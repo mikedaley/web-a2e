@@ -16,6 +16,7 @@
 #include "cards/mouse_card.hpp"
 #include "cards/smartport/smartport_card.hpp"
 #include "cards/softcard_z80.hpp"
+#include "cards/ssc/ssc_card.hpp"
 #include "mmu/mmu.hpp"
 #include "types.hpp"
 #include "video/video.hpp"
@@ -249,6 +250,12 @@ public:
   MouseCard* getMouseCard() { return mouse_; }
   SmartPortCard* getSmartPortCard() { return smartport_; }
   SoftCardZ80* getSoftCard() { return softcard_; }
+  SSCCard* getSSCCard() { return ssc_; }
+
+  // Serial I/O for Super Serial Card
+  void serialReceive(uint8_t byte);
+  bool isSSCInstalled() const { return ssc_ != nullptr; }
+  void setSerialTxCallback(SSCCard::SerialTxCallback cb);
 
   // No-Slot Clock
   void enableNoSlotClock(bool enable) { mmu_->enableNoSlotClock(enable); }
@@ -294,6 +301,7 @@ private:
   MouseCard* mouse_ = nullptr;
   SmartPortCard* smartport_ = nullptr;
   SoftCardZ80* softcard_ = nullptr;
+  SSCCard* ssc_ = nullptr;
 
   // Storage for cards when removed from slots
   std::unique_ptr<ExpansionCard> diskStorage_;

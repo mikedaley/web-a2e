@@ -36,6 +36,7 @@ export class SlotConfigurationWindow extends BaseWindow {
       { id: "mouse", name: "Mouse Card", color: "blue" },
       { id: "smartport", name: "SmartPort", color: "red" },
       { id: "softcard", name: "Z-80 SoftCard", color: "cyan" },
+      { id: "ssc", name: "Super Serial Card", color: "yellow" },
     ];
 
     // Card icon SVGs (simple representations)
@@ -46,15 +47,16 @@ export class SlotConfigurationWindow extends BaseWindow {
       mouse: `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="3" width="12" height="18" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="3" x2="12" y2="10" stroke="currentColor" stroke-width="1"/></svg>`,
       smartport: `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="7" y="6" width="10" height="3" rx="0.5" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="7" y="11" width="10" height="3" rx="0.5" fill="none" stroke="currentColor" stroke-width="0.8"/><circle cx="12" cy="18" r="1" fill="currentColor"/></svg>`,
       softcard: `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="5" width="18" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="12" y="14" text-anchor="middle" font-size="7" font-weight="bold" fill="currentColor">Z80</text><line x1="6" y1="5" x2="6" y2="3" stroke="currentColor" stroke-width="1"/><line x1="9" y1="5" x2="9" y2="3" stroke="currentColor" stroke-width="1"/><line x1="12" y1="5" x2="12" y2="3" stroke="currentColor" stroke-width="1"/><line x1="15" y1="5" x2="15" y2="3" stroke="currentColor" stroke-width="1"/><line x1="18" y1="5" x2="18" y2="3" stroke="currentColor" stroke-width="1"/><line x1="6" y1="19" x2="6" y2="21" stroke="currentColor" stroke-width="1"/><line x1="9" y1="19" x2="9" y2="21" stroke="currentColor" stroke-width="1"/><line x1="12" y1="19" x2="12" y2="21" stroke="currentColor" stroke-width="1"/><line x1="15" y1="19" x2="15" y2="21" stroke="currentColor" stroke-width="1"/><line x1="18" y1="19" x2="18" y2="21" stroke="currentColor" stroke-width="1"/></svg>`,
+      ssc: `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="6" width="16" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="12" y="14" text-anchor="middle" font-size="5" font-weight="bold" fill="currentColor">RS232</text><circle cx="7" cy="20" r="1" fill="currentColor"/><circle cx="12" cy="20" r="1" fill="currentColor"/><circle cx="17" cy="20" r="1" fill="currentColor"/><circle cx="9.5" cy="22" r="1" fill="currentColor"/><circle cx="14.5" cy="22" r="1" fill="currentColor"/></svg>`,
     };
 
     // Slot metadata
     this.slots = [
-      { slot: 1, label: "Slot 1", available: ["softcard"], note: "Printer / Serial" },
+      { slot: 1, label: "Slot 1", available: ["ssc", "softcard"], note: "Printer / Serial" },
       {
         slot: 2,
         label: "Slot 2",
-        available: ["smartport", "softcard"],
+        available: ["ssc", "smartport", "softcard"],
         note: "Serial / Modem",
       },
       {

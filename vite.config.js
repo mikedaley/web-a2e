@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 import { copyFileSync, mkdirSync } from "fs";
+import { serialProxyPlugin } from "./plugins/serial-proxy-plugin.js";
 
 // Plugin to copy audio worklet file (can't be bundled)
 const copyAudioWorklet = () => ({
@@ -92,5 +93,5 @@ export default defineConfig({
     exclude: ["a2e.js"],
   },
 
-  plugins: [copyAudioWorklet()],
+  plugins: [serialProxyPlugin(), copyAudioWorklet()],
 });

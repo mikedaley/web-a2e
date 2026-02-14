@@ -868,6 +868,9 @@ const char* Emulator::getSlotCardName(uint8_t slot) const {
   if (strcmp(name, "Z-80 SoftCard") == 0) {
     return "softcard";
   }
+  if (strcmp(name, "Super Serial Card") == 0) {
+    return "ssc";
+  }
 
   return "empty";
 }
@@ -907,6 +910,9 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
       mmu_->removeCard(slot);
     } else if (strcmp(existingName, "Z-80 SoftCard") == 0) {
       softcard_ = nullptr;
+      mmu_->removeCard(slot);
+    } else if (strcmp(existingName, "Super Serial Card") == 0) {
+      ssc_ = nullptr;
       mmu_->removeCard(slot);
     } else {
       mmu_->removeCard(slot);
@@ -999,6 +1005,16 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
     return true;
   }
 
+  // Handle Super Serial Card
+  if (strcmp(cardId, "ssc") == 0) {
+    auto card = std::make_unique<SSCCard>();
+    card->setSlotNumber(slot);
+    card->setIRQCallback([this]() { cpu_->irq(); });
+    ssc_ = card.get();
+    mmu_->insertCard(slot, std::move(card));
+    return true;
+  }
+
   return false;
 }
 
@@ -1060,6 +1076,22 @@ const uint8_t* Emulator::getSmartPortBlockData(int device, size_t* size) const {
     return nullptr;
   }
   return smartport_->getBlockData(device, size);
+}
+
+// ==========================================================================
+// Super Serial Card
+// ==========================================================================
+
+void Emulator::serialReceive(uint8_t byte) {
+  if (ssc_) {
+    ssc_->serialReceive(byte);
+  }
+}
+
+void Emulator::setSerialTxCallback(SSCCard::SerialTxCallback cb) {
+  if (ssc_) {
+    ssc_->setSerialTxCallback(std::move(cb));
+  }
 }
 
 // ==========================================================================

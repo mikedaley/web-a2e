@@ -375,6 +375,14 @@ export class UIController {
       });
     }
 
+    const serialBtn = document.getElementById("btn-serial-port");
+    if (serialBtn) {
+      serialBtn.addEventListener("click", () => {
+        this.windowManager.toggleWindow("serial-connection");
+        this.closeAllMenus();
+        this.refocusCanvas();
+      });
+    }
   }
 
 

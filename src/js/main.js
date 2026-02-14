@@ -45,10 +45,12 @@ import { UIController } from "./ui/ui-controller.js";
 import { ThemeManager } from "./ui/theme-manager.js";
 import { showToast } from "./ui/toast.js";
 import { SlotConfigurationWindow } from "./ui/slot-configuration-window.js";
+import { SerialConnectionWindow } from "./serial/serial-connection-window.js";
 import { WindowSwitcher } from "./ui/window-switcher.js";
 import { StateManager } from "./state/state-manager.js";
 import { SaveStatesWindow } from "./state/save-states-window.js";
 import { AgentManager } from "./agent/index.js";
+import { SerialManager } from "./serial/serial-manager.js";
 import {
   WindowManager,
   CPUDebuggerWindow,
@@ -85,6 +87,7 @@ class AppleIIeEmulator {
     this.mouseHandler = null;
     this.themeManager = null;
     this.agentManager = null;
+    this.serialManager = null;
 
     this.running = false;
   }
@@ -341,6 +344,15 @@ class AppleIIeEmulator {
       // Set up agent manager for MCP server connection
       window.emulator = this;
       this.agentManager = new AgentManager();
+
+      // Set up serial manager for Super Serial Card WebSocket bridge
+      this.serialManager = new SerialManager(this.wasmModule);
+      this.wasmModule._setSerialTxCallback();
+
+      // Serial connection window
+      const serialConnectionWindow = new SerialConnectionWindow(this.serialManager);
+      serialConnectionWindow.create();
+      this.windowManager.register(serialConnectionWindow);
 
       // Set up UI controller
       this.uiController = new UIController({
