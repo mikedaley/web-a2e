@@ -46,6 +46,7 @@ import { ThemeManager } from "./ui/theme-manager.js";
 import { showToast } from "./ui/toast.js";
 import { SlotConfigurationWindow } from "./ui/slot-configuration-window.js";
 import { SerialConnectionWindow } from "./serial/serial-connection-window.js";
+import { HayesModem } from "./serial/hayes-modem.js";
 import { WindowSwitcher } from "./ui/window-switcher.js";
 import { StateManager } from "./state/state-manager.js";
 import { SaveStatesWindow } from "./state/save-states-window.js";
@@ -88,6 +89,7 @@ class AppleIIeEmulator {
     this.themeManager = null;
     this.agentManager = null;
     this.serialManager = null;
+    this.modem = null;
 
     this.running = false;
   }
@@ -345,12 +347,13 @@ class AppleIIeEmulator {
       window.emulator = this;
       this.agentManager = new AgentManager();
 
-      // Set up serial manager for Super Serial Card WebSocket bridge
+      // Set up serial manager and Hayes modem for Super Serial Card
       this.serialManager = new SerialManager(this.wasmModule);
+      this.modem = new HayesModem(this.wasmModule, this.serialManager);
       this.wasmModule._setSerialTxCallback();
 
       // Serial connection window
-      const serialConnectionWindow = new SerialConnectionWindow(this.serialManager);
+      const serialConnectionWindow = new SerialConnectionWindow(this.modem);
       serialConnectionWindow.create();
       this.windowManager.register(serialConnectionWindow);
 

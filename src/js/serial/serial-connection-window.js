@@ -10,7 +10,7 @@ import { BaseWindow } from "../windows/base-window.js";
 const STORAGE_KEY = "a2e-serial-connection";
 
 export class SerialConnectionWindow extends BaseWindow {
-  constructor(serialManager) {
+  constructor(modem) {
     super({
       id: "serial-connection",
       title: "Serial Port",
@@ -21,7 +21,7 @@ export class SerialConnectionWindow extends BaseWindow {
       resizeDirections: [],
     });
 
-    this.serialManager = serialManager;
+    this.modem = modem;
   }
 
   create() {
@@ -59,29 +59,24 @@ export class SerialConnectionWindow extends BaseWindow {
     this.contentElement.addEventListener("keydown", (e) => e.stopPropagation());
     this.contentElement.addEventListener("keyup", (e) => e.stopPropagation());
 
-    // Wire serial manager status callbacks
-    this.serialManager.onStatusChange = (status) => {
+    // Wire modem status callbacks
+    this.modem.onStatusChange = (status) => {
       this.updateStatus(status === "connected");
     };
 
-    this.serialManager.onError = () => {
-      this.updateStatus(false);
-      this.statusText.textContent = "Connection failed";
-    };
-
-    this.updateStatus(this.serialManager.isConnected());
+    this.updateStatus(this.modem.isConnected());
   }
 
   toggleConnection() {
-    if (this.serialManager.isConnected()) {
-      this.serialManager.disconnect();
+    if (this.modem.isConnected()) {
+      this.modem.hangup();
     } else {
       const host = this.hostInput.value.trim();
       const port = parseInt(this.portInput.value, 10);
       if (!host || !port) return;
 
       this.saveSettings(host, port);
-      this.serialManager.connectProxy(host, port);
+      this.modem.dial(`${host}:${port}`);
       this.statusText.textContent = "Connecting...";
     }
   }

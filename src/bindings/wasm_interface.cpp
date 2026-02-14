@@ -1294,7 +1294,9 @@ void setSerialTxCallback() {
   REQUIRE_EMULATOR();
   g_emulator->setSerialTxCallback([](uint8_t byte) {
     EM_ASM({
-      if (window.emulator && window.emulator.serialManager) {
+      if (window.emulator && window.emulator.modem) {
+        window.emulator.modem.processTxByte($0);
+      } else if (window.emulator && window.emulator.serialManager) {
         window.emulator.serialManager.sendByte($0);
       }
     }, byte);

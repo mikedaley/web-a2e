@@ -25,6 +25,7 @@ export class SerialManager {
     // Callbacks
     this.onStatusChange = null;
     this.onError = null;
+    this.onReceive = null;
   }
 
   /**
@@ -52,7 +53,11 @@ export class SerialManager {
       this.ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
         for (let i = 0; i < data.length; i++) {
-          this.wasmModule._serialReceive(data[i]);
+          if (this.onReceive) {
+            this.onReceive(data[i]);
+          } else {
+            this.wasmModule._serialReceive(data[i]);
+          }
         }
       };
 
