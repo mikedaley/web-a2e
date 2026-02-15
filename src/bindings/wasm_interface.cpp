@@ -1274,6 +1274,36 @@ void clearSmartPortActivity() {
 }
 
 // ============================================================================
+// Super Serial Card
+// ============================================================================
+
+EMSCRIPTEN_KEEPALIVE
+void serialReceive(uint8_t byte) {
+  REQUIRE_EMULATOR();
+  g_emulator->serialReceive(byte);
+}
+
+EMSCRIPTEN_KEEPALIVE
+bool isSSCInstalled() {
+  REQUIRE_EMULATOR_OR(false);
+  return g_emulator->isSSCInstalled();
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setSerialTxCallback() {
+  REQUIRE_EMULATOR();
+  g_emulator->setSerialTxCallback([](uint8_t byte) {
+    EM_ASM({
+      if (window.emulator && window.emulator.modem) {
+        window.emulator.modem.processTxByte($0);
+      } else if (window.emulator && window.emulator.serialManager) {
+        window.emulator.serialManager.sendByte($0);
+      }
+    }, byte);
+  });
+}
+
+// ============================================================================
 // Expansion Slot Management
 // ============================================================================
 

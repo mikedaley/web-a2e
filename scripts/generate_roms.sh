@@ -62,6 +62,7 @@ generate_array "$ROM_DIR/342-0273-A-US-UK.bin" "ROM_CHAR"
 generate_array "$ROM_DIR/341-0027.bin" "ROM_DISK2"
 generate_array "$ROM_DIR/Thunderclock Plus ROM.bin" "ROM_THUNDERCLOCK"
 generate_array "$ROM_DIR/Apple Mouse Interface Card ROM - 342-0270-C.bin" "ROM_MOUSE"
+generate_array "$ROM_DIR/Super Serial Card ROM - 341-0065-A.bin" "ROM_SSC"
 
 # Close namespace
 echo "} // namespace roms" >> "$OUTPUT_FILE"

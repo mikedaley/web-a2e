@@ -31,6 +31,8 @@ set(CORE_SOURCES
     src/core/cards/smartport/block_device.cpp
     src/core/cards/smartport/smartport_card.cpp
     src/core/cards/softcard_z80.cpp
+    src/core/cards/ssc/acia6551.cpp
+    src/core/cards/ssc/ssc_card.cpp
     src/core/z80/z80.cpp
     src/core/z80/z80_opcode_tables.cpp
     src/core/z80/z80_opcodes_main.cpp
@@ -58,6 +60,7 @@ set(ROM_FILES
     roms/341-0027.bin                               # Disk II ROM
     "roms/Thunderclock Plus ROM.bin"                 # Thunderclock card ROM
     "roms/Apple Mouse Interface Card ROM - 342-0270-C.bin"  # Mouse Interface Card ROM
+    "roms/Super Serial Card ROM - 341-0065-A.bin"           # Super Serial Card ROM
 )
 
 # Custom command to generate ROM header
@@ -347,7 +350,10 @@ if(EMSCRIPTEN)
                 \"_getMockingboardVIATimerInfo\", \
                 \"_setMockingboardDebugLogging\", \
                 \"_enableNoSlotClock\", \
-                \"_isNoSlotClockEnabled\" \
+                \"_isNoSlotClockEnabled\", \
+                \"_serialReceive\", \
+                \"_isSSCInstalled\", \
+                \"_setSerialTxCallback\" \
             ]' \
             -s EXPORTED_RUNTIME_METHODS='[\"ccall\", \"cwrap\", \"UTF8ToString\", \"stringToUTF8\", \"HEAPU8\", \"HEAPF32\"]' \
             -s ALLOW_MEMORY_GROWTH=1 \
@@ -426,6 +432,8 @@ else()
         src/core/cards/smartport/block_device.cpp
         src/core/cards/smartport/smartport_card.cpp
         src/core/cards/softcard_z80.cpp
+        src/core/cards/ssc/acia6551.cpp
+        src/core/cards/ssc/ssc_card.cpp
         src/core/z80/z80.cpp
         src/core/z80/z80_opcode_tables.cpp
         src/core/z80/z80_opcodes_main.cpp
@@ -793,6 +801,13 @@ else()
 
     add_catch2_test(test_emulator_state
         tests/integration/test_emulator_state.cpp
+        ${CORE_TEST_SOURCES}
+        ${TEST_COMMON_SOURCES}
+    )
+
+    # Super Serial Card
+    add_catch2_test(test_ssc
+        tests/integration/test_ssc.cpp
         ${CORE_TEST_SOURCES}
         ${TEST_COMMON_SOURCES}
     )
