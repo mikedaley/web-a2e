@@ -2,7 +2,7 @@
 // Enables offline functionality by caching app assets
 
 // IMPORTANT: Bump this version when WASM or core JS files change
-const CACHE_VERSION = 3.4;
+const CACHE_VERSION = 3.5;
 const CACHE_NAME = `a2e-cache-v${CACHE_VERSION}`;
 
 // Files that should always be fetched fresh (network-first)

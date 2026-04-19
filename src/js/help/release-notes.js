@@ -11,6 +11,23 @@
 
 export const RELEASE_NOTES = [
   {
+    week: "April 13, 2026",
+    improvements: [
+      {
+        title: "No-Slot Clock precision",
+        description:
+          "The DS1215 No-Slot Clock now reports centisecond (1/100s) accuracy instead of whole-second resolution, enabling precise benchmark timing against real hardware.",
+      },
+    ],
+    fixes: [
+      {
+        title: "Safari agent polling",
+        description:
+          "Disabled agent server polling in Safari on remote origins to prevent repeated failed connection attempts.",
+      },
+    ],
+  },
+  {
     week: "March 23, 2026",
     features: [
       {
