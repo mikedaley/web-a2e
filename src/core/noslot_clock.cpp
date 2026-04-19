@@ -7,6 +7,7 @@
 
 #include "noslot_clock.hpp"
 #include <ctime>
+#include <chrono>
 
 namespace a2e {
 
@@ -74,11 +75,18 @@ void NoSlotClock::reset() {
 }
 
 void NoSlotClock::loadCurrentTime() {
-  time_t now = time(nullptr);
-  struct tm* t = localtime(&now);
+  auto now = std::chrono::system_clock::now();
+  time_t nowTime = std::chrono::system_clock::to_time_t(now);
+  struct tm* t = localtime(&nowTime);
+
+  // Calculate hundredths of a second from sub-second component
+  auto sinceEpoch = now.time_since_epoch();
+  auto wholeSeconds = std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch);
+  auto hundredths = std::chrono::duration_cast<std::chrono::milliseconds>(
+      sinceEpoch - wholeSeconds).count() / 10;
 
   // Pack BCD time into 64 bits, LSB first:
-  // Byte 0: hundredths (always 00)
+  // Byte 0: hundredths (0-99)
   // Byte 1: seconds
   // Byte 2: minutes
   // Byte 3: hours
@@ -92,7 +100,7 @@ void NoSlotClock::loadCurrentTime() {
   };
 
   uint8_t bytes[8];
-  bytes[0] = 0x00;                          // hundredths
+  bytes[0] = toBCD(static_cast<int>(hundredths)); // hundredths (0-99)
   bytes[1] = toBCD(t->tm_sec);              // seconds
   bytes[2] = toBCD(t->tm_min);              // minutes
   bytes[3] = toBCD(t->tm_hour);             // hours
