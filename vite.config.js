@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { serialProxyPlugin } from "./plugins/serial-proxy-plugin.js";
+import { devProxyPlugin } from "./plugins/dev-proxy-plugin.js";
 
 // Stamp the app version into the service worker's cache name.
 //
@@ -130,6 +131,7 @@ export default defineConfig({
 
   plugins: [
     serialProxyPlugin(),
+    devProxyPlugin(),
     copyWorkerFiles(),
     stampServiceWorkerVersion(),
   ],

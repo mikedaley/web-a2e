@@ -15,7 +15,7 @@ A cycle-accurate Apple //e Enhanced emulator running in the browser using WebAss
 - **Expansion cards** — Mockingboard sound card, Thunderclock Plus, Apple Mouse Interface Card, SmartPort hard drive, Super Serial Card, Parallel Card (Centronics), Microsoft Z-80 SoftCard, No-Slot Clock (DS1215)
 - **Virtual dot-matrix printer** — ImageWriter II (colour), ImageWriter I, Epson FX-80, and Apple DMP with period-correct fonts, sounds, and PNG/PDF export
 - **File explorer** — Browse DOS 3.3 and ProDOS disk contents with BASIC detokenizer and disassembler
-- **Shareable links** — Pass a disk image URL in the address (`?disk=`) to open the emulator with it already loaded
+- **Shareable links** — Pass a disk image URL in the address (`?disk=` floppy or `?hd=` hard drive) to open the emulator with it already loaded; a built-in CORS proxy handles hosts that send no `Access-Control-Allow-Origin`
 - **Save states** — Autosave slot plus 5 manual save slots, stored in IndexedDB
 - **Built-in debugger** — CPU debugger, memory browser, heat map, soft switch monitor, BASIC conditional breakpoints, and more
 - **Light/Dark/System themes** — Switchable colour scheme with Apple rainbow logo accent palette
@@ -151,21 +151,24 @@ A disk image URL can be passed in the address so a link opens with the disk alre
 https://your-emulator/?disk=https://example.com/demo.dsk
 ```
 
+Formats supported per device:
+
+| Parameter | Device | Formats |
+| --------- | ------ | ------- |
+| `?disk=` | Disk II (floppy) | `.dsk` `.do` `.po` `.woz` |
+| `?hd=` | SmartPort (hard drive) | `.2mg` `.hdv` |
+
 Relative paths work too, for images hosted alongside the emulator: `?disk=/disks/demo.dsk`
 
 A path on your own machine (`/Users/you/Downloads/demo.dsk`) will not work — a web page cannot read local files. Use **Insert** or drag the file onto a drive for those.
 
 Notes:
 - Disks loaded this way are **not** written to browser storage or the Recent list, and autosave pauses for the session. A link someone shares can't replace the disks in your own drives — reopen the plain address and your session is intact.
-- **The host must send `Access-Control-Allow-Origin`.** This is the main practical limit, and it is decided by the host, not the emulator — a browser cannot read a file the server declines to share, even though `curl` downloads it fine.
-
-  | Works | Doesn't |
-  | ----- | ------- |
-  | GitHub raw / Pages, Google Drive, Dropbox | Asimov (`asimov.applefritter.com`) |
-  | Anything hosted alongside the emulator (`?disk=/disks/x.dsk`) | Most classic archive mirrors and plain Apache/nginx sites |
-
-  To share something from an archive that refuses, re-host the image somewhere CORS-friendly and link that.
-- `?name=` is required for `.nib` and `.2mg` images behind extensionless URLs, since those formats can't be identified from their contents.
+- **CORS is handled automatically.** The browser first tries to fetch the URL directly; if the host sends no `Access-Control-Allow-Origin` (the common case for archive mirrors and plain web servers), the request is retried through the emulator's own same-origin proxy (`/proxy/url/…`), which fetches the file server-side and returns it with permissive CORS headers. The proxy is served two ways:
+  - **Cloudflare Pages** — a Pages Function at `functions/proxy/`, deployed by the optional `cloudflare-pages-deploy.yml` workflow (opt-in via the `CLOUDFLARE_PAGES_ENABLED` repo variable).
+  - **Any other static host** — the server needs its own `/proxy/url/<encoded>` endpoint. A simple reverse proxy (e.g. an nginx `location /proxy/url` block, or the Cloudflare Pages Function copied to your host) is enough; on the VPS `npm run deploy` setup, provide that endpoint and the fallback works there too.
+  The local Vite dev server serves the same route via a plugin, so development behaves like production. Either way the visitor sees no distinction — the load just succeeds.
+- `?name=` is required for `.nib` and `.2mg` images behind extensionless URLs (e.g. `download?id=…`), since those formats can't be identified from their contents. Floppy formats are identified either from the extension or, failing that, by content sniffing (WOZ magic / 143360-byte DSK), so they seldom need `?name=`.
 - `?autostart` boots the machine on load, with nothing to click. The one thing a browser will not allow before a gesture is **sound**, so an autostarted machine runs silent until the visitor clicks or types anything, at which point the speaker joins in. Without `?autostart`, the visitor clicks Power as usual.
 
 ### File Explorer
@@ -494,6 +497,9 @@ web-a2e/
 │   ├── shaders/             # CRT vertex/fragment shaders
 │   ├── assets/              # Images and sounds
 │   └── index.html           # Main HTML entry point
+├── functions/               # Cloudflare Pages Functions
+│   └── proxy/               # CORS proxy for URL-loaded media
+├── plugins/                 # Vite plugins (dev CORS proxy, serial)
 ├── roms/                    # ROM files (not included)
 ├── tests/
 │   ├── klaus/               # Klaus Dormann CPU compliance tests
@@ -545,7 +551,6 @@ Requires WebAssembly, WebGL 2.0, Web Audio API (AudioWorklet), IndexedDB, and Se
 
 ### Platform
 - **Disk image library** — Browse and load from a curated online software archive
-- **URL disk loading** — Load disk images directly from a URL parameter
 - **Mobile touch controls** — On-screen keyboard and virtual joystick optimized for touch devices
 
 ## License

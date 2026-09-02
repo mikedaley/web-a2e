@@ -1,0 +1,55 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Check Secrets
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::GitHub Secret 'CLOUDFLARE_API_TOKEN' is missing! Please check Repository Settings > Secrets > Actions."
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          npx -y wrangler pages project create web-a2e --production-branch ${{ github.ref_name }} || true
+          # Zip the large h32mb.2mg and swap it (Cloudflare will see it as a 19MB file named .2mg)
+          zip -j dist/disks/h32mb.2mg.zip dist/disks/h32mb.2mg
+          mv -f dist/disks/h32mb.2mg.zip dist/disks/h32mb.2mg
+          npx -y wrangler pages deploy dist --project-name=web-a2e --branch ${{ github.ref_name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_LOG: debug

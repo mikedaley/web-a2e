@@ -15,13 +15,42 @@ import {
 import { showToast } from "../ui/toast.js";
 
 /**
+ * Build the path for the same-origin CORS proxy (Cloudflare Pages Function).
+ *
+ * The proxy lives at /proxy/url/<encodeURIComponent(target)>, matching the
+ * functions/proxy/[[path]].js route. The path is relative so the app works
+ * regardless of the domain it is served from.
+ *
+ * @param {string} url - Absolute http(s) URL to fetch through the proxy
+ * @returns {string} Relative proxy URL
+ */
+function proxyUrl(url) {
+  return `/proxy/url/${encodeURIComponent(url)}`;
+}
+
+/**
+ * Confirm a proxied response really is a fetch failure worth reporting.
+ *
+ * A proxy that could not reach the target answers with a non-2xx status, so
+ * unlike a direct fetch the failure is visible and has no CORS to blame.
+ *
+ * @param {Response} response
+ * @returns {boolean} True when the proxy itself failed
+ */
+function isProxyFailure(response) {
+  return response.status === 502 || response.status === 404 || response.status === 400;
+}
+
+/**
  * Fetch an image, refusing anything implausibly large.
  *
  * Credentials are omitted deliberately: the URL comes from whoever wrote the
  * link, and it must not be able to make the visitor's browser send cookies to a
  * third party. That also means the host has to serve permissive CORS headers —
- * most public file hosts do, but a plain web server generally does not, and
- * there is nothing the page can do about it from here.
+ * most public file hosts do, but a plain web server generally does not. When a
+ * direct fetch is refused (an opaque TypeError the browser raises for a CORS
+ * refusal), the request is retried through the same-origin /proxy/url route so
+ * hosts without CORS headers still work.
  *
  * @param {string} url - Absolute http(s) URL
  * @param {number} maxBytes - Reject anything larger than this
@@ -39,16 +68,22 @@ async function fetchImage(url, maxBytes) {
     // fetch rejects with an opaque TypeError for both a missing host and a
     // CORS refusal, and the browser deliberately withholds which. In practice
     // it is nearly always CORS — plenty of Apple II archives serve the file
-    // happily to curl but send no Access-Control-Allow-Origin — so name that
-    // first rather than making the reader guess from "Failed to fetch".
+    // happily to curl but send no Access-Control-Allow-Origin. Rather than
+    // giving up (and making the host name the culprit), retry through the
+    // same-origin proxy: the proxy side has no CORS, so a refusal there is a
+    // real upstream problem, not the browser's security policy.
     if (error instanceof TypeError) {
-      throw new Error(
-        `${new URL(url).host} refused the request. It most likely does not ` +
-          `allow other sites to read its files (no CORS headers); the host ` +
-          `being down would look the same.`,
-      );
+      response = await fetch(proxyUrl(url), { credentials: "omit" });
+      if (isProxyFailure(response)) {
+        throw new Error(
+          `${new URL(url).host} refused the request. It most likely does not ` +
+            `allow other sites to read its files (no CORS headers); the host ` +
+            `being down would look the same.`,
+        );
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   if (!response.ok) {

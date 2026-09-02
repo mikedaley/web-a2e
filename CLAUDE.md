@@ -412,10 +412,14 @@ fringing from the real signal, so a shader knob for it would only double-count.
 
 ### URL Media Parameters
 
-`?disk=`, `?disk1=`, `?disk2=`, `?hd=`, `?hd2=`, `?name=` and `?autostart=` let a link open with images already inserted. Two modules:
+`?disk=`, `?disk1=`, `?disk2=`, `?hd=`, `?hd2=`, `?name=` and `?autostart=` let a link open with images already inserted. `?disk=` targets the Disk II floppy drives (formats `.dsk`/`.do`/`.po`/`.woz`); `?hd=` targets the SmartPort block devices (formats `.2mg`/`.hdv`). Three modules:
 
 - `src/js/utils/url-params.js` — pure parsing and URL validation (http/https only; relative paths resolve against the page). Unit-tested in `tests/js/utils/url-params.test.js`.
 - `src/js/disk-manager/url-media-loader.js` — fetches (`credentials: "omit"`, size-capped) and inserts.
+- `functions/proxy/[[path]].js` — a Cloudflare Pages Function serving the same-origin CORS proxy (`/proxy/url/<encodeURIComponent(target)>`), returning the fetched file with permissive CORS headers. Deployed by the optional `.github/workflows/cloudflare-pages-deploy.yml`, which is opt-in per repository (`vars.CLOUDFLARE_PAGES_ENABLED == 'true'`) so a maintainer who keeps their existing host is unaffected. On a non-Cloudflare host the same `/proxy/url` endpoint must be provided another way (a reverse proxy) for the fallback to work.
+- `plugins/dev-proxy-plugin.js` — Vite `configureServer` middleware serving that same route during `npm run dev`, so development behaves like production. Must call `next()` for non-proxy paths — skipping it stalls every other request on the whole server.
+
+`fetchImage` in `url-media-loader.js` first tries a direct fetch; when the browser raises the opaque TypeError that signals a CORS refusal, it automatically retries through `/proxy/url/…`. Hosts that already send `Access-Control-Allow-Origin` are never routed through the proxy. Note the dev-server middleware must call `next()` for non-proxy paths — skipping it stalls every other request on the whole server.
 
 `main.js` parses the URL *before* `DiskManager.init()` / `HardDriveManager.init()` and populates `urlOwnedDrives` / `urlOwnedDevices`, which those managers use to skip restoring persisted images into units a link is about to claim — otherwise the two loads race.
 
@@ -601,6 +605,11 @@ public/                 # Static assets, built WASM files, shaders
 ├── shaders/           # CRT vertex/fragment shaders
 ├── assets/            # Images and sounds
 └── index.html         # Main HTML entry point
+functions/
+└── proxy/              # Cloudflare Pages Function — CORS proxy for URL-loaded media
+plugins/
+├── dev-proxy-plugin.js  # Vite dev-server middleware serving /proxy/url (mirrors the Pages Function)
+├── serial-proxy-plugin.js  # WebSocket-to-TCP proxy
 tests/
 ├── unit/               # Catch2 unit tests (CPU, cards, disk, audio, etc.)
 ├── integration/        # Catch2 integration tests (full emulator)

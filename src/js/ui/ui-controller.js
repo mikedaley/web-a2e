@@ -1165,9 +1165,9 @@ export class UIController {
       if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = !isUK;
     };
 
-    // Initialize from saved setting
+    // Initialize from saved setting (default: US when no preference stored)
     const savedCharset = localStorage.getItem("a2e-charset");
-    const isUKInitial = savedCharset === "uk";
+    const isUKInitial = savedCharset !== "us";  // null → true → US charset (no offset)
     this.wasmModule._setUKCharacterSet(isUKInitial);
     if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = !isUKInitial;
 
