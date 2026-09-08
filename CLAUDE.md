@@ -260,19 +260,39 @@ responsible for putting them back.
 eight, and `MMU::insertCard` asks the profile rather than assuming 1-7. What
 goes in slot 0 on a real II+ is the 16K language card, which is how a 48K
 machine becomes the 64K one nearly all II+ software expects; the profile fits
-one, because the bank switching at `$C080-$C08F` is the same hardware the //e
-carries on its motherboard and needs no second implementation.
+one as a *fixed* card, because the bank switching at `$C080-$C08F` is the same
+hardware the //e carries on its motherboard, is implemented by the MMU, and is
+not something the user could pull out.
+
+The Expansion Slots window follows all of this. `SlotConfigurationWindow`
+builds its slot list from the profile — which slots exist, and which carry a
+card the user cannot change — rather than from a fixed //e table, and
+`setMachine()` rebuilds it after a switch. A //e shows slots 1-7 with the
+80-column card locked into slot 3; a II+ shows 0-7 with the language card
+locked into slot 0 and slot 3 free for anything. What each free slot *offers*
+stays host presentation (`SLOT_UI`), since that is convention rather than
+machine fact.
 
 #### Choosing a machine
 
-**View > Machine** opens `MachineSelectorWindow`
-(`src/js/machine/machine-selector-window.js`), which lists every machine the
-core knows with its CPU, memory, video and slot range, draws each one, and
-marks the one that is running with the six-stripe Apple rainbow and a lit power
-light. A machine whose ROMs are not in the build is shown but cannot be
-selected.
+**The header badge names the machine and is how it is changed.** It used to be
+the right-hand half of `apple-logo.png`, so the header announced "//e" whatever
+was running; the logo is now `applem-logo.png` (the wordmark alone) and the
+badge is a live control. `MachineMenu` (`src/js/machine/machine-menu.js`) keeps
+it in step and hangs an ordinary `.header-menu-container` dropdown off it, so
+it inherits the app's open/close, click-outside and Escape handling rather than
+inventing its own. Each entry draws the machine, names it, summarises its CPU,
+memory and columns, ticks the one in use and marks any whose ROMs are missing.
 
-Switching is destructive and the window says so before doing it: the core
+The badge wears `profile.logotype`, not `shortName`. Apple's own marks are not
+always what you would write in a sentence: a II Plus is badged `][`, and
+rendering "II+" in the badge's heavy oblique face produces "//+", which is not
+a designation Apple ever used. `shortName` stays for prose.
+
+The window title follows the machine too, so a browser's window switcher shows
+which machine a tab is running.
+
+Switching is destructive and the menu says so before doing it: the core
 rebuilds the emulator, so inserted media and anything in memory are lost, just
 as they would be on a reload. What is *not* lost is the user's preferences —
 `AppleIIeEmulator.onMachineChanged()` pushes the display settings, volume,

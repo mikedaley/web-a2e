@@ -32,6 +32,7 @@ TEST_CASE("The //e profile describes an Apple //e", "[machine]") {
     SECTION("identity") {
         REQUIRE(m.id == MachineId::AppleIIe);
         REQUIRE(std::string(m.key) == "apple2e");
+        REQUIRE(std::string(m.logotype) == "//e");
         REQUIRE(m.cpu == CPUVariant::CMOS_65C02);
     }
 
@@ -98,6 +99,10 @@ TEST_CASE("The II+ profile describes an Apple II Plus", "[machine]") {
 
     SECTION("identity") {
         REQUIRE(std::string(m.key) == "apple2plus");
+        // Apple badged the machine "][", and the header renders the badge in a
+        // heavy oblique face where "II+" would come out looking like "//+".
+        REQUIRE(std::string(m.logotype) == "][+");
+        REQUIRE(std::string(m.shortName) == "II+");
         // The II+ predates the 65C02. The CPU core models both variants and
         // the profile is what selects one.
         REQUIRE(m.cpu == CPUVariant::NMOS_6502);
@@ -146,10 +151,19 @@ TEST_CASE("The II+ profile describes an Apple II Plus", "[machine]") {
         REQUIRE(m.caps.hasLanguageCard);
     }
 
-    SECTION("nothing is fixed in a slot the way the //e's 80-column card is") {
-        for (int slot = 0; slot < MACHINE_SLOT_COUNT; slot++) {
+    SECTION("slot 0 holds the language card and the rest are the user's") {
+        // The MMU implements the $C080 bank switching itself, so the card is
+        // not something the user could pull out; the slot is fixed to say so.
+        REQUIRE(std::string(m.slots[0].fixedCard) == "languagecard");
+
+        // Slot 3 is an ordinary slot here. It is the //e that has a built-in
+        // 80-column card bolted into it.
+        for (int slot = 1; slot < MACHINE_SLOT_COUNT; slot++) {
+            INFO("slot " << slot);
             REQUIRE(m.slots[slot].fixedCard == nullptr);
         }
+        REQUIRE(std::string(machineProfile(MachineId::AppleIIe)
+                                .slots[3].fixedCard) == "80col");
     }
 }
 

@@ -181,7 +181,13 @@ struct MachineProfile {
   MachineId id;
   const char *key;       // Stable identifier: "apple2e"
   const char *name;      // "Apple //e Enhanced"
-  const char *shortName; // "//e"
+  const char *shortName; // "//e" — for prose: "Switch to //e"
+  // How the model is branded on the machine itself, for the header badge.
+  // Distinct from shortName because Apple's own marks are not always what you
+  // would write in a sentence: a II Plus is badged "][", and setting the badge
+  // from a short name instead renders "II+" in the badge's heavy oblique face
+  // as "//+", which is not a designation Apple ever used.
+  const char *logotype;
 
   CPUVariant cpu;
   MachineTiming timing;
@@ -210,6 +216,7 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
     MachineId::AppleIIe,
     "apple2e",
     "Apple //e Enhanced",
+    "//e",
     "//e",
     CPUVariant::CMOS_65C02,
     // timing
@@ -296,6 +303,7 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
     "apple2plus",
     "Apple II Plus",
     "II+",
+    "][+",
     CPUVariant::NMOS_6502,
     // timing — the same video circuit, so the same numbers as a //e
     {
@@ -352,7 +360,11 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
     // slot 3, which holds the //e's built-in 80-column card, is an ordinary
     // slot here.
     {{
-        {nullptr, nullptr}, // 0: language card
+        // Slot 0 holds the 16K language card, which is how a 48K machine
+        // becomes the 64K one nearly all II+ software expects. Fixed because
+        // the MMU implements the bank switching itself rather than as a card
+        // the user could pull out.
+        {"languagecard", "languagecard"}, // 0
         {nullptr, nullptr}, // 1
         {nullptr, nullptr}, // 2
         {nullptr, nullptr}, // 3

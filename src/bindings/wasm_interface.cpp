@@ -145,6 +145,7 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += ",\"key\":\"" + std::string(m.key) + "\"";
   json += ",\"name\":\"" + std::string(m.name) + "\"";
   json += ",\"shortName\":\"" + std::string(m.shortName) + "\"";
+  json += ",\"logotype\":\"" + std::string(m.logotype) + "\"";
   json += ",\"cpu\":\"" +
           std::string(m.cpu == a2e::CPUVariant::CMOS_65C02 ? "65C02" : "6502") +
           "\"";

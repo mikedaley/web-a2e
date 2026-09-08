@@ -595,15 +595,6 @@ export class UIController {
       });
     }
 
-    const machineBtn = document.getElementById("btn-machine");
-    if (machineBtn) {
-      machineBtn.addEventListener("click", () => {
-        this.windowManager.toggleWindow("machine-selector");
-        this.closeAllMenus();
-        this.refocusCanvas();
-      });
-    }
-
     const slotsBtn = document.getElementById("btn-slots");
     if (slotsBtn) {
       slotsBtn.addEventListener("click", () => {

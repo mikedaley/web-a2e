@@ -29,6 +29,7 @@ const APPLE_IIE_FALLBACK = Object.freeze({
   key: "apple2e",
   name: "Apple //e Enhanced",
   shortName: "//e",
+  logotype: "//e",
   cpu: "65C02",
   timing: Object.freeze({
     cpuClockHz: 1023000,

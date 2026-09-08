@@ -29,7 +29,7 @@ import "../css/documentation.css";
 import "../css/window-switcher.css";
 import "../css/docking.css";
 import "../css/fullscreen-popouts.css";
-import "../css/machine-selector.css";
+import "../css/machine.css";
 import "../css/responsive.css";
 
 import { VERSION } from "./config/version.js";
@@ -65,7 +65,7 @@ import { UIController } from "./ui/ui-controller.js";
 import { ThemeManager } from "./ui/theme-manager.js";
 import { showToast } from "./ui/toast.js";
 import { SlotConfigurationWindow } from "./ui/slot-configuration-window.js";
-import { MachineSelectorWindow } from "./machine/machine-selector-window.js";
+import { MachineMenu } from "./machine/machine-menu.js";
 import { SerialConnectionWindow } from "./serial/serial-connection-window.js";
 import { PrinterWindow } from "./printer/printer-window.js";
 import { PrinterManager } from "./printer/printer-manager.js";
@@ -390,22 +390,7 @@ class AppleIIeEmulator {
       // empty slot 4, and leaves mouse capture disabled until the next slot edit.
       await slotConfigWindow.create();
       this.windowManager.register(slotConfigWindow);
-
-      // Machine selector. Switching rebuilds the emulator in the core, so the
-      // host has to put itself back together afterwards: the machine's picture
-      // may be a different size, the slots are back to that machine's defaults,
-      // and nothing is in a drive.
-      this.machineSelectorWindow = new MachineSelectorWindow(
-        this.wasmModule,
-        async (profile) => {
-          this.machine = profile;
-          this.renderer.setMachineDisplay(profile.display);
-          await this.onMachineChanged();
-          showToast(`Switched to ${profile.name}`, "info", 4000);
-        },
-      );
-      await this.machineSelectorWindow.create();
-      this.windowManager.register(this.machineSelectorWindow);
+      this.slotConfigWindow = slotConfigWindow;
 
       // Release notes window
       this.releaseNotesWindow = new ReleaseNotesWindow();
@@ -520,6 +505,20 @@ class AppleIIeEmulator {
         emulationSpeed: this.emulationSpeed,
       });
       this.uiController.init();
+
+      // The header badge names the machine and is how it is changed. Created
+      // after the UI controller so the generic header-menu open/close wiring
+      // is already in place for it.
+      this.machineMenu = new MachineMenu({
+        wasmModule: this.wasmModule,
+        onMachineChanged: async (profile) => {
+          this.machine = profile;
+          this.renderer.setMachineDisplay(profile.display);
+          await this.onMachineChanged();
+          showToast(`Switched to ${profile.name}`, "info", 4000);
+        },
+      });
+      await this.machineMenu.init();
 
       // Set up state manager
       this.stateManager = new StateManager({
@@ -665,6 +664,11 @@ class AppleIIeEmulator {
     }
     if (this.emulationSpeed) this.emulationSpeed.apply();
     if (this.uiController) this.uiController.applyCharacterSet?.();
+
+    // The slots a machine has, and which of them the user may touch, are the
+    // machine's own business — a II+ has a slot 0 and no built-in 80-column
+    // card, so the window has to be rebuilt rather than merely refreshed.
+    if (this.slotConfigWindow) await this.slotConfigWindow.setMachine();
 
     await this.updateMouseHandlerState();
     if (this.diskManager) this.diskManager.syncWithEmulatorState?.();

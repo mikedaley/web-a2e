@@ -7,6 +7,7 @@
 
 import { BaseWindow } from "../windows/base-window.js";
 import { showToast } from "./toast.js";
+import { getMachineProfile } from "../machine/machine-profile.js";
 
 /**
  * Cards installed when there is no saved configuration.
@@ -25,8 +26,31 @@ const DEFAULT_SLOT_CONFIG = {
   7: "smartport",
 };
 
+/*
+ * What each slot conventionally takes, and how to describe it. This is host
+ * presentation rather than machine fact: the profile says which slots exist
+ * and which are fixed, and this says what to offer for the rest.
+ */
+const SLOT_UI = {
+  0: { available: [], note: "16K RAM" },
+  1: { available: ["parallel", "ssc", "softcard"], note: "Printer" },
+  2: { available: ["parallel", "ssc", "smartport", "softcard"], note: "Modem / Serial" },
+  3: { available: ["parallel", "ssc", "smartport", "softcard"], note: "80-Column / Serial" },
+  4: { available: ["mockingboard", "mouse", "smartport", "softcard"], note: "Mouse / Sound" },
+  5: { available: ["thunderclock", "smartport", "softcard"], note: "3.5\" Drives / Clock" },
+  6: { available: ["disk2"], note: "5.25\" Drives" },
+  7: { available: ["thunderclock", "smartport", "softcard"], note: "Hard Disk / Clock" },
+};
+
+// Cards a machine has permanently fitted. These never appear in the tray —
+// there is nothing to drag, because there is nothing the user could remove.
+const FIXED_CARD_LABELS = {
+  "80col": { name: "80-Column", note: "80-Column (Built-in)" },
+  languagecard: { name: "Language Card", note: "Language Card (16K)" },
+};
+
 /**
- * SlotConfigurationWindow - Configure Apple IIe expansion slots
+ * SlotConfigurationWindow - Configure the machine's expansion slots
  * Visual drag-and-drop card tray and motherboard slot layout
  */
 export class SlotConfigurationWindow extends BaseWindow {
@@ -69,47 +93,12 @@ export class SlotConfigurationWindow extends BaseWindow {
       parallel: `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="2" y="7" width="20" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="11" x2="5" y2="13" stroke="currentColor" stroke-width="1"/><line x1="7" y1="11" x2="7" y2="13" stroke="currentColor" stroke-width="1"/><line x1="9" y1="11" x2="9" y2="13" stroke="currentColor" stroke-width="1"/><line x1="11" y1="11" x2="11" y2="13" stroke="currentColor" stroke-width="1"/><line x1="13" y1="11" x2="13" y2="13" stroke="currentColor" stroke-width="1"/><line x1="15" y1="11" x2="15" y2="13" stroke="currentColor" stroke-width="1"/><line x1="17" y1="11" x2="17" y2="13" stroke="currentColor" stroke-width="1"/><line x1="19" y1="11" x2="19" y2="13" stroke="currentColor" stroke-width="1"/></svg>`,
     };
 
-    // Slot metadata
-    this.slots = [
-      {
-        slot: 1,
-        label: "Slot 1",
-        available: ["parallel", "ssc", "softcard"],
-        note: "Printer",
-      },
-      {
-        slot: 2,
-        label: "Slot 2",
-        available: ["parallel", "ssc", "smartport", "softcard"],
-        note: "Modem / Serial",
-      },
-      {
-        slot: 3,
-        label: "Slot 3",
-        available: [],
-        note: "80-Column (Built-in)",
-        fixed: true,
-      },
-      {
-        slot: 4,
-        label: "Slot 4",
-        available: ["mockingboard", "mouse", "smartport", "softcard"],
-        note: "Mouse / Sound",
-      },
-      {
-        slot: 5,
-        label: "Slot 5",
-        available: ["thunderclock", "smartport", "softcard"],
-        note: "3.5\" Drives / Clock",
-      },
-      { slot: 6, label: "Slot 6", available: ["disk2"], note: "5.25\" Drives" },
-      {
-        slot: 7,
-        label: "Slot 7",
-        available: ["thunderclock", "smartport", "softcard"],
-        note: "Hard Disk / Clock",
-      },
-    ];
+    // Which slots this machine has, and what each will take. Built from the
+    // machine profile rather than fixed here — a //e has slots 1-7 with a
+    // built-in 80-column card bolted into slot 3, while a II+ also has a slot
+    // 0 holding its language card and treats slot 3 as an ordinary slot.
+    this.slots = [];
+    this.rebuildSlots();
 
     // Current slot assignments (working state for drag-and-drop)
     this.slotAssignments = {};
@@ -215,6 +204,42 @@ export class SlotConfigurationWindow extends BaseWindow {
   /**
    * Get the list of cards not currently installed in any slot
    */
+  /**
+   * Work out this machine's slots from its profile.
+   *
+   * Called at construction and again whenever the machine changes, because a
+   * different machine has a different set of slots and a different idea of
+   * which of them the user may touch.
+   */
+  rebuildSlots() {
+    const machine = getMachineProfile();
+    const first = machine.firstSlot ?? 1;
+    const last = machine.lastSlot ?? 7;
+
+    this.slots = [];
+    for (let slot = first; slot <= last; slot++) {
+      const ui = SLOT_UI[slot] || { available: [], note: "" };
+      const fixedCard = machine.slots?.find((s) => s.slot === slot)?.fixedCard;
+      const fixed = FIXED_CARD_LABELS[fixedCard];
+
+      this.slots.push({
+        slot,
+        label: `Slot ${slot}`,
+        available: fixed ? [] : ui.available,
+        note: fixed ? fixed.note : ui.note,
+        fixed: !!fixed,
+        fixedName: fixed ? fixed.name : null,
+      });
+    }
+  }
+
+  /** Adopt a different machine and redraw. */
+  async setMachine() {
+    this.rebuildSlots();
+    await this.initSlotAssignments();
+    this.updateView();
+  }
+
   getAvailableCards() {
     const installed = new Set(Object.values(this.slotAssignments));
     return this.cards.filter((c) => !installed.has(c.id));
@@ -277,7 +302,7 @@ export class SlotConfigurationWindow extends BaseWindow {
                 <div class="mb-connector-teeth"></div>
                 <div class="mb-slot-card-fixed">
                   <span class="mb-lock-icon">&#128274;</span>
-                  <span>80-Column</span>
+                  <span>${slotInfo.fixedName}</span>
                 </div>
               </div>
               <div class="mb-slot-note">${slotInfo.note}</div>

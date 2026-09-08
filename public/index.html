@@ -32,9 +32,37 @@
                     <div class="logo">
                         <img
                             class="logo-image"
-                            src="/assets/apple-logo.png"
-                            alt="Apple //e"
+                            src="/assets/applem-logo.png"
+                            alt="AppleEm"
                         />
+                        <!--
+                          The machine badge. This used to be the second half of
+                          the logo image, which meant the header said "//e" no
+                          matter what was running. It is now live, and it is
+                          also how the machine is changed: the one thing the
+                          header always shows is which computer this is, so it
+                          is also the obvious place to press to change it.
+
+                          An ordinary header menu, so it inherits the app's
+                          open/close, click-outside and Escape behaviour rather
+                          than inventing its own.
+                        -->
+                        <div class="header-menu-container" id="machine-menu-container">
+                            <button
+                                id="btn-machine-chip"
+                                class="header-menu-trigger machine-chip"
+                                type="button"
+                                title="Apple //e Enhanced — click to change machine"
+                            >
+                                <span class="machine-chip-name" id="machine-chip-name">//e</span>
+                                <svg class="menu-chevron machine-chip-caret" viewBox="0 0 12 12"
+                                     width="10" height="10" aria-hidden="true">
+                                    <path d="M3 5l3 3 3-3" fill="none" stroke="currentColor"
+                                          stroke-width="1.5"/>
+                                </svg>
+                            </button>
+                            <div class="header-menu machine-menu" id="machine-menu"></div>
+                        </div>
                         <span id="app-version" class="app-version"></span>
                     </div>
                     <!--<span class="tagline">Apple II Enhanced Emulator</span>-->
@@ -296,9 +324,6 @@
                             >
                                 <span>Cursor Keys as Joystick</span>
                                 <span class="menu-check-icon"></span>
-                            </button>
-                            <button class="header-menu-item" id="btn-machine">
-                                <span>Machine</span>
                             </button>
                             <button class="header-menu-item" id="btn-slots">
                                 <span>Expansion Slots</span>
