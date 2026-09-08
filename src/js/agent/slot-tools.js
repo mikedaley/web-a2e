@@ -5,6 +5,8 @@
  *  Shawn Bullock <shawn@agenticexpert.ai>
  */
 
+import { saveSlotConfig } from "../machine/slot-storage.js";
+
 // Slot metadata (matches slot-configuration-window.js)
 const SLOT_CONFIG = [
   { slot: 1, compatible: ["parallel", "ssc", "softcard"], fixed: false },
@@ -50,7 +52,7 @@ async function persistSlotConfig(wasmModule) {
         config[cfg.slot] = await getSlotCard(wasmModule, cfg.slot);
       }
     }
-    localStorage.setItem("a2e-slot-config", JSON.stringify(config));
+    saveSlotConfig(config);
   } catch (e) {
     // Non-fatal
   }

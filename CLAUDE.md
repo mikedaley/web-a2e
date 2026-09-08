@@ -273,6 +273,27 @@ locked into slot 0 and slot 3 free for anything. What each free slot *offers*
 stays host presentation (`SLOT_UI`), since that is convention rather than
 machine fact.
 
+**What a machine ships with is in its profile, not in the constructor.**
+`Emulator`'s constructor used to fit a Mockingboard in slot 4 and a Disk II in
+slot 6 whatever the machine was, and `getSlotCardName` reported an 80-column
+card in slot 3 whatever the machine was. Both put hardware in a II+ that it
+never had, and both leaked into the saved slot layout. Defaults now come from
+`slots[].defaultCard` and a fixed slot reports `slots[].fixedCard`. A card the
+machine does not ship is *parked* in `diskStorage_`/`mbStorage_` rather than
+dropped, because `disk_` and `mockingboard_` still point at it and
+`setSlotCard()` fits it later from exactly those members.
+
+**Slot layouts are remembered per machine.** `src/js/machine/slot-storage.js`
+keys them by machine (`a2e-slot-config:apple2e`), because the machines do not
+agree about what a slot is: one shared layout put a II+'s slot 3 card into a
+//e's built-in 80-column slot, and followed a //e's SmartPort onto a machine
+whose defaults are a bare Disk II. A machine with nothing saved falls back to
+its profile's defaults rather than to a shared constant, and an emptied machine
+stays empty — "never configured" and "deliberately stripped" are different
+states. The single pre-machine key is read once as the //e's starting point,
+copied under the //e's own key, and then left alone; an orphan costs nothing,
+and losing somebody's layout to a mistake in that copy would cost more.
+
 #### Choosing a machine
 
 **The header badge names the machine and is how it is changed.** It used to be

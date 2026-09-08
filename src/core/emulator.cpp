@@ -76,9 +76,27 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   // during instruction execution (before disk_->update() is called)
   disk_->setCycleCallback([this]() { return cpu_->getTotalCycles(); });
 
-  // Insert cards into slots (transfers ownership to MMU)
-  mmu_->insertCard(6, std::move(disk));
-  mmu_->insertCard(4, std::move(mb));
+  // Fit the cards this machine ships with. Which slots those are is the
+  // machine's business — a //e comes with a Mockingboard in 4 and a Disk II in
+  // 6, a II+ with only the Disk II — so the profile decides rather than this
+  // constructor. Anything the machine does not ship is left constructed but
+  // unfitted, so the host can install it later without rebuilding.
+  for (int slot = machine_->firstSlot; slot <= machine_->lastSlot; slot++) {
+    const char *card = machine_->slots[slot].defaultCard;
+    if (!card) continue;
+    if (strcmp(card, "disk2") == 0 && disk) {
+      mmu_->insertCard(static_cast<uint8_t>(slot), std::move(disk));
+    } else if (strcmp(card, "mockingboard") == 0 && mb) {
+      mmu_->insertCard(static_cast<uint8_t>(slot), std::move(mb));
+    }
+  }
+
+  // A card this machine does not ship is parked rather than dropped. Both are
+  // still pointed at by disk_ and mockingboard_, and setSlotCard() fits them
+  // later from exactly these members, so letting either go out of scope here
+  // would leave those pointers dangling.
+  if (disk) diskStorage_ = std::move(disk);
+  if (mb) mbStorage_ = std::move(mb);
 
   // Audio gets raw pointer
   audio_->setMockingboard(mockingboard_);
@@ -1118,13 +1136,16 @@ void Emulator::mouseButton(bool pressed) {
 // ============================================================================
 
 const char* Emulator::getSlotCardName(uint8_t slot) const {
-  if (slot < 1 || slot > 7) {
+  if (!machine_->hasSlot(slot)) {
     return "invalid";
   }
 
-  // Slot 3 is built-in 80-column
-  if (slot == 3) {
-    return "80col";
+  // A slot the machine fills itself. On a //e that is the 80-column card in
+  // slot 3; on a II+ it is the language card in slot 0, and slot 3 is an
+  // ordinary slot. Reporting "80col" for every machine's slot 3 put a card in
+  // a II+ that it has never had.
+  if (const char *fixed = machine_->slots[slot].fixedCard) {
+    return fixed;
   }
 
   // Check the slot array for all cards

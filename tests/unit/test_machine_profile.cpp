@@ -710,6 +710,50 @@ TEST_CASE("Mixed mode looks the same on both machines", "[machine][video]") {
     }
 }
 
+TEST_CASE("A machine is fitted with the cards its profile names", "[machine]") {
+    // The constructor used to put a Mockingboard in slot 4 and a Disk II in
+    // slot 6 whatever the machine was, and getSlotCardName reported an
+    // 80-column card in slot 3 whatever the machine was. Both put hardware in
+    // a II+ that it never had, and both leaked into the saved slot layout.
+    Emulator iie(MachineId::AppleIIe);
+    iie.init();
+
+    SECTION("a //e ships with its usual four and its built-in 80 columns") {
+        REQUIRE(std::string(iie.getSlotCardName(3)) == "80col");
+        REQUIRE(std::string(iie.getSlotCardName(4)) == "mockingboard");
+        REQUIRE(std::string(iie.getSlotCardName(6)) == "disk2");
+        REQUIRE(std::string(iie.getSlotCardName(1)) == "empty");
+    }
+
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) return;
+
+    Emulator iiPlus(MachineId::AppleIIPlus);
+    iiPlus.init();
+
+    SECTION("a II+ ships with a Disk II and nothing else") {
+        REQUIRE(std::string(iiPlus.getSlotCardName(6)) == "disk2");
+        REQUIRE(std::string(iiPlus.getSlotCardName(4)) == "empty");
+        REQUIRE(std::string(iiPlus.getSlotCardName(5)) == "empty");
+        REQUIRE(std::string(iiPlus.getSlotCardName(7)) == "empty");
+    }
+
+    SECTION("slot 3 is an ordinary empty slot on a II+") {
+        REQUIRE(std::string(iiPlus.getSlotCardName(3)) == "empty");
+    }
+
+    SECTION("slot 0 holds its language card, and a //e has no slot 0") {
+        REQUIRE(std::string(iiPlus.getSlotCardName(0)) == "languagecard");
+        REQUIRE(std::string(iie.getSlotCardName(0)) == "invalid");
+    }
+
+    SECTION("a card the machine does not ship is still there to install") {
+        // It is parked rather than dropped, so the pointers the emulator keeps
+        // to it stay valid and it can be fitted later without a rebuild.
+        REQUIRE(iiPlus.getMockingboardPtr() != nullptr);
+        REQUIRE(iiPlus.getDiskPtr() != nullptr);
+    }
+}
+
 TEST_CASE("A II+ has a slot 0 and a //e does not", "[machine]") {
     // slots_ is indexed by slot number and has room for slot 0; which machines
     // actually have one is the profile's answer.

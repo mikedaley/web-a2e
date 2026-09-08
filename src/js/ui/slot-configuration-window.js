@@ -8,6 +8,12 @@
 import { BaseWindow } from "../windows/base-window.js";
 import { showToast } from "./toast.js";
 import { getMachineProfile } from "../machine/machine-profile.js";
+import {
+  defaultSlotConfig,
+  loadSlotConfig,
+  saveSlotConfig,
+  slotConfigOrDefaults,
+} from "../machine/slot-storage.js";
 
 /**
  * Cards installed when there is no saved configuration.
@@ -19,13 +25,6 @@ import { getMachineProfile } from "../machine/machine-profile.js";
  * fallback is only reached when `_getSlotCard` returns nothing, but at that
  * point the window would have described slots that did not match the machine.
  */
-const DEFAULT_SLOT_CONFIG = {
-  4: "mockingboard",
-  5: "thunderclock",
-  6: "disk2",
-  7: "smartport",
-};
-
 /*
  * What each slot conventionally takes, and how to describe it. This is host
  * presentation rather than machine fact: the profile says which slots exist
@@ -233,9 +232,18 @@ export class SlotConfigurationWindow extends BaseWindow {
     }
   }
 
-  /** Adopt a different machine and redraw. */
+  /**
+   * Adopt a different machine.
+   *
+   * The core was rebuilt by the switch and is running whatever the new machine
+   * constructs by default, which is not what the user last left that machine
+   * with. So this pushes the machine's saved configuration into the core
+   * first, and only then reads back what is actually fitted — otherwise the
+   * window would faithfully show a layout nobody chose.
+   */
   async setMachine() {
     this.rebuildSlots();
+    await this.applyInitialSettings();
     await this.initSlotAssignments();
     this.updateView();
   }
@@ -532,7 +540,7 @@ export class SlotConfigurationWindow extends BaseWindow {
       }
     }
 
-    return DEFAULT_SLOT_CONFIG[slot] || "empty";
+    return defaultSlotConfig()[slot] || "empty";
   }
 
   updateUI() {
@@ -588,8 +596,8 @@ export class SlotConfigurationWindow extends BaseWindow {
   }
 
   async applyInitialSettings() {
-    const saved = this.loadSettingsFromStorage();
-    const config = saved || DEFAULT_SLOT_CONFIG;
+    // What this machine was last left with, or what it ships with.
+    const config = slotConfigOrDefaults();
     if (this.wasmModule && this.wasmModule._setSlotCard) {
       for (const [slot, cardId] of Object.entries(config)) {
         const slotNum = parseInt(slot, 10);
@@ -610,17 +618,15 @@ export class SlotConfigurationWindow extends BaseWindow {
   }
 
   saveSettings() {
-    try {
-      const config = {};
-      for (const slotInfo of this.slots) {
-        if (slotInfo.fixed) continue;
-        const cardId = this.slotAssignments[slotInfo.slot] || "empty";
-        config[slotInfo.slot] = cardId;
-      }
-      localStorage.setItem("a2e-slot-config", JSON.stringify(config));
-    } catch (e) {
-      console.warn("Could not save slot configuration:", e);
+    const config = {};
+    for (const slotInfo of this.slots) {
+      if (slotInfo.fixed) continue;
+      const cardId = this.slotAssignments[slotInfo.slot] || "empty";
+      config[slotInfo.slot] = cardId;
     }
+    // Saved against the machine it describes: the two machines do not agree
+    // about which slots exist, so one shared configuration cannot serve both.
+    saveSlotConfig(config);
   }
 
   loadSettings() {
@@ -640,15 +646,7 @@ export class SlotConfigurationWindow extends BaseWindow {
   }
 
   loadSettingsFromStorage() {
-    try {
-      const saved = localStorage.getItem("a2e-slot-config");
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn("Could not parse slot configuration:", e);
-    }
-    return null;
+    return loadSlotConfig();
   }
 
   update() {
