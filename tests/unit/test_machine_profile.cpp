@@ -20,6 +20,7 @@
 #include "roms.cpp"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -603,6 +604,95 @@ TEST_CASE("Text fringes on a II+ and not on a //e", "[machine][video]") {
 
     SECTION("...but a monochrome monitor has no chroma to show") {
         REQUIRE(colouredPixels(iiPlus, VideoColorMode::MONOCHROME) == 0);
+    }
+}
+
+TEST_CASE("Mixed mode looks the same on both machines", "[machine][video]") {
+    // Worth pinning because it surprises people, including the person who
+    // wrote the burst model.
+    //
+    // A //e does inhibit the burst on the four text rows of a mixed screen —
+    // burstForScanline returns false for them. But the burst is not what the
+    // decoders are handed: they get the colour killer, which works a field at
+    // a time, and 160 of the 192 lines are graphics carrying burst, so the
+    // killer never engages. The text rows are therefore decoded in colour
+    // exactly like the graphics above them.
+    //
+    // The consequence is that inhibitsBurstInText only ever changes a *full
+    // text* screen. In mixed mode the two machines are pixel-identical, and a
+    // //e's bottom rows fringe just as a II+'s do. Making them differ would
+    // need a colour killer that reacts within a field, which is not what a
+    // real monitor does.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) return;
+
+    auto render = [](MachineId id, bool text, bool mixed) {
+        auto e = std::make_unique<Emulator>(id);
+        e->init();
+        e->getMMU().read(text ? 0xC051 : 0xC050);  // TEXT / GRAPHICS
+        e->getMMU().read(mixed ? 0xC053 : 0xC052); // MIXED on / off
+        e->getMMU().read(0xC057);                  // HIRES
+
+        // Something dense enough to carry colour across the graphics area.
+        for (int line = 0; line < 192; line++) {
+            for (int col = 0; col < 40; col++) {
+                const uint16_t addr = static_cast<uint16_t>(
+                    0x2000 + ((line & 7) << 10) + (((line >> 3) & 7) << 7) +
+                    ((line >> 6) * 40) + col);
+                e->getMMU().writeRAM(addr, 0x55);
+            }
+        }
+        const char *word = "STATUS LINE";
+        for (int row = 20; row < 24; row++) {
+            const uint16_t base = static_cast<uint16_t>(
+                0x400 + ((row & 7) * 0x80) + ((row >> 3) * 40));
+            for (int i = 0; word[i]; i++) {
+                e->getMMU().writeRAM(static_cast<uint16_t>(base + i),
+                                     static_cast<uint8_t>(word[i] | 0x80));
+            }
+        }
+        e->getVideo().setColorMode(VideoColorMode::COMPOSITE);
+        e->getVideo().forceRenderFrame();
+        return e;
+    };
+
+    // Colour in the bottom four text rows: framebuffer lines 320-383.
+    auto colourInTextRows = [](Emulator &e) {
+        const uint8_t *fb = e.getVideo().getFramebuffer();
+        const int width = e.getMachine().display.pixelWidth;
+        int coloured = 0;
+        for (int line = 320; line < 384; line++) {
+            for (int x = 0; x < 280; x++) {
+                const size_t o = static_cast<size_t>(line) * width * 4 +
+                                 static_cast<size_t>(x) * 4;
+                const int r = fb[o], g = fb[o + 1], b = fb[o + 2];
+                if (std::max(r, std::max(g, b)) - std::min(r, std::min(g, b)) > 40)
+                    coloured++;
+            }
+        }
+        return coloured;
+    };
+
+    SECTION("mixed hi-res: both fringe, and by the same amount") {
+        auto iie = render(MachineId::AppleIIe, false, true);
+        auto iiPlus = render(MachineId::AppleIIPlus, false, true);
+
+        REQUIRE(iie->getVideo().isChromaEnabled());
+        REQUIRE(iiPlus->getVideo().isChromaEnabled());
+        REQUIRE(colourInTextRows(*iie) > 0);
+        REQUIRE(colourInTextRows(*iie) == colourInTextRows(*iiPlus));
+    }
+
+    SECTION("full text is where the two machines part company") {
+        auto iie = render(MachineId::AppleIIe, true, false);
+        auto iiPlus = render(MachineId::AppleIIPlus, true, false);
+
+        // No burst anywhere on a //e, so the killer engages and text is grey.
+        REQUIRE_FALSE(iie->getVideo().isChromaEnabled());
+        REQUIRE(colourInTextRows(*iie) == 0);
+
+        // A II+ sends a reference on every line whatever the mode.
+        REQUIRE(iiPlus->getVideo().isChromaEnabled());
+        REQUIRE(colourInTextRows(*iiPlus) > 0);
     }
 }
 
