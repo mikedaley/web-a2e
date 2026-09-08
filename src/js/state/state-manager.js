@@ -17,13 +17,14 @@ import {
   saveStateToSlot,
   loadStateFromSlot,
 } from "./state-persistence.js";
+import { machineDisplay } from "../machine/machine-profile.js";
 
 // Constants
 const AUTO_SAVE_INTERVAL_MS = 5000;
 const THUMBNAIL_WIDTH = 140;
 const THUMBNAIL_HEIGHT = 96;
-const PREVIEW_WIDTH = 560;
-const PREVIEW_HEIGHT = 384;
+// The save-state preview is a copy of the machine's framebuffer at full size,
+// so it follows the machine rather than fixing a //e picture.
 
 /**
  * @typedef {Object} StateManagerDeps
@@ -266,10 +267,11 @@ export class StateManager {
 
     try {
       const offscreen = document.createElement("canvas");
-      offscreen.width = PREVIEW_WIDTH;
-      offscreen.height = PREVIEW_HEIGHT;
+      const { width: previewWidth, height: previewHeight } = machineDisplay();
+      offscreen.width = previewWidth;
+      offscreen.height = previewHeight;
       const ctx = offscreen.getContext("2d");
-      ctx.drawImage(canvas, 0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+      ctx.drawImage(canvas, 0, 0, previewWidth, previewHeight);
       return offscreen.toDataURL("image/jpeg", 0.85);
     } catch (error) {
       console.error("Failed to capture preview:", error);

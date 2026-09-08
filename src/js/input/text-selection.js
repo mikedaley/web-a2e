@@ -5,6 +5,8 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+import { machineDisplay } from "../machine/machine-profile.js";
+
 /**
  * TextSelection - Enable text selection and copying from the Apple II screen
  *
@@ -45,9 +47,10 @@ export class TextSelection {
   }
 
   setupOverlay() {
+    const { width, height } = machineDisplay();
     this.overlay = document.createElement('canvas');
-    this.overlay.width = 560;
-    this.overlay.height = 384;
+    this.overlay.width = width;
+    this.overlay.height = height;
     this.overlayCtx = this.overlay.getContext('2d');
   }
 
@@ -138,9 +141,10 @@ export class TextSelection {
       v = (v - 0.5) * scale + 0.5;
     }
 
-    // u,v are now contentUV — map to 560×384 texture space
-    const contentX = u * 560;
-    const contentY = v * 384;
+    // u,v are now contentUV — map to the machine's framebuffer space
+    const { width: fbWidth, height: fbHeight } = machineDisplay();
+    const contentX = u * fbWidth;
+    const contentY = v * fbHeight;
 
     const mode = await this.getDisplayMode();
     const cols = mode.col80 ? 80 : 40;
@@ -227,7 +231,7 @@ export class TextSelection {
    */
   async drawSelectionHighlight() {
     const ctx = this.overlayCtx;
-    ctx.clearRect(0, 0, 560, 384);
+    ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
 
     const mode = await this.getDisplayMode();
     if (!mode.textMode) { this.uploadOverlay(); return; }
@@ -280,7 +284,7 @@ export class TextSelection {
     this.isSelecting = false;
 
     if (this.overlayCtx) {
-      this.overlayCtx.clearRect(0, 0, 560, 384);
+      this.overlayCtx.clearRect(0, 0, this.overlay.width, this.overlay.height);
       this.uploadOverlay();
     }
   }

@@ -20,7 +20,14 @@ class Video {
 public:
   using CycleCallback = std::function<uint64_t()>;
 
-  Video(MMU &mmu);
+  // The profile comes from the MMU rather than a second parameter: the video
+  // scanner and the floating bus are the same counters read two ways, so a
+  // Video and an MMU that disagreed about frame timing would be a bug with no
+  // way to express it.
+  explicit Video(MMU &mmu);
+
+  // The machine this video generator is modelling.
+  const MachineProfile &getMachine() const { return *machine_; }
 
   // Render a complete frame to the framebuffer
   void renderFrame();
@@ -175,6 +182,9 @@ private:
   // side so the demodulation window never runs off the ends.
   std::array<uint8_t, ntsc::DOT_BUFFER> dots_{};
   std::array<ntsc::IdealKind, ntsc::VISIBLE_DOTS> idealKind_{};
+
+  // Not owned: profiles are static constexpr objects with program lifetime.
+  const MachineProfile *machine_ = &defaultMachineProfile();
   bool burst_ = false;
 
   // Colour killer.

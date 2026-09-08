@@ -110,6 +110,12 @@ if(EMSCRIPTEN)
                 \"_consumeFrameSamples\", \
                 \"_getFramebuffer\", \
                 \"_getFramebufferSize\", \
+                \"_getMachineCount\", \
+                \"_getMachineKey\", \
+                \"_getMachineKeyAt\", \
+                \"_getMachineName\", \
+                \"_getMachineProfileJSON\", \
+                \"_getMachineProfileJSONAt\", \
                 \"_forceRenderFrame\", \
                 \"_isFrameReady\", \
                 \"_keyDown\", \
@@ -450,6 +456,7 @@ else()
     set(ALL_CORE_INCLUDES
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/core/cpu/6502
+        ${CMAKE_SOURCE_DIR}/src/core/machine
         ${CMAKE_SOURCE_DIR}/src/core/mmu
         ${CMAKE_SOURCE_DIR}/src/core/video
         ${CMAKE_SOURCE_DIR}/src/core/audio
@@ -667,6 +674,20 @@ else()
         src/core/mmu/mmu.cpp
         src/core/noslot_clock.cpp
         src/core/cards/thunderclock/thunderclock_card.cpp
+    )
+
+    # Machine profile (profile header + the subsystems that read it)
+    add_catch2_test(test_machine_profile
+        tests/unit/test_machine_profile.cpp
+        src/core/mmu/mmu.cpp
+        src/core/noslot_clock.cpp
+        src/core/video/video.cpp
+        src/core/video/ntsc.cpp
+        src/core/audio/audio.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/debug/debug_log.cpp
     )
 
     # NTSC composite decoding (standalone — no MMU needed)

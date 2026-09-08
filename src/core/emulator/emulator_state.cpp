@@ -21,7 +21,7 @@
 namespace a2e {
 
 // State format version - increment when format changes
-static constexpr uint32_t STATE_VERSION = 7;  // LSS 8-phase clock
+static constexpr uint32_t STATE_VERSION = 8;  // Machine id in header
 static constexpr uint32_t STATE_MAGIC = 0x53324541; // "A2ES" in little-endian
 
 // Helper to write little-endian values
@@ -70,6 +70,12 @@ const uint8_t *Emulator::exportState(size_t *size) {
   // Header
   writeLE32(stateBuffer_, STATE_MAGIC);
   writeLE32(stateBuffer_, STATE_VERSION);
+
+  // Which machine this state came off. Everything after this point is laid out
+  // to that machine's shape — its RAM sizes, its cards — so a state restored
+  // into a different machine would be read as garbage rather than fail. The id
+  // is what lets importState refuse it instead.
+  writeLE32(stateBuffer_, static_cast<uint32_t>(machine_->id));
 
   // CPU state
   stateBuffer_.push_back(cpu_->getA());
@@ -262,6 +268,16 @@ bool Emulator::importState(const uint8_t *data, size_t size) {
   uint32_t version = readLE32(data + offset);
   offset += 4;
   if (version != STATE_VERSION) {
+    return false;
+  }
+
+  // Refuse a state saved off a different machine. The remaining bytes are sized
+  // and ordered by the saving machine's profile, so importing them here would
+  // quietly load nonsense rather than fail.
+  if (offset + 4 > size) return false;
+  uint32_t stateMachine = readLE32(data + offset);
+  offset += 4;
+  if (stateMachine != static_cast<uint32_t>(machine_->id)) {
     return false;
   }
 

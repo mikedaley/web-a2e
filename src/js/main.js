@@ -37,9 +37,12 @@ import { DEFAULT_LAYOUT } from "./config/default-layout.js";
 import { WebGLRenderer } from "./display/webgl-renderer.js";
 import { AudioDriver } from "./audio/audio-driver.js";
 import { WasmProxy } from "./worker/wasm-proxy.js";
+import { loadMachineProfile, machineDisplay } from "./machine/machine-profile.js";
 import {
   allocateSharedBuffers,
   FB_BYTES,
+  FB_WIDTH,
+  FB_HEIGHT,
   CTRL_FRAME_READY,
   CTRL_FRAME_INDEX,
 } from "./worker/shared-buffers.js";
@@ -125,6 +128,12 @@ class AppleIIeEmulator {
       this.wasmModule = new WasmProxy();
       const wasmBust = import.meta.env.DEV ? Date.now() : VERSION;
       await this.wasmModule.init(`/a2e.js?v=${wasmBust}`);
+
+      // Ask the core which machine it is emulating before anything sizes
+      // itself to the picture. One round trip, and everything downstream —
+      // the screenshot canvas, the selection overlay, the printer's screen
+      // dump — reads the answer instead of assuming a //e.
+      this.machine = await loadMachineProfile(this.wasmModule);
 
       // Set up renderer
       const canvas = document.getElementById("screen");
@@ -648,8 +657,7 @@ class AppleIIeEmulator {
   captureScreenshot() {
     if (!this._lastFramebuffer) return null;
 
-    const width = 560;
-    const height = 384;
+    const { width, height } = machineDisplay();
 
     if (!this._screenshotCanvas) {
       this._screenshotCanvas = document.createElement("canvas");
@@ -679,6 +687,20 @@ class AppleIIeEmulator {
   setupSharedBuffers() {
     this._sharedControl = null;
     this._sharedFrameViews = null;
+
+    // The shared framebuffer slot is a fixed allocation (see shared-buffers.js)
+    // and the Worker writes a whole frame into it. A machine whose picture does
+    // not fit would run past the end of the slot, so refuse the shared path and
+    // fall back to postMessage rather than corrupt memory.
+    const { width: fbWidth, height: fbHeight } = machineDisplay();
+    if (fbWidth > FB_WIDTH || fbHeight > FB_HEIGHT) {
+      console.warn(
+        `Machine framebuffer ${fbWidth}x${fbHeight} exceeds the shared slot ` +
+          `${FB_WIDTH}x${FB_HEIGHT} — using postMessage transport. ` +
+          `Raise FB_WIDTH/FB_HEIGHT in shared-buffers.js.`
+      );
+      return;
+    }
 
     const buffers = allocateSharedBuffers();
     if (!buffers) {

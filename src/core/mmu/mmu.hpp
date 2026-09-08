@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "../machine/machine_profile.hpp"
 #include "../types.hpp"
 #include <array>
 #include <cstdint>
@@ -31,8 +32,14 @@ public:
   using WatchpointReadCallback = std::function<void(uint16_t, uint8_t)>;
   using WatchpointWriteCallback = std::function<void(uint16_t, uint8_t)>;
 
-  MMU();
+  // The profile supplies video timing: the floating-bus scanner and the VBL
+  // status bit are both derived from where in the frame the machine is, and a
+  // frame is a count of cycles that differs between machines.
+  explicit MMU(const MachineProfile &machine = defaultMachineProfile());
   ~MMU();  // Defined in mmu.cpp (needed for unique_ptr<ExpansionCard>)
+
+  // The machine this MMU is modelling.
+  const MachineProfile &getMachine() const { return *machine_; }
 
   // Memory access
   uint8_t read(uint16_t address);
@@ -206,6 +213,9 @@ private:
   void handleLanguageCardSwitchWrite(uint8_t reg);
 
   // Memory banks
+  // Not owned: profiles are static constexpr objects with program lifetime.
+  const MachineProfile *machine_ = &defaultMachineProfile();
+
   std::array<uint8_t, MAIN_RAM_SIZE> mainRAM_{};
   std::array<uint8_t, AUX_RAM_SIZE> auxRAM_{};
 

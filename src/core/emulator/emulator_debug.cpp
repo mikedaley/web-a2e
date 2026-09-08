@@ -19,28 +19,32 @@ namespace a2e {
 // ============================================================================
 
 int Emulator::getFrameCycle() const {
-  return static_cast<int>(cpu_->getTotalCycles() % CYCLES_PER_FRAME);
+  return static_cast<int>(cpu_->getTotalCycles() %
+                          machine_->timing.cyclesPerFrame());
 }
 
 int Emulator::getBeamScanline() const {
-  return getFrameCycle() / CYCLES_PER_SCANLINE;
+  return getFrameCycle() / machine_->timing.cyclesPerScanline;
 }
 
 int Emulator::getBeamHPos() const {
-  return getFrameCycle() % CYCLES_PER_SCANLINE;
+  return getFrameCycle() % machine_->timing.cyclesPerScanline;
 }
 
 int Emulator::getBeamColumn() const {
+  // A scanline starts in blanking; the visible columns follow it, so a beam
+  // still inside the blanking interval is on no column at all.
+  const int hblank = machine_->timing.hblankCycles;
   int hPos = getBeamHPos();
-  return hPos >= 25 ? hPos - 25 : -1;
+  return hPos >= hblank ? hPos - hblank : -1;
 }
 
 bool Emulator::isInVBL() const {
-  return getBeamScanline() >= 192;
+  return getBeamScanline() >= machine_->timing.visibleScanlines;
 }
 
 bool Emulator::isInHBLANK() const {
-  return getBeamHPos() < 25;
+  return getBeamHPos() < machine_->timing.hblankCycles;
 }
 
 // ============================================================================

@@ -7,6 +7,7 @@
 
 import { VERSION } from "../config/version.js";
 import { buildNoSignalFrame } from "./no-signal-frame.js";
+import { machineDisplay } from "../machine/machine-profile.js";
 
 export class WebGLRenderer {
   constructor(canvas) {
@@ -27,9 +28,11 @@ export class WebGLRenderer {
     // Selection overlay texture
     this.selectionTexture = null;
 
-    // Texture dimensions
-    this.width = 560;
-    this.height = 384;
+    // Texture dimensions. The source texture is the machine's framebuffer, so
+    // its size is the machine's, not a constant of the renderer.
+    const display = machineDisplay();
+    this.width = display.width;
+    this.height = display.height;
 
     // CRT effect parameters (0.0 to 1.0 unless noted)
     this.crtParams = {

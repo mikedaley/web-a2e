@@ -38,12 +38,19 @@
  *  Shawn Bullock <shawn@agenticexpert.ai>
  */
 
+import { machineDisplay } from "../machine/machine-profile.js";
+
 const ESC = 0x1B;
 
-// The //e renders its screen to this fixed RGBA framebuffer (see main.js
-// captureScreenshot). 280×192 HGR is doubled to 560×384.
-export const SCREEN_W = 560;
-export const SCREEN_H = 384;
+// The machine renders its screen to an RGBA framebuffer of this size (see
+// main.js captureScreenshot). On a //e, 280x192 HGR doubled to 560x384.
+//
+// These are functions rather than constants because the size belongs to the
+// machine, and the machine is not known until the core has been asked. Every
+// default parameter below calls them, so each call gets the current answer
+// rather than whatever was true when this module was first imported.
+export const screenWidth = () => machineDisplay().width;
+export const screenHeight = () => machineDisplay().height;
 
 // ---- Wire-format primitives (the per-printer demarcations) --------------------
 
@@ -181,7 +188,7 @@ function buildMono(fb, width, height, proto, opts = {}) {
  * @param {boolean} [opts.invert]          colour: force greyscale polarity.
  * @returns {number[]}  byte stream for PrinterManager.feedBytes().
  */
-export function buildScreenDumpImageWriter(fb, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+export function buildScreenDumpImageWriter(fb, width = screenWidth(), height = screenHeight(), opts = {}) {
   return opts.color
     ? buildScreenDumpColor(fb, width, height, opts)
     : buildMono(fb, width, height, IMAGEWRITER, opts);
@@ -191,7 +198,7 @@ export function buildScreenDumpImageWriter(fb, width = SCREEN_W, height = SCREEN
  * Apple Dot Matrix Printer screen dump (C. Itoh ESC G, 72 dpi, single black
  * ribbon — no colour passes). Same wire format as the ImageWriter mono dump.
  */
-export function buildScreenDumpAppleDMP(fb, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+export function buildScreenDumpAppleDMP(fb, width = screenWidth(), height = screenHeight(), opts = {}) {
   return buildMono(fb, width, height, APPLE_DMP, opts);
 }
 
@@ -199,12 +206,12 @@ export function buildScreenDumpAppleDMP(fb, width = SCREEN_W, height = SCREEN_H,
  * Epson FX-80 screen dump (ESC/P ESC * 5, 72 dpi, MSB-top columns). Mono — the
  * FX-80 has no colour ribbon.
  */
-export function buildScreenDumpEpson(fb, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+export function buildScreenDumpEpson(fb, width = screenWidth(), height = screenHeight(), opts = {}) {
   return buildMono(fb, width, height, EPSON_FX, opts);
 }
 
 // Back-compat aliases — the original ImageWriter-only entry points.
-export function buildScreenDump(fb, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+export function buildScreenDump(fb, width = screenWidth(), height = screenHeight(), opts = {}) {
   return buildMono(fb, width, height, IMAGEWRITER, opts);
 }
 
@@ -273,7 +280,7 @@ function gamut(invert) {
 // Drives the auto WYSIWYG-vs-inverted choice: a dense colour screen reproduces
 // as seen, a sparse one (mostly black field) inverts so paper stays white.
 const LIT_THRESH = 48;
-export function litDensity(fb, width = SCREEN_W, height = SCREEN_H) {
+export function litDensity(fb, width = screenWidth(), height = screenHeight()) {
   const n = width * height;
   let lit = 0;
   for (let i = 0; i < n; i++) {
@@ -338,7 +345,7 @@ function ditherToBands(fb, width, height, gam) {
  *   reproduced WYSIWYG.
  * @returns {number[]}  byte stream for PrinterManager.feedBytes().
  */
-export function buildScreenDumpColor(fb, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+export function buildScreenDumpColor(fb, width = screenWidth(), height = screenHeight(), opts = {}) {
   const invert = opts.invert ?? (litDensity(fb, width, height) < 0.05);
   const nCols  = Math.min(width, Math.max(1, (opts.maxCols ?? width) | 0));
   const map = ditherToBands(fb, width, height, gamut(invert));

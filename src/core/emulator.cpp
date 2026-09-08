@@ -23,10 +23,10 @@
 
 namespace a2e {
 
-Emulator::Emulator() {
-  mmu_ = std::make_unique<MMU>();
+Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
+  mmu_ = std::make_unique<MMU>(*machine_);
   video_ = std::make_unique<Video>(*mmu_);
-  audio_ = std::make_unique<Audio>();
+  audio_ = std::make_unique<Audio>(*machine_);
   keyboard_ = std::make_unique<Keyboard>();
 
   // Create cards, keep raw pointers, then insert into slots
@@ -39,7 +39,7 @@ Emulator::Emulator() {
   cpu_ = std::make_unique<CPU6502>(
       [this](uint16_t addr) { return cpuRead(addr); },
       [this](uint16_t addr, uint8_t val) { cpuWrite(addr, val); },
-      CPUVariant::CMOS_65C02);
+      machine_->cpu);
 
   // Set up keyboard callback to receive translated keys
   keyboard_->setKeyCallback([this](int key) { keyDown(key); });
@@ -245,8 +245,9 @@ void Emulator::runCycles(int cycles) {
       // Progressive rendering and frame boundary
       video_->renderUpToCycle(cpu_->getTotalCycles());
       uint64_t currentCycle = cpu_->getTotalCycles();
-      if (currentCycle - lastFrameCycle_ >= CYCLES_PER_FRAME) {
-        lastFrameCycle_ += CYCLES_PER_FRAME;
+      if (currentCycle - lastFrameCycle_ >=
+          static_cast<uint64_t>(machine_->timing.cyclesPerFrame())) {
+        lastFrameCycle_ += machine_->timing.cyclesPerFrame();
         video_->renderFrame();
         video_->beginNewFrame(lastFrameCycle_);
         frameReady_ = true;
@@ -501,11 +502,12 @@ void Emulator::runCycles(int cycles) {
 
     // Check for frame boundary
     uint64_t currentCycle = cpu_->getTotalCycles();
-    if (currentCycle - lastFrameCycle_ >= CYCLES_PER_FRAME) {
-      // Advance by exactly CYCLES_PER_FRAME to stay aligned with VBL detection
-      // ($C019 uses cycles % CYCLES_PER_FRAME). Using currentCycle would drift
+    if (currentCycle - lastFrameCycle_ >=
+        static_cast<uint64_t>(machine_->timing.cyclesPerFrame())) {
+      // Advance by exactly one frame to stay aligned with VBL detection ($C019
+      // uses cycles modulo the frame length). Using currentCycle would drift
       // by a few cycles each frame, desynchronizing raster effects.
-      lastFrameCycle_ += CYCLES_PER_FRAME;
+      lastFrameCycle_ += machine_->timing.cyclesPerFrame();
       video_->renderFrame();                   // Uses this frame's change log
       video_->beginNewFrame(lastFrameCycle_);   // Reset log, aligned to frame boundary
       frameReady_ = true;
@@ -517,7 +519,9 @@ void Emulator::runCycles(int cycles) {
     // Check beam breakpoints
     if (!beamBreakpoints_.empty()) {
       uint64_t fc = cpu_->getTotalCycles() - lastFrameCycle_;
-      if (fc >= CYCLES_PER_FRAME) fc %= CYCLES_PER_FRAME;
+      const auto framecycles =
+          static_cast<uint64_t>(machine_->timing.cyclesPerFrame());
+      if (fc >= framecycles) fc %= framecycles;
       int16_t sl = static_cast<int16_t>(fc / 65);
       int16_t hp = static_cast<int16_t>(fc % 65);
       for (auto& bp : beamBreakpoints_) {
@@ -567,7 +571,9 @@ void Emulator::applySpeedToAudio() {
 
 int Emulator::generateStereoAudioSamples(float *buffer, int sampleCount) {
   // Calculate cycles needed for this audio buffer, scaled by speed multiplier
-  int cyclesToRun = static_cast<int>(sampleCount * CYCLES_PER_SAMPLE * speedMultiplier_);
+  int cyclesToRun = static_cast<int>(
+      sampleCount * machine_->timing.cyclesPerSample(AUDIO_SAMPLE_RATE) *
+      speedMultiplier_);
 
   // Run emulation for the required cycles
   runCycles(cyclesToRun);
@@ -907,8 +913,9 @@ void Emulator::stepInstruction() {
 
   // Check for frame boundary
   uint64_t currentCycle = cpu_->getTotalCycles();
-  if (currentCycle - lastFrameCycle_ >= CYCLES_PER_FRAME) {
-    lastFrameCycle_ += CYCLES_PER_FRAME;
+  if (currentCycle - lastFrameCycle_ >=
+      static_cast<uint64_t>(machine_->timing.cyclesPerFrame())) {
+    lastFrameCycle_ += machine_->timing.cyclesPerFrame();
     video_->renderFrame();
     video_->beginNewFrame(lastFrameCycle_);
     frameReady_ = true;

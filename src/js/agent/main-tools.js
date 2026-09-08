@@ -6,6 +6,7 @@
  */
 
 import { readDiskFileBytes } from "./file-explorer-tools.js";
+import { machineDisplay } from "../machine/machine-profile.js";
 
 /**
  * Parse address or length value from hex ($xxxx) or decimal format
@@ -407,13 +408,14 @@ export const mainTools = {
     }
 
     const imageBase64 = emulator.captureScreenshot();
+    const { width, height } = machineDisplay();
 
     return {
       success: true,
       imageBase64,
-      width: 560,
-      height: 384,
-      message: "Screen captured as 560x384 PNG",
+      width,
+      height,
+      message: `Screen captured as ${width}x${height} PNG`,
     };
   },
 

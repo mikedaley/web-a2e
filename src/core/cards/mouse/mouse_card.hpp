@@ -47,6 +47,12 @@ public:
     MouseCard();
     ~MouseCard() override = default;
 
+    // The card raises its interrupt at the start of vertical blank, so it needs
+    // the machine's video timing to know where that is.
+    void setMachine(const MachineProfile &machine) override {
+        machine_ = &machine;
+    }
+
     // Delete copy
     MouseCard(const MouseCard&) = delete;
     MouseCard& operator=(const MouseCard&) = delete;
@@ -120,6 +126,10 @@ public:
     uint8_t getMode() const { return mode_; }
 
 private:
+    // Not owned: profiles are static constexpr objects with program lifetime.
+    const MachineProfile *machine_ = &defaultMachineProfile();
+
+
     // ROM data
     const uint8_t* rom_;
     size_t romSize_;

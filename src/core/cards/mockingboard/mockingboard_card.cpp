@@ -129,13 +129,28 @@ void MockingboardCard::update(int cycles) {
     }
 }
 
+void MockingboardCard::setMachine(const MachineProfile &machine) {
+    double next = machine.timing.cyclesPerSample(AUDIO_SAMPLE_RATE);
+    if (next == baseCyclesPerSample_) return;
+
+    // Rescale the current output rate by the same speed multiplier that is
+    // already in effect, so installing a card mid-session does not silently
+    // drop an 8x boost back to 1x.
+    double multiplier = cyclesPerOutputSample_ / baseCyclesPerSample_;
+    baseCyclesPerSample_ = next;
+    setOutputSampleRate(next * multiplier);
+}
+
 void MockingboardCard::setSpeedMultiplier(int multiplier) {
     if (multiplier < 1) multiplier = 1;
-    double next = CYCLES_PER_SAMPLE * multiplier;
+    setOutputSampleRate(baseCyclesPerSample_ * multiplier);
+}
+
+void MockingboardCard::setOutputSampleRate(double next) {
     if (next == cyclesPerOutputSample_) return;
     cyclesPerOutputSample_ = next;
 
-    // Drop whatever is queued. A speed change means the backlog was measured
+    // Drop whatever is queued. A rate change means the backlog was measured
     // against the old rate, and playing it out first would be heard as a lag
     // spike at the moment of the change.
     sampleAccum_.clear();

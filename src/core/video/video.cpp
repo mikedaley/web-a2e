@@ -11,7 +11,7 @@
 
 namespace a2e {
 
-Video::Video(MMU &mmu) : mmu_(mmu) {
+Video::Video(MMU &mmu) : mmu_(mmu), machine_(&mmu.getMachine()) {
   // Initialize framebuffer to black
   std::memset(framebuffer_.data(), 0, framebuffer_.size());
 }
@@ -322,7 +322,7 @@ void Video::emitLoResScanline(int scanline, int startCol, int endCol,
 
 void Video::emitHiResScanline(int scanline, int startCol, int endCol,
                               const VideoSwitchState &vs) {
-  if (scanline >= 192) return;
+  if (scanline >= machine_->timing.visibleScanlines) return;
 
   for (int col = startCol; col < endCol; col++) {
     uint16_t addr = getHiResAddress(scanline, col);
@@ -391,7 +391,7 @@ void Video::emitDoubleLoResScanline(int scanline, int startCol, int endCol,
 
 void Video::emitDoubleHiResScanline(int scanline, int startCol, int endCol,
                                     const VideoSwitchState &vs) {
-  if (scanline >= 192) return;
+  if (scanline >= machine_->timing.visibleScanlines) return;
 
   uint16_t pageOffset = (vs.page2 && !vs.store80) ? 0x2000 : 0;
 
@@ -428,12 +428,18 @@ void Video::beginScanline() {
 }
 
 bool Video::burstForScanline(int scanline, const VideoSwitchState &vs) const {
-  const bool textLine = vs.text || (vs.mixed && scanline >= 160);
+  // A machine that never inhibits burst — a II+ — sends a reference on every
+  // line, which is why its text fringes green and violet in every mode.
+  if (!machine_->caps.inhibitsBurstInText) return true;
+
+  const bool textLine =
+      vs.text ||
+      (vs.mixed && scanline >= machine_->timing.mixedModeTextScanline);
   return !textLine;
 }
 
 void Video::endScanline(int scanline) {
-  if (scanline < 0 || scanline >= 192) return;
+  if (scanline < 0 || scanline >= machine_->timing.visibleScanlines) return;
 
   uint32_t line[ntsc::VISIBLE_DOTS];
 
@@ -458,8 +464,12 @@ void Video::endScanline(int scanline) {
     break;
   }
 
-  // A scanline occupies two framebuffer rows (192 lines doubled to 384).
-  const size_t row = static_cast<size_t>(scanline) * 2 * SCREEN_WIDTH * 4;
+  // A scanline occupies `lineDoubling` framebuffer rows (192 lines doubled to
+  // 384) and each row is one pixel per emitted dot.
+  const int rowBytes = machine_->display.pixelWidth * 4;
+  const size_t row = static_cast<size_t>(scanline) *
+                     static_cast<size_t>(machine_->display.lineDoubling) *
+                     static_cast<size_t>(rowBytes);
   uint8_t *dst = framebuffer_.data() + row;
   for (int x = 0; x < ntsc::VISIBLE_DOTS; x++) {
     const uint32_t c = line[x];
@@ -469,7 +479,9 @@ void Video::endScanline(int scanline) {
     dst[o + 2] = c & 0xFF;
     dst[o + 3] = (c >> 24) & 0xFF;
   }
-  std::memcpy(dst + SCREEN_WIDTH * 4, dst, SCREEN_WIDTH * 4);
+  for (int copy = 1; copy < machine_->display.lineDoubling; copy++) {
+    std::memcpy(dst + static_cast<size_t>(copy) * rowBytes, dst, rowBytes);
+  }
 }
 
 // ============================================================================
@@ -478,10 +490,12 @@ void Video::endScanline(int scanline) {
 
 void Video::renderScanlineSegment(int scanline, int startCol, int endCol,
                                    const VideoSwitchState &vs) {
-  if (scanline >= 192 || startCol >= endCol) return;
+  if (scanline >= machine_->timing.visibleScanlines || startCol >= endCol)
+    return;
 
-  // Mixed mode: scanlines 160-191 always render as text
-  if (vs.mixed && scanline >= 160 && !vs.text) {
+  // Mixed mode: the last band of scanlines always renders as text
+  if (vs.mixed && scanline >= machine_->timing.mixedModeTextScanline &&
+      !vs.text) {
     if (vs.col80) {
       emitText80Scanline(scanline, startCol, endCol, vs);
     } else {
@@ -516,13 +530,13 @@ void Video::renderScanlineSegment(int scanline, int startCol, int endCol,
 // ============================================================================
 
 void Video::renderScanlineWithChanges(int scanline) {
-  // Apple IIe horizontal timing: each 65-cycle scanline starts with
-  // 25 cycles of horizontal blanking, then 40 cycles of visible display.
-  static constexpr int HBLANK_CYCLES = 25;
+  // Horizontal timing: a scanline starts with its blanking interval, then one
+  // cycle per visible column.
+  const auto &timing = machine_->timing;
 
-  uint32_t scanlineStartCycle = scanline * CYCLES_PER_SCANLINE;
-  uint32_t visibleStartCycle = scanlineStartCycle + HBLANK_CYCLES;
-  uint32_t scanlineEndCycle = scanlineStartCycle + CYCLES_PER_SCANLINE;
+  uint32_t scanlineStartCycle = scanline * timing.cyclesPerScanline;
+  uint32_t visibleStartCycle = scanlineStartCycle + timing.hblankCycles;
+  uint32_t scanlineEndCycle = scanlineStartCycle + timing.cyclesPerScanline;
 
   beginScanline();
 
@@ -544,7 +558,8 @@ void Video::renderScanlineWithChanges(int scanline) {
     burstSeenThisFrame_ = true;
   }
 
-  // Phase 2: Process visible-area changes (cycles 25-64 → columns 0-39)
+  // Phase 2: Process visible-area changes (one cycle per visible column)
+  const int visibleColumns = timing.visibleColumns;
   int col = 0;
   while (changeIdx_ < switchChangeCount_) {
     uint32_t changeCycle = switchChanges_[changeIdx_].cycleOffset;
@@ -553,7 +568,7 @@ void Video::renderScanlineWithChanges(int scanline) {
     }
 
     int changeCol = static_cast<int>(changeCycle - visibleStartCycle);
-    if (changeCol > 40) changeCol = 40;
+    if (changeCol > visibleColumns) changeCol = visibleColumns;
 
     if (changeCol > col) {
       renderScanlineSegment(scanline, col, changeCol, currentRenderState_);
@@ -565,8 +580,8 @@ void Video::renderScanlineWithChanges(int scanline) {
   }
 
   // Render remaining visible columns
-  if (col < 40) {
-    renderScanlineSegment(scanline, col, 40, currentRenderState_);
+  if (col < visibleColumns) {
+    renderScanlineSegment(scanline, col, visibleColumns, currentRenderState_);
   }
 
   endScanline(scanline);
@@ -578,13 +593,15 @@ void Video::renderUpToCycle(uint64_t currentCycle) {
   uint64_t frameCycle = currentCycle - frameStartCycle_;
 
   // Render scanlines whose 65 cycles are fully complete.
-  // frameCycle / CYCLES_PER_SCANLINE gives the number of complete scanlines,
+  // frameCycle / cyclesPerScanline gives the number of complete scanlines,
   // so targetScanline = completedScanlines - 1 is the last fully-elapsed one.
   // This ensures all CPU writes during a scanline are captured before we
   // read video memory for that scanline (critical for raster bar effects).
-  int completedScanlines = static_cast<int>(frameCycle / CYCLES_PER_SCANLINE);
+  int completedScanlines =
+      static_cast<int>(frameCycle / machine_->timing.cyclesPerScanline);
   int targetScanline = completedScanlines - 1;
-  if (targetScanline > 191) targetScanline = 191;
+  const int lastVisible = machine_->timing.visibleScanlines - 1;
+  if (targetScanline > lastVisible) targetScanline = lastVisible;
 
   while (lastRenderedScanline_ < targetScanline) {
     lastRenderedScanline_++;
@@ -619,8 +636,11 @@ void Video::forceRenderFrame() {
 
   // This renders a whole field from one state, so the killer can be settled up
   // front instead of lagging a frame behind as it does during live rendering.
+  const int visibleScanlines = machine_->timing.visibleScanlines;
+  const int visibleColumns = machine_->timing.visibleColumns;
+
   chromaEnabled_ = false;
-  for (int scanline = 0; scanline < 192; scanline++) {
+  for (int scanline = 0; scanline < visibleScanlines; scanline++) {
     if (burstForScanline(scanline, vs)) {
       chromaEnabled_ = true;
       break;
@@ -628,10 +648,10 @@ void Video::forceRenderFrame() {
   }
   burstSeenThisFrame_ = chromaEnabled_;
 
-  for (int scanline = 0; scanline < 192; scanline++) {
+  for (int scanline = 0; scanline < visibleScanlines; scanline++) {
     beginScanline();
     burst_ = burstForScanline(scanline, vs);
-    renderScanlineSegment(scanline, 0, 40, vs);
+    renderScanlineSegment(scanline, 0, visibleColumns, vs);
     endScanline(scanline);
   }
   frameDirty_ = true;

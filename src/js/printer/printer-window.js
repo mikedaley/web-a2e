@@ -12,7 +12,7 @@ import { PRINTER_MODELS, RIBBONS } from "./printer-manager.js";
 import { makeZipStore } from "./zip-store.js";
 import {
   buildScreenDumpImageWriter, buildScreenDumpAppleDMP, buildScreenDumpEpson,
-  buildScreenDumpColor, litDensity, SCREEN_W, SCREEN_H,
+  buildScreenDumpColor, litDensity, screenWidth, screenHeight,
 } from "./screen-dump.js";
 import { printPagesViaIframe } from "./print-utils.js";
 import { savePage } from "./printer-page-store.js";
@@ -2648,7 +2648,7 @@ export class PrinterWindow extends BaseWindow {
         btn.classList.remove("pr-holding");
         // Long-press overrides the auto default with reverse-video polarity in
         // either mode (text default is no-invert, graphics auto-picks by density).
-        this.dumpScreen(null, SCREEN_W, SCREEN_H, { invert: true });
+        this.dumpScreen(null, screenWidth(), screenHeight(), { invert: true });
       }, LONG_MS);
     };
     const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } btn.classList.remove("pr-holding"); };
@@ -2662,7 +2662,7 @@ export class PrinterWindow extends BaseWindow {
     btn.addEventListener("pointercancel", cancel);
   }
 
-  dumpScreen(fb = null, width = SCREEN_W, height = SCREEN_H, opts = {}) {
+  dumpScreen(fb = null, width = screenWidth(), height = screenHeight(), opts = {}) {
     const pixels = fb || window.emulator?._lastFramebuffer;
     if (!pixels) return { success: false, message: "No framebuffer available — is the emulator running?" };
 

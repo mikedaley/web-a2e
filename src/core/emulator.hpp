@@ -12,6 +12,7 @@
 #include "cards/disk2/disk2_card.hpp"
 #include "cards/expansion_card.hpp"
 #include "input/keyboard.hpp"
+#include "machine/machine_profile.hpp"
 #include "cards/mockingboard/mockingboard_card.hpp"
 #include "cards/mouse/mouse_card.hpp"
 #include "cards/smartport/smartport_card.hpp"
@@ -39,8 +40,14 @@ public:
   // BASIC stepping modes
   enum class BasicStepMode { None, Line, Statement };
 
-  Emulator();
+  // Which machine to model. Everything downstream — the CPU fitted, the video
+  // timing, how much RAM answers, which cards the slots take — follows from the
+  // profile this selects.
+  explicit Emulator(MachineId machine = MachineId::AppleIIe);
   ~Emulator();
+
+  // The machine being modelled.
+  const MachineProfile &getMachine() const { return *machine_; }
 
   // Initialization
   void init();
@@ -60,7 +67,9 @@ public:
   bool isFrameReady() const { return frameReady_; }
   void clearFrameReady() { frameReady_ = false; }
   const uint8_t *getFramebuffer() const;
-  size_t getFramebufferSize() const { return FRAMEBUFFER_SIZE; }
+  size_t getFramebufferSize() const {
+    return machine_->display.framebufferSize();
+  }
 
   // Input - raw browser keycodes (preferred)
   int handleRawKeyDown(int browserKeycode, bool shift, bool ctrl, bool alt,
@@ -395,6 +404,10 @@ private:
   void toggleSpeaker();
 
   // Components
+  // Not owned: profiles are static constexpr objects with program lifetime.
+  // Declared first so the subsystems below can be constructed from it.
+  const MachineProfile *machine_ = &defaultMachineProfile();
+
   std::unique_ptr<MMU> mmu_;
   std::unique_ptr<CPU6502> cpu_;
   std::unique_ptr<Video> video_;

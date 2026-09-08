@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "../machine/machine_profile.hpp"
 #include <cstdint>
 #include <cstddef>
 #include <functional>
@@ -104,6 +105,20 @@ public:
      * Reset the card to power-on state
      */
     virtual void reset() = 0;
+
+    /**
+     * Tell the card which machine it has been plugged into.
+     *
+     * Called by the MMU when the card is inserted. Most cards ignore it: a
+     * Disk II does not care what is at the other end of the bus. It exists for
+     * the cards that time themselves against the machine rather than against
+     * their own oscillator — the mouse card raises its interrupt at the start
+     * of vertical blank, and where vertical blank falls is a property of the
+     * machine's video timing, not of the card.
+     *
+     * @param machine Profile of the host machine, valid for the card's lifetime
+     */
+    virtual void setMachine(const MachineProfile &machine) { (void)machine; }
 
     /**
      * Update the card's internal state (call each CPU cycle)

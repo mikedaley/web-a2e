@@ -11,7 +11,8 @@
 
 namespace a2e {
 
-Audio::Audio() {
+Audio::Audio(const MachineProfile &machine)
+    : baseCyclesPerSample_(machine.timing.cyclesPerSample(AUDIO_SAMPLE_RATE)) {
   toggleCycles_.reserve(MAX_TOGGLES);
   reset();
 }
@@ -51,7 +52,7 @@ int Audio::generateStereoSamples(float *buffer, int sampleCount,
   // discard seven eighths of the speaker toggles and replay the remainder at
   // real-time pitch.
   uint64_t expectedCycles =
-      static_cast<uint64_t>(sampleCount * CYCLES_PER_SAMPLE * speedMultiplier_);
+      static_cast<uint64_t>(sampleCount * baseCyclesPerSample_ * speedMultiplier_);
   if (totalCycles == 0 || totalCycles > expectedCycles * 2) {
     totalCycles = expectedCycles;
     startCycle = endCycle - totalCycles;

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "../machine/machine_profile.hpp"
 #include "../types.hpp"
 #include <array>
 #include <cstdint>
@@ -22,7 +23,10 @@ public:
   static constexpr int BUFFER_SIZE = 4096;
   static constexpr int MAX_TOGGLES = 8192;
 
-  Audio();
+  // The profile supplies the CPU clock, which is what turns a sample count
+  // into a span of emulated cycles. A machine with a different clock produces a
+  // different number here and everything downstream follows.
+  explicit Audio(const MachineProfile &machine = defaultMachineProfile());
 
   // Speaker toggle (called when $C030 is accessed)
   void toggleSpeaker(uint64_t cycleCount);
@@ -70,6 +74,10 @@ private:
   // Audio generation state
   uint64_t lastSampleCycle_ = 0;
   int speedMultiplier_ = 1;
+
+  // Cycles of emulated time one output sample represents at 1x, taken from the
+  // machine profile's CPU clock.
+  double baseCyclesPerSample_ = CYCLES_PER_SAMPLE;
 
   // Simple low-pass filter state
   // Alpha ~0.15 gives cutoff ~7.8kHz at 48kHz, preserving speaker harmonics

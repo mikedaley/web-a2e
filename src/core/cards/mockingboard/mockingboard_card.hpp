@@ -38,6 +38,11 @@ public:
     MockingboardCard();
     ~MockingboardCard() override = default;
 
+    // The card's own oscillators are independent of the host, but the rate at
+    // which it must hand samples to the mixer is measured in CPU cycles, so it
+    // follows the machine's clock.
+    void setMachine(const MachineProfile &machine) override;
+
     // Delete copy
     MockingboardCard(const MockingboardCard&) = delete;
     MockingboardCard& operator=(const MockingboardCard&) = delete;
@@ -172,10 +177,15 @@ private:
     float dcStateL_ = 0.0f;
     float dcStateR_ = 0.0f;
 
+    // Change the rate at which frames are emitted, discarding the backlog that
+    // was measured against the old rate.
+    void setOutputSampleRate(double cyclesPerSample);
+
     // Incremental audio generation state
-    // CPU cycles per audio sample at 48kHz: 1,023,000 / 48,000 ≈ 21.3125
-    static constexpr double CYCLES_PER_SAMPLE = 1023000.0 / 48000.0;
-    // CYCLES_PER_SAMPLE scaled by the emulation speed (see setSpeedMultiplier)
+    // CPU cycles per audio sample, from the host machine's clock. On a //e at
+    // 48kHz that is 1,023,000 / 48,000 ≈ 21.3125.
+    double baseCyclesPerSample_ = CYCLES_PER_SAMPLE;
+    // baseCyclesPerSample_ scaled by the emulation speed (see setSpeedMultiplier)
     double cyclesPerOutputSample_ = CYCLES_PER_SAMPLE;
     double cycleAccum_ = 0.0;                   // Fractional CPU cycle accumulator
     std::vector<float> sampleAccum_;             // Accumulated stereo samples (interleaved L/R)

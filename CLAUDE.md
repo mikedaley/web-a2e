@@ -36,8 +36,10 @@ modules under test are pure logic and run in plain node — a new DOM dependency
 in one of them is a smell, not a reason to add jsdom.
 
 Covers the printer emulation (characterization tests capturing the event stream
-from `PrinterBase.setEventSink()`), the Applesoft listing parser, and input
-mapping.
+from `PrinterBase.setEventSink()`), the Applesoft listing parser, input
+mapping, and the host-side machine profile (that a fetch failure leaves callers
+with a usable //e rather than nothing, and that a fetched profile actually
+reaches them).
 
 ### Consistency checks
 
@@ -61,7 +63,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, condition evaluator, and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, condition evaluator, machine profiles (the //e's numbers, the registry, and that the subsystems take their timing from the profile they were handed), and full emulator integration.
 
 ## Architecture
 
@@ -78,6 +80,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `disassembler/` - 65C02 instruction disassembler
 - `assembler/` - Merlin-compatible 65C02 assembler (see Assembler below)
 - `input/keyboard.cpp` - Keyboard input handling
+- `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk2/` - Disk II controller card
 - `cards/mockingboard/` - AY-3-8910 sound chip + VIA 6522 timer + Mockingboard card
@@ -113,6 +116,73 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `config/` - App version
 - `utils/` - Shared utilities (storage, string, BASIC)
 - `windows/` - Base window class and window manager
+
+### Machine Profiles
+
+The emulator models one machine at a time, and which machine it is comes from a
+**profile**: `src/core/machine/machine_profile.hpp` holds a `MachineProfile`
+per machine and a registry of them. Today the registry has exactly one entry,
+`APPLE_IIE_PROFILE`.
+
+**The profile is data, not polymorphism.** The parts of a machine that differ
+between a //e, a II+ and a IIgs are overwhelmingly numbers — a clock rate, a
+scanline count, how much RAM answers, which CPU is fitted, whether the video
+generator inhibits colour burst in text mode. Those live in a struct that the
+subsystems read. They are deliberately not virtual methods: `MMU::read`, the
+video emitters and the CPU dispatch loop are the hottest code in the emulator,
+and an indirect call on a per-cycle or per-dot path would cost real speed to
+serve a machine count of one. Anything a future machine cannot express as data
+— a 65816's 24-bit bus, the IIgs shadowing map, Super Hi-Res — wants its own
+subsystem class chosen once at construction, not a branch taken sixty million
+times a second. The rule is: **a number or a flag goes in the profile; a
+different mechanism goes in a different class that the profile names.**
+
+The profile is threaded by construction, not by lookup. `Emulator(MachineId)`
+selects it and hands it to `MMU` and `Audio`; `Video` takes it *from the MMU*
+rather than as a second argument, because the video scanner and the floating
+bus are the same counters read two ways and a pair that disagreed would be a
+bug with no way to express it. Cards receive it through
+`ExpansionCard::setMachine()`, called by `MMU::insertCard`. Most cards ignore
+it — a Disk II does not care what is at the other end of the bus — but the
+mouse card raises its interrupt at the start of vertical blank, and where
+vertical blank falls belongs to the machine.
+
+**The constants in `types.hpp` did not go away, and that is deliberate.**
+`MAIN_RAM_SIZE`, `FRAMEBUFFER_SIZE` and the rest size `std::array` members at
+compile time, which a runtime profile lookup cannot do. They remain as the
+//e's values, and `machine_profile.hpp` `static_assert`s every one of them
+against the profile, so the two descriptions cannot drift: change one and the
+build fails. Further assertions pin the relationships rather than the numbers —
+a scanline is its blanking plus one cycle per visible column, a visible column
+clocks out 14 dots, the framebuffer is every visible line doubled.
+
+**Save states carry the machine id.** The header is `STATE_VERSION` 8, with the
+id written straight after the version. Everything after that point is laid out
+to the saving machine's shape, so a state restored into a different machine
+would be read as garbage rather than fail; the id is what lets `importState`
+refuse it.
+
+**The host asks rather than assumes.** `src/js/machine/machine-profile.js`
+fetches the whole profile as one JSON string through `_getMachineProfileJSON`
+(one round trip — the Worker services RPCs on the thread that runs the
+emulation) and `main.js` does it immediately after the WASM module is up,
+before anything sizes itself to the picture. The WebGL renderer, the
+text-selection overlay, the screenshot path, the save-state preview, the
+printer's screen dump and the agent's `captureScreenshot` all read
+`machineDisplay()` instead of the 560x384 they each used to hardcode. A fetch
+failure is not fatal: the module falls back to the //e, which is a correct
+description of the only machine that exists.
+
+The one place that still fixes a size is the shared framebuffer slot
+(`FB_WIDTH`/`FB_HEIGHT` in `worker/shared-buffers.js`). A `SharedArrayBuffer`
+cannot be resized once handed to the Worker and the AudioWorklet, so the slot
+is allocated up front and must hold any machine's frame. `setupSharedBuffers()`
+checks the fit and falls back to the `postMessage` transport rather than let a
+frame write past the end of the slot.
+
+Adding a machine is therefore: a new `MachineId` and profile entry, a subsystem
+class for anything that is a different mechanism rather than a different
+number, and its ROMs. Nothing in the host needs to know.
 
 ### Paste / Typed Text
 
@@ -559,6 +629,7 @@ src/
 │   ├── disassembler/   # 65C02 disassembler
 │   ├── assembler/      # Merlin-compatible 65C02 assembler
 │   ├── input/          # Keyboard handling
+│   ├── machine/        # Machine profiles (timing, memory, display, capabilities, slots)
 │   ├── cards/          # Expansion card system
 │   │   ├── disk2/         # Disk II controller card
 │   │   ├── mockingboard/  # AY-3-8910 + VIA 6522 + Mockingboard card
@@ -591,6 +662,7 @@ src/
     ├── file-explorer/  # DOS 3.3 and ProDOS file browser, disassembler
     ├── help/           # Documentation and release notes
     ├── input/          # Keyboard input, text selection, joystick, mouse
+    ├── machine/        # Host-side machine profile fetched from the core
     ├── state/          # Save state manager and persistence
     ├── ui/             # Menu wiring, reminders, slot configuration
     ├── utils/          # Shared utilities (storage, string, BASIC)

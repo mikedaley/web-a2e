@@ -7,14 +7,15 @@
 
 #pragma once
 
+#include "../../types.hpp"
 #include <array>
 #include <cstdint>
 #include <functional>
 
 namespace a2e {
 
-// CPU variant types
-enum class CPUVariant { NMOS_6502, CMOS_65C02 };
+// CPUVariant is defined in types.hpp so a machine profile can name a CPU
+// without including this header.
 
 // Status flag bits
 enum StatusFlag : uint8_t {

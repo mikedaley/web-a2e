@@ -14,6 +14,25 @@
 
 namespace a2e {
 
+// CPU variant types
+//
+// Lives here rather than in cpu6502.hpp so a machine profile can name the CPU a
+// machine is fitted with without dragging in the whole processor header.
+enum class CPUVariant { NMOS_6502, CMOS_65C02 };
+
+// ============================================================================
+// Apple //e machine constants
+//
+// These describe one machine, and the authoritative description of a machine is
+// now MachineProfile (machine/machine_profile.hpp). They survive as constexpr
+// because they size std::array members at compile time, which a runtime profile
+// lookup cannot do. machine_profile.hpp static_asserts every one of them
+// against the //e profile, so the two cannot drift.
+//
+// Prefer the profile in new code. Reach for these only where a compile-time
+// constant is genuinely required.
+// ============================================================================
+
 // Memory size constants
 constexpr size_t MAIN_RAM_SIZE = 64 * 1024; // 64KB main RAM
 constexpr size_t AUX_RAM_SIZE = 64 * 1024;  // 64KB auxiliary RAM

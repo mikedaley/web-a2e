@@ -442,10 +442,12 @@ void MouseCard::update(int cycles) {
 
     uint64_t totalCycles = cycleCallback_();
 
-    // Detect VBL transition (scanline 192, start of vertical blank)
-    uint64_t cycleInFrame = totalCycles % CYCLES_PER_FRAME;
-    int scanline = static_cast<int>(cycleInFrame / CYCLES_PER_SCANLINE);
-    bool inVBL = (scanline >= 192);
+    // Detect VBL transition (first non-visible scanline). Where that falls is
+    // the machine's business, not the card's, so it comes from the profile.
+    const auto &timing = machine_->timing;
+    uint64_t cycleInFrame = totalCycles % timing.cyclesPerFrame();
+    int scanline = static_cast<int>(cycleInFrame / timing.cyclesPerScanline);
+    bool inVBL = (scanline >= timing.visibleScanlines);
 
     // Detect transition into VBL
     if (inVBL && !wasInVBL_) {

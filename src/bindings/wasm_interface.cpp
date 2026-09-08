@@ -114,7 +114,133 @@ uint8_t *getFramebuffer() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-int getFramebufferSize() { return a2e::FRAMEBUFFER_SIZE; }
+int getFramebufferSize() {
+  REQUIRE_EMULATOR_OR(static_cast<int>(a2e::defaultMachineProfile()
+                                           .display.framebufferSize()));
+  return static_cast<int>(g_emulator->getFramebufferSize());
+}
+
+// ============================================================================
+// Machine profile
+//
+// The host used to hardcode 560x384 and a 1.023 MHz clock in a dozen places.
+// It asks the core instead, so a machine with a different picture or a
+// different clock needs no host change at all.
+// ============================================================================
+
+// C++ linkage: this file is one big extern "C" block for the exports, but a
+// helper returning std::string is not a C function.
+extern "C++" {
+namespace {
+
+std::string machineProfileToJSON(const a2e::MachineProfile &m) {
+  auto boolean = [](bool value) { return value ? "true" : "false"; };
+
+  std::string json = "{";
+  json += "\"id\":" + std::to_string(static_cast<int>(m.id));
+  json += ",\"key\":\"" + std::string(m.key) + "\"";
+  json += ",\"name\":\"" + std::string(m.name) + "\"";
+  json += ",\"shortName\":\"" + std::string(m.shortName) + "\"";
+  json += ",\"cpu\":\"" +
+          std::string(m.cpu == a2e::CPUVariant::CMOS_65C02 ? "65C02" : "6502") +
+          "\"";
+
+  json += ",\"timing\":{";
+  json += "\"cpuClockHz\":" + std::to_string(m.timing.cpuClockHz);
+  json += ",\"cyclesPerScanline\":" + std::to_string(m.timing.cyclesPerScanline);
+  json += ",\"hblankCycles\":" + std::to_string(m.timing.hblankCycles);
+  json += ",\"visibleColumns\":" + std::to_string(m.timing.visibleColumns);
+  json += ",\"scanlinesPerFrame\":" + std::to_string(m.timing.scanlinesPerFrame);
+  json += ",\"visibleScanlines\":" + std::to_string(m.timing.visibleScanlines);
+  json += ",\"mixedModeTextScanline\":" +
+          std::to_string(m.timing.mixedModeTextScanline);
+  json += ",\"cyclesPerFrame\":" + std::to_string(m.timing.cyclesPerFrame());
+  json += "}";
+
+  json += ",\"memory\":{";
+  json += "\"mainRamSize\":" + std::to_string(m.memory.mainRamSize);
+  json += ",\"auxRamSize\":" + std::to_string(m.memory.auxRamSize);
+  json += ",\"romSize\":" + std::to_string(m.memory.romSize);
+  json += ",\"charRomSize\":" + std::to_string(m.memory.charRomSize);
+  json += "}";
+
+  json += ",\"display\":{";
+  json += "\"dotsPerLine\":" + std::to_string(m.display.dotsPerLine);
+  json += ",\"width\":" + std::to_string(m.display.pixelWidth);
+  json += ",\"height\":" + std::to_string(m.display.pixelHeight);
+  json += ",\"lineDoubling\":" + std::to_string(m.display.lineDoubling);
+  json += ",\"framebufferSize\":" + std::to_string(m.display.framebufferSize());
+  json += "}";
+
+  json += ",\"caps\":{";
+  json += std::string("\"hasAuxRam\":") + boolean(m.caps.hasAuxRam);
+  json += std::string(",\"has80Column\":") + boolean(m.caps.has80Column);
+  json += std::string(",\"hasDoubleHires\":") + boolean(m.caps.hasDoubleHires);
+  json += std::string(",\"hasLanguageCard\":") + boolean(m.caps.hasLanguageCard);
+  json += std::string(",\"hasAltCharSet\":") + boolean(m.caps.hasAltCharSet);
+  json += std::string(",\"hasOpenAppleKeys\":") + boolean(m.caps.hasOpenAppleKeys);
+  json += std::string(",\"hasIOUDisable\":") + boolean(m.caps.hasIOUDisable);
+  json += std::string(",\"inhibitsBurstInText\":") +
+          boolean(m.caps.inhibitsBurstInText);
+  json += "}";
+
+  json += ",\"slots\":[";
+  for (int slot = 1; slot < a2e::MACHINE_SLOT_COUNT; slot++) {
+    const auto &s = m.slots[slot];
+    if (slot > 1) json += ",";
+    json += "{\"slot\":" + std::to_string(slot);
+    json += ",\"fixedCard\":";
+    json += s.fixedCard ? "\"" + std::string(s.fixedCard) + "\"" : "null";
+    json += ",\"defaultCard\":";
+    json += s.defaultCard ? "\"" + std::string(s.defaultCard) + "\"" : "null";
+    json += "}";
+  }
+  json += "]}";
+  return json;
+}
+
+} // namespace
+} // extern "C++"
+
+EMSCRIPTEN_KEEPALIVE
+int getMachineCount() { return a2e::MACHINE_COUNT; }
+
+EMSCRIPTEN_KEEPALIVE
+const char *getMachineKeyAt(int index) {
+  return a2e::machineProfileAt(index).key;
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char *getMachineKey() {
+  REQUIRE_EMULATOR_OR(a2e::defaultMachineProfile().key);
+  return g_emulator->getMachine().key;
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char *getMachineName() {
+  REQUIRE_EMULATOR_OR(a2e::defaultMachineProfile().name);
+  return g_emulator->getMachine().name;
+}
+
+// Whole profile in one round trip: the host needs most of it at once, and the
+// Worker services RPCs on the thread that runs the emulation.
+EMSCRIPTEN_KEEPALIVE
+const char *getMachineProfileJSON() {
+  static std::string buffer;
+  const auto &m =
+      g_emulator ? g_emulator->getMachine() : a2e::defaultMachineProfile();
+  buffer = machineProfileToJSON(m);
+  return buffer.c_str();
+}
+
+// Describe a machine the emulator is not currently running, so a host can list
+// what it could run before committing to one.
+EMSCRIPTEN_KEEPALIVE
+const char *getMachineProfileJSONAt(int index) {
+  static std::string buffer;
+  buffer = machineProfileToJSON(a2e::machineProfileAt(index));
+  return buffer.c_str();
+}
 
 EMSCRIPTEN_KEEPALIVE
 void forceRenderFrame() {

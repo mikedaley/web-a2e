@@ -86,7 +86,8 @@ const DIM = [0x8c, 0x8c, 0x8c];
 /**
  * Build the powered-off screen.
  *
- * @param {number} width  framebuffer width in pixels (560)
+ * @param {number} width  framebuffer width in pixels; callers pass the
+ *                         machine's, and the //e's size is the default
  * @param {number} height framebuffer height in pixels (384)
  * @returns {Uint8Array} RGBA pixel data, width * height * 4 bytes
  */
