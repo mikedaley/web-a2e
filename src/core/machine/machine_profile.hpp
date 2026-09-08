@@ -39,9 +39,10 @@ namespace a2e {
 // must never be renumbered.
 enum class MachineId : uint8_t {
   AppleIIe = 0,
+  AppleIIPlus = 1,
 };
 
-inline constexpr int MACHINE_COUNT = 1;
+inline constexpr int MACHINE_COUNT = 2;
 
 // ----------------------------------------------------------------------------
 // Timing
@@ -82,6 +83,7 @@ struct MachineMemory {
   size_t mainRamSize;
   size_t auxRamSize;         // 0 when the machine has no auxiliary bank
   size_t romSize;
+  uint16_t romBaseAddress;   // Where the system ROM starts in the address space
   size_t charRomSize;
   size_t lcBankSize;         // Language card $D000 bank, 4KB
   size_t lcHighSize;         // Language card $E000-$FFFF, 8KB
@@ -119,10 +121,12 @@ struct MachineCapabilities {
   bool hasAuxRam;
   bool has80Column;
   bool hasDoubleHires;
-  bool hasLanguageCard;
+  bool hasLanguageCard;       // Built into the machine, rather than a card
   bool hasAltCharSet;
+  bool hasLowercase;          // An unmodified II+ cannot display lower case
   bool hasOpenAppleKeys;      // Open/Closed Apple on $C061/$C062
   bool hasIOUDisable;         // $C07E/$C07F
+  bool hasInternalSlotRom;    // $C100-$CFFF ROM on the motherboard (INTCXROM)
   bool inhibitsBurstInText;   // Video generator kills burst on text lines
 };
 
@@ -133,7 +137,7 @@ struct MachineCapabilities {
 // user cannot change (the //e's built-in 80-column card in slot 3);
 // `defaultCard` is what a fresh machine ships with.
 // ----------------------------------------------------------------------------
-inline constexpr int MACHINE_SLOT_COUNT = 8; // Index by slot number; 0 unused
+inline constexpr int MACHINE_SLOT_COUNT = 8; // Indexed by slot number
 
 struct MachineSlot {
   const char *fixedCard;   // nullptr when the slot is user-configurable
@@ -154,7 +158,17 @@ struct MachineProfile {
   MachineMemory memory;
   MachineDisplay display;
   MachineCapabilities caps;
+
+  // Which slot numbers physically exist. A //e has 1-7 with the language card
+  // on the motherboard; a II+ has 0-7, and slot 0 is where the language card
+  // goes.
+  int firstSlot;
+  int lastSlot;
   std::array<MachineSlot, MACHINE_SLOT_COUNT> slots;
+
+  constexpr bool hasSlot(int slot) const {
+    return slot >= firstSlot && slot <= lastSlot;
+  }
 };
 
 // ============================================================================
@@ -182,8 +196,9 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
     {
         64 * 1024, // mainRamSize
         64 * 1024, // auxRamSize
-        16 * 1024, // romSize
-        8 * 1024,  // charRomSize
+        16 * 1024, // romSize — $C000-$FFFF, including the internal slot ROM
+        0xC000,    // romBaseAddress
+        8 * 1024,  // charRomSize — US and UK sets
         4 * 1024,  // lcBankSize
         8 * 1024,  // lcHighSize
     },
@@ -199,15 +214,19 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
         true,  // hasAuxRam
         true,  // has80Column
         true,  // hasDoubleHires
-        true,  // hasLanguageCard
+        true,  // hasLanguageCard — on the motherboard, not a card
         true,  // hasAltCharSet
+        true,  // hasLowercase
         true,  // hasOpenAppleKeys
         true,  // hasIOUDisable
+        true,  // hasInternalSlotRom
         true,  // inhibitsBurstInText
     },
-    // slots (index 0 unused; slot 3 is the built-in 80-column card)
+    1, // firstSlot
+    7, // lastSlot
+    // slots (slot 3 is the built-in 80-column card)
     {{
-        {nullptr, nullptr},      // 0: not a slot
+        {nullptr, nullptr},      // 0: a //e has no slot 0
         {nullptr, nullptr},      // 1: empty (parallel / SSC available)
         {nullptr, nullptr},      // 2: empty (parallel / SSC available)
         {"80col", "80col"},      // 3: built-in 80-column, fixed
@@ -219,10 +238,96 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
 };
 
 // ============================================================================
+// The Apple II Plus
+//
+// The machine the //e replaced, and the cheapest possible second profile: its
+// video timing is the same circuit, so every number in MachineTiming is
+// identical and the differences fall entirely in what the machine *has*.
+//
+// Four of those differences are the reason this profile is worth having, since
+// each one exercises a different part of the seam:
+//
+//   - An NMOS 6502 rather than a 65C02. The CPU core already models both; the
+//     profile is what selects one.
+//   - No auxiliary bank, no 80-column mode, no double hi-res. Half the //e's
+//     soft switches do not exist.
+//   - 12KB of ROM at $D000 rather than 16KB at $C000, because a II+ has no
+//     internal slot ROM.
+//   - It never inhibits colour burst. This is the interesting one: a //e kills
+//     the burst on text lines and so shows crisp white text, while a II+ sends
+//     a reference on every line and its text fringes green and violet in every
+//     mode. Video::burstForScanline() reads the flag, so this behaviour follows
+//     from the profile alone.
+// ============================================================================
+inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
+    MachineId::AppleIIPlus,
+    "apple2plus",
+    "Apple II Plus",
+    "II+",
+    CPUVariant::NMOS_6502,
+    // timing — the same video circuit, so the same numbers as a //e
+    {
+        1023000.0, // cpuClockHz
+        65,        // cyclesPerScanline
+        25,        // hblankCycles
+        40,        // visibleColumns
+        262,       // scanlinesPerFrame
+        192,       // visibleScanlines
+        160,       // mixedModeTextScanline
+    },
+    // memory
+    {
+        48 * 1024, // mainRamSize — the most the motherboard takes
+        0,         // auxRamSize — there is no auxiliary bank
+        12 * 1024, // romSize — $D000-$FFFF: Applesoft plus the monitor
+        0xD000,    // romBaseAddress
+        2 * 1024,  // charRomSize — upper case and the flashing/inverse sets
+        4 * 1024,  // lcBankSize — for a language card fitted in slot 0
+        8 * 1024,  // lcHighSize
+    },
+    // display — the same 40 columns of 14 dots, the same doubled 192 lines
+    {
+        560, // dotsPerLine
+        560, // pixelWidth
+        384, // pixelHeight
+        2,   // lineDoubling
+    },
+    // caps
+    {
+        false, // hasAuxRam
+        false, // has80Column
+        false, // hasDoubleHires
+        false, // hasLanguageCard — it is a card in slot 0, not built in
+        false, // hasAltCharSet
+        false, // hasLowercase — unmodified, the II+ cannot display it
+        false, // hasOpenAppleKeys — $C061/$C062 are the paddle buttons
+        false, // hasIOUDisable
+        false, // hasInternalSlotRom — nothing answers at $C100-$CFFF
+        false, // inhibitsBurstInText — burst on every line, so text fringes
+    },
+    0, // firstSlot — slot 0 exists, and is where a language card goes
+    7, // lastSlot
+    // slots: nothing is fixed on a II+, and nothing is fitted by default. Even
+    // slot 3, which holds the //e's built-in 80-column card, is an ordinary
+    // slot here.
+    {{
+        {nullptr, nullptr}, // 0: language card
+        {nullptr, nullptr}, // 1
+        {nullptr, nullptr}, // 2
+        {nullptr, nullptr}, // 3
+        {nullptr, nullptr}, // 4
+        {nullptr, nullptr}, // 5
+        {nullptr, "disk2"}, // 6: a II+ without a Disk II is not much use
+        {nullptr, nullptr}, // 7
+    }},
+};
+
+// ============================================================================
 // Registry
 // ============================================================================
+// Ordered by MachineId, which machineProfile() relies on and a test pins.
 inline constexpr std::array<const MachineProfile *, MACHINE_COUNT>
-    MACHINE_PROFILES = {{&APPLE_IIE_PROFILE}};
+    MACHINE_PROFILES = {{&APPLE_IIE_PROFILE, &APPLE_II_PLUS_PROFILE}};
 
 constexpr const MachineProfile &defaultMachineProfile() {
   return APPLE_IIE_PROFILE;
@@ -261,10 +366,75 @@ constexpr const MachineProfile *findMachineProfile(const char *key) {
 }
 
 // ============================================================================
-// The legacy constants in types.hpp size arrays at compile time, so they cannot
-// simply become profile lookups. These assertions are what stop the two
-// descriptions of the //e from drifting apart: change one and the build fails.
+// Validation
+//
+// Two jobs. The first is stopping the //e's profile and the legacy constants in
+// types.hpp from drifting apart, since the latter size arrays at compile time
+// and so cannot simply become profile lookups: change one and the build fails.
+//
+// The second matters more now there is a second machine. Those same arrays are
+// sized for the //e, which makes them the ceiling for *every* profile — a
+// machine claiming more RAM or a bigger picture than the compiled storage would
+// run off the end of it. So every registered profile is checked against the
+// ceiling, and against its own internal consistency, at compile time.
 // ============================================================================
+
+// Every profile must fit the storage the build actually allocates.
+constexpr bool profileFitsCompiledStorage(const MachineProfile &m) {
+  return m.memory.mainRamSize <= MAIN_RAM_SIZE &&
+         m.memory.auxRamSize <= AUX_RAM_SIZE &&
+         m.memory.romSize <= ROM_SIZE &&
+         m.memory.charRomSize <= CHAR_ROM_SIZE &&
+         m.display.framebufferSize() <= FRAMEBUFFER_SIZE;
+}
+
+// ...and must describe a machine that could exist.
+constexpr bool profileIsSelfConsistent(const MachineProfile &m) {
+  // A scanline is its blanking plus one cycle per visible column.
+  if (m.timing.hblankCycles + m.timing.visibleColumns !=
+      m.timing.cyclesPerScanline)
+    return false;
+  // Each visible column clocks out 14 dots of the colour subcarrier stream.
+  if (m.timing.visibleColumns * 14 != m.display.dotsPerLine) return false;
+  // The framebuffer holds every visible scanline, doubled.
+  if (m.timing.visibleScanlines * m.display.lineDoubling !=
+      m.display.pixelHeight)
+    return false;
+  // Mixed mode's text band is the tail of the visible area.
+  if (m.timing.mixedModeTextScanline >= m.timing.visibleScanlines) return false;
+  // A machine with no auxiliary bank must not claim auxiliary RAM, and one
+  // that has the bank must have some.
+  if (m.caps.hasAuxRam != (m.memory.auxRamSize > 0)) return false;
+  // Double hi-res is an 80-column mode; it cannot exist without one.
+  if (m.caps.hasDoubleHires && !m.caps.has80Column) return false;
+  // The ROM has to end at the top of the 16-bit address space.
+  if (m.memory.romBaseAddress + m.memory.romSize != 0x10000) return false;
+  // Slot numbers must be real and in order.
+  if (m.firstSlot < 0 || m.lastSlot >= MACHINE_SLOT_COUNT) return false;
+  if (m.firstSlot > m.lastSlot) return false;
+  // Nothing may be fitted to a slot the machine does not have.
+  for (int slot = 0; slot < MACHINE_SLOT_COUNT; slot++) {
+    if (m.hasSlot(slot)) continue;
+    if (m.slots[slot].fixedCard || m.slots[slot].defaultCard) return false;
+  }
+  return true;
+}
+
+constexpr bool allProfilesValid() {
+  for (int i = 0; i < MACHINE_COUNT; i++) {
+    const auto &m = *MACHINE_PROFILES[i];
+    // The registry is ordered by id, which machineProfile() indexes directly.
+    if (static_cast<int>(m.id) != i) return false;
+    if (!profileFitsCompiledStorage(m)) return false;
+    if (!profileIsSelfConsistent(m)) return false;
+  }
+  return true;
+}
+
+static_assert(allProfilesValid(),
+              "A machine profile is inconsistent or does not fit the compiled "
+              "storage — see profileIsSelfConsistent/profileFitsCompiledStorage");
+
 static_assert(APPLE_IIE_PROFILE.memory.mainRamSize == MAIN_RAM_SIZE);
 static_assert(APPLE_IIE_PROFILE.memory.auxRamSize == AUX_RAM_SIZE);
 static_assert(APPLE_IIE_PROFILE.memory.romSize == ROM_SIZE);
@@ -278,19 +448,7 @@ static_assert(APPLE_IIE_PROFILE.timing.scanlinesPerFrame == SCANLINES_PER_FRAME)
 static_assert(APPLE_IIE_PROFILE.timing.cyclesPerFrame() == CYCLES_PER_FRAME);
 static_assert(APPLE_IIE_PROFILE.timing.cyclesPerSample(AUDIO_SAMPLE_RATE) ==
               CYCLES_PER_SAMPLE);
-// A scanline is its blanking plus one cycle per visible column, by definition.
-static_assert(APPLE_IIE_PROFILE.timing.hblankCycles +
-                  APPLE_IIE_PROFILE.timing.visibleColumns ==
-              APPLE_IIE_PROFILE.timing.cyclesPerScanline);
-// Each visible column clocks out 14 dots of the 14.31818 MHz stream.
-static_assert(APPLE_IIE_PROFILE.timing.visibleColumns * 14 ==
-              APPLE_IIE_PROFILE.display.dotsPerLine);
-// The framebuffer holds every visible scanline, doubled.
-static_assert(APPLE_IIE_PROFILE.timing.visibleScanlines *
-                  APPLE_IIE_PROFILE.display.lineDoubling ==
-              APPLE_IIE_PROFILE.display.pixelHeight);
-// Mixed mode's text band is the tail of the visible area.
-static_assert(APPLE_IIE_PROFILE.timing.mixedModeTextScanline <
-              APPLE_IIE_PROFILE.timing.visibleScanlines);
+// The relationships between these numbers are checked for every machine by
+// profileIsSelfConsistent() above, not just for the //e.
 
 } // namespace a2e

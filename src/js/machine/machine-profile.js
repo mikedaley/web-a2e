@@ -68,6 +68,27 @@ const APPLE_IIE_FALLBACK = Object.freeze({
 
 let current = APPLE_IIE_FALLBACK;
 
+/*
+ * Call a core export that takes a `const char *`.
+ *
+ * A JavaScript string is not a pointer. Handing one straight to a WASM export
+ * passes whatever the number coercion produces, which the core reads as an
+ * address — so the call does not fail, it silently looks up the wrong thing.
+ * That is exactly how an existing machine first reported itself unrunnable and
+ * every switch was refused. The string has to be copied into the core's heap
+ * and the pointer freed afterwards.
+ */
+async function callWithString(wasmModule, fn, text) {
+  const bytes = text.length + 1;
+  const ptr = await wasmModule._malloc(bytes);
+  try {
+    await wasmModule.stringToUTF8(text, ptr, bytes);
+    return await wasmModule[fn](ptr);
+  } finally {
+    wasmModule._free(ptr); // fire-and-forget, as everywhere else
+  }
+}
+
 /** The machine currently being emulated. Never null. */
 export function getMachineProfile() {
   return current;
@@ -109,19 +130,62 @@ export async function loadMachineProfile(wasmModule) {
   return current;
 }
 
-/** Every machine the core can run, for a host that wants to offer a choice. */
+/**
+ * Every machine the core knows about, for a host that wants to offer a choice.
+ *
+ * Each entry carries a `runnable` flag. A machine can be fully described and
+ * still have no ROM to run: the II+ ROM set is optional at build time, and
+ * without it the machine is real in every respect except that it would never
+ * reach a prompt. A chooser that ignored this would offer a blank screen.
+ */
 export async function listMachineProfiles(wasmModule) {
   try {
     const count = await wasmModule._getMachineCount();
     const profiles = [];
     for (let i = 0; i < count; i++) {
       const json = await wasmModule.callString("_getMachineProfileJSONAt", i);
-      if (json) profiles.push(JSON.parse(json));
+      if (!json) continue;
+      const profile = JSON.parse(json);
+      profile.runnable = !!(await callWithString(
+        wasmModule, "_isMachineRunnable", profile.key));
+      profiles.push(profile);
     }
     return profiles;
   } catch (err) {
     console.warn("Could not list machine profiles:", err);
     return [current];
+  }
+}
+
+/**
+ * Switch the core to a different machine.
+ *
+ * There is no way to convert a running machine into another one — the RAM, the
+ * cards and the save state are all shaped to the machine that made them — so
+ * the core destroys the emulator and builds the new one from scratch. Inserted
+ * media and host state do not survive, exactly as they would not across a page
+ * reload, so the caller is responsible for putting them back.
+ *
+ * Returns the new profile, or null if the key names no machine or the core
+ * refused.
+ */
+export async function switchMachine(wasmModule, key) {
+  try {
+    const ok = await callWithString(wasmModule, "_setMachine", key);
+    if (!ok) return null;
+    return await loadMachineProfile(wasmModule);
+  } catch (err) {
+    console.warn(`Could not switch to machine "${key}":`, err);
+    return null;
+  }
+}
+
+/** Whether the running machine has the ROM it needs to start. */
+export async function hasSystemRom(wasmModule) {
+  try {
+    return !!(await wasmModule._hasSystemROM());
+  } catch {
+    return false;
   }
 }
 

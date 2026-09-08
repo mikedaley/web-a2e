@@ -41,6 +41,11 @@ public:
   // The machine this MMU is modelling.
   const MachineProfile &getMachine() const { return *machine_; }
 
+  // Base of the address window systemROM_ covers. Every ROM read indexes the
+  // array as `address - ROM_WINDOW_BASE`, and loadROM() places a machine's
+  // image at the offset its own ROM base implies.
+  static constexpr uint16_t ROM_WINDOW_BASE = 0xC000;
+
   // Memory access
   uint8_t read(uint16_t address);
   void write(uint16_t address, uint8_t value);

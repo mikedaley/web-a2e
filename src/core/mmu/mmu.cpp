@@ -76,8 +76,11 @@ void MMU::warmReset() {
 // ===== Expansion Slot Management =====
 
 std::unique_ptr<ExpansionCard> MMU::insertCard(uint8_t slot, std::unique_ptr<ExpansionCard> card) {
-  if (slot < 1 || slot > 7) {
-    return card; // Invalid slot, return card unchanged
+  // Which slots exist is the machine's business, so the profile decides. The
+  // hard 1-7 bound stays because slots_ is indexed slot-1 and has no room for
+  // a slot 0; a II+ language card in slot 0 needs that array widened first.
+  if (slot < 1 || slot > 7 || !machine_->hasSlot(slot)) {
+    return card; // No such slot on this machine, return the card unchanged
   }
 
   std::unique_ptr<ExpansionCard> previous = std::move(slots_[slot - 1]);
@@ -157,8 +160,16 @@ void MMU::decayTracking(uint8_t amount) {
 void MMU::loadROM(const uint8_t *systemRom, size_t systemSize,
                   const uint8_t *charRom, size_t charSize) {
   if (systemRom && systemSize > 0) {
-    std::memcpy(systemROM_.data(), systemRom,
-                std::min(systemSize, systemROM_.size()));
+    // systemROM_ is a window over $C000-$FFFF and every read indexes it as
+    // `address - ROM_WINDOW_BASE`. A machine whose ROM starts higher — a II+
+    // has 12KB at $D000, with nothing on the motherboard answering below it —
+    // is placed at the matching offset, so the read path needs no knowledge of
+    // where a given machine's ROM begins.
+    const size_t offset = machine_->memory.romBaseAddress - ROM_WINDOW_BASE;
+    if (offset < systemROM_.size()) {
+      std::memcpy(systemROM_.data() + offset, systemRom,
+                  std::min(systemSize, systemROM_.size() - offset));
+    }
   }
   if (charRom && charSize > 0) {
     std::memcpy(charROM_.data(), charRom, std::min(charSize, charROM_.size()));
@@ -1148,6 +1159,16 @@ uint8_t MMU::handleLanguageCardSwitch(uint8_t reg) {
 
 void MMU::writeSoftSwitch(uint16_t address, uint8_t value) {
   uint8_t reg = address & 0xFF;
+
+  // $C000-$C00F are the //e's memory and display management switches: 80STORE,
+  // RAMRD/RAMWRT, INTCXROM, ALTZP, SLOTC3ROM, 80COL and ALTCHARSET. A machine
+  // without an auxiliary bank has none of them — on a II+ that address range
+  // is keyboard territory and a write there manages no memory at all. Ignoring
+  // the group wholesale is what stops software probing for a //e from
+  // convincing this MMU it has hardware the machine does not have.
+  if (reg <= 0x0F && !machine_->caps.hasAuxRam) {
+    return;
+  }
 
   switch (reg) {
   // Keyboard strobe

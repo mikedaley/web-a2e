@@ -59,6 +59,36 @@ elif [ -f "$ROM_DIR/342-0135-A-CD.bin" ] && [ -f "$ROM_DIR/342-0134-A-EF.bin" ];
 fi
 
 generate_array "$ROM_DIR/342-0273-A-US-UK.bin" "ROM_CHAR"
+
+# Apple II Plus. These are optional: when the files are absent the arrays are
+# emitted empty with size 0, the II+ profile reports no ROM, and the machine is
+# offered but cannot be started. The //e is unaffected either way.
+#
+# A II+ motherboard carries six 2KB ROMs in sockets D0 to F8, covering
+# $D000-$FFFF: five of Applesoft and the Autostart monitor at $F800. They are
+# concatenated in address order into one 12KB image. A single pre-combined
+# apple2plus.rom is accepted instead.
+II_PLUS_PARTS=(341-0011.bin 341-0012.bin 341-0013.bin \
+               341-0014.bin 341-0015.bin 341-0020.bin)
+
+have_all_parts=1
+for part in "${II_PLUS_PARTS[@]}"; do
+    [ -f "$ROM_DIR/$part" ] || have_all_parts=0
+done
+
+if [ "$have_all_parts" = "1" ]; then
+    combined="$ROM_DIR/.iiplus-combined.tmp"
+    : > "$combined"
+    for part in "${II_PLUS_PARTS[@]}"; do
+        cat "$ROM_DIR/$part" >> "$combined"
+    done
+    generate_array "$combined" "ROM_SYSTEM_II_PLUS"
+    rm -f "$combined"
+else
+    generate_array "$ROM_DIR/apple2plus.rom" "ROM_SYSTEM_II_PLUS"
+fi
+
+generate_array "$ROM_DIR/341-0036.bin" "ROM_CHAR_II_PLUS"
 generate_array "$ROM_DIR/341-0027.bin" "ROM_DISK2"
 generate_array "$ROM_DIR/Thunderclock Plus ROM.bin" "ROM_THUNDERCLOCK"
 generate_array "$ROM_DIR/Apple Mouse Interface Card ROM - 342-0270-C.bin" "ROM_MOUSE"

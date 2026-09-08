@@ -87,10 +87,48 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
 
 Emulator::~Emulator() = default;
 
+namespace {
+
+// The system ROM built in for a machine, or an empty span when there is none.
+struct SystemRoms {
+  const uint8_t *system;
+  size_t systemSize;
+  const uint8_t *chars;
+  size_t charSize;
+};
+
+SystemRoms romsFor(MachineId machine) {
+  if (machine == MachineId::AppleIIPlus) {
+    return {roms::ROM_SYSTEM_II_PLUS, roms::ROM_SYSTEM_II_PLUS_SIZE,
+            roms::ROM_CHAR_II_PLUS, roms::ROM_CHAR_II_PLUS_SIZE};
+  }
+  return {roms::ROM_SYSTEM, roms::ROM_SYSTEM_SIZE, roms::ROM_CHAR,
+          roms::ROM_CHAR_SIZE};
+}
+
+} // namespace
+
+bool Emulator::isMachineRunnable(MachineId machine) {
+  // A machine's ROM has to actually fill the space its profile claims. A short
+  // image would leave the reset vector reading whatever the array was
+  // initialised to, which looks like a running machine that immediately goes
+  // nowhere.
+  return romsFor(machine).systemSize >= machineProfile(machine).memory.romSize;
+}
+
 void Emulator::init() {
-  // Load system and character ROMs into MMU
-  mmu_->loadROM(roms::ROM_SYSTEM, roms::ROM_SYSTEM_SIZE,
-                roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  // Each machine has its own system and character ROMs. The II+ set is
+  // optional at build time (see scripts/generate_roms.sh): when its files are
+  // absent the arrays are empty, and rather than leave the machine silently
+  // running a //e's ROM — or nothing — we record that it has none. The host
+  // asks through hasSystemROM() and can say so instead of presenting a machine
+  // that will never reach a prompt.
+  const SystemRoms rom = romsFor(machine_->id);
+  systemRomLoaded_ = isMachineRunnable(machine_->id);
+
+  if (systemRomLoaded_) {
+    mmu_->loadROM(rom.system, rom.systemSize, rom.chars, rom.charSize);
+  }
 
   // Load Disk II ROM into the card
   disk_->loadROM(roms::ROM_DISK2, roms::ROM_DISK2_SIZE);

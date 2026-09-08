@@ -38,8 +38,9 @@ in one of them is a smell, not a reason to add jsdom.
 Covers the printer emulation (characterization tests capturing the event stream
 from `PrinterBase.setEventSink()`), the Applesoft listing parser, input
 mapping, and the host-side machine profile (that a fetch failure leaves callers
-with a usable //e rather than nothing, and that a fetched profile actually
-reaches them).
+with a usable //e rather than nothing, that a fetched profile actually reaches
+them, and that a machine key is marshalled into the core's heap as a pointer
+rather than passed as a JavaScript string).
 
 ### Consistency checks
 
@@ -63,7 +64,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, condition evaluator, machine profiles (the //e's numbers, the registry, and that the subsystems take their timing from the profile they were handed), and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, and that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode), and full emulator integration.
 
 ## Architecture
 
@@ -121,8 +122,8 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 
 The emulator models one machine at a time, and which machine it is comes from a
 **profile**: `src/core/machine/machine_profile.hpp` holds a `MachineProfile`
-per machine and a registry of them. Today the registry has exactly one entry,
-`APPLE_IIE_PROFILE`.
+per machine and a registry of them. There are two, `APPLE_IIE_PROFILE` and
+`APPLE_II_PLUS_PROFILE`.
 
 **The profile is data, not polymorphism.** The parts of a machine that differ
 between a //e, a II+ and a IIgs are overwhelmingly numbers — a clock rate, a
@@ -156,6 +157,17 @@ build fails. Further assertions pin the relationships rather than the numbers �
 a scanline is its blanking plus one cycle per visible column, a visible column
 clocks out 14 dots, the framebuffer is every visible line doubled.
 
+**Every profile is validated at compile time.** `profileIsSelfConsistent()`
+checks that a profile describes a machine that could exist — a scanline is its
+blanking plus one cycle per visible column, a column clocks out 14 dots, the
+framebuffer is every visible line doubled, a machine with no auxiliary bank
+does not claim auxiliary RAM, double hi-res does not exist without 80 columns,
+the ROM reaches the top of the address space, and nothing is fitted to a slot
+the machine does not have. `profileFitsCompiledStorage()` checks it against the
+arrays the build actually allocates, which are sized for the //e and are
+therefore the ceiling for every machine. `allProfilesValid()` runs both over
+the registry in a `static_assert`, so a broken profile does not compile.
+
 **Save states carry the machine id.** The header is `STATE_VERSION` 8, with the
 id written straight after the version. Everything after that point is laid out
 to the saving machine's shape, so a state restored into a different machine
@@ -180,9 +192,62 @@ is allocated up front and must hold any machine's frame. `setupSharedBuffers()`
 checks the fit and falls back to the `postMessage` transport rather than let a
 frame write past the end of the slot.
 
-Adding a machine is therefore: a new `MachineId` and profile entry, a subsystem
-class for anything that is a different mechanism rather than a different
-number, and its ROMs. Nothing in the host needs to know.
+#### The Apple II Plus
+
+The second profile, and the one that proves the seam carries. Its video timing
+is the same circuit, so every number in `MachineTiming` is identical to the
+//e's and the differences fall entirely in what the machine *has*. Four of them
+matter, because each exercises a different part of the mechanism:
+
+- **An NMOS 6502 rather than a 65C02.** The CPU core already modelled both
+  variants; the profile is what selects one.
+- **No auxiliary bank.** `$C000-$C00F` are the //e's memory and display
+  management switches — 80STORE, RAMRD/RAMWRT, INTCXROM, ALTZP, SLOTC3ROM,
+  80COL, ALTCHARSET — and on a II+ that range manages no memory at all.
+  `writeSoftSwitch` ignores the whole group when the machine has no auxiliary
+  bank, and **that single guard is what makes every 80-column and
+  double-resolution path unreachable**: `Video` selects those modes from the
+  80COL switch, which can now never be set. No second guard in the video code
+  is needed or wanted.
+- **12KB of ROM at `$D000` rather than 16KB at `$C000`,** since nothing on a
+  II+ motherboard answers at `$C100-$CFFF`. `MMU::loadROM` places a machine's
+  image at the offset its `romBaseAddress` implies within the `$C000-$FFFF`
+  window, so the read path — which indexes `address - ROM_WINDOW_BASE` — needs
+  no knowledge of where a given machine's ROM begins.
+- **It never inhibits colour burst.** A //e kills the burst on text lines and
+  so shows crisp white text; a II+ sends a reference on every line and its text
+  fringes green and violet in every mode. `Video::burstForScanline()` reads
+  `caps.inhibitsBurstInText`, so this follows from the profile alone.
+
+**The II+ ROMs are optional and are not in the repository.** A II+ motherboard
+carries six 2KB ROMs in sockets D0 to F8 covering `$D000-$FFFF`: five of
+Applesoft and the Autostart monitor at `$F800`. `scripts/generate_roms.sh`
+concatenates them in address order, or accepts a single pre-combined
+`apple2plus.rom`, and emits empty arrays when they are absent. **A machine can
+therefore be fully described and still be unable to start.** `Emulator::init()`
+records this in `hasSystemROM()` rather than silently running a //e's ROM or
+none at all, `Emulator::isMachineRunnable()` answers the same question about a
+machine that is not running, and the host's `listMachineProfiles()` puts a
+`runnable` flag on every entry so a chooser does not offer a machine that will
+never reach a prompt.
+
+**Switching machines rebuilds the emulator.** There is no way to convert a
+running machine into a different one — the RAM, the cards and the save state
+are all shaped to the machine that made them — so `_setMachine` destroys the
+global emulator and constructs the new one. Inserted media and host state do
+not survive, exactly as they would not across a page reload, and the caller is
+responsible for putting them back.
+
+One thing the II+ still needs beyond ROMs: **slot 0**. The profile says it
+exists (`firstSlot` is 0, and slot 0 is where a language card goes), but
+`MMU::insertCard` still rejects it because `slots_` is indexed `slot - 1` and
+has no room. Widening that array is the remaining work.
+
+#### Adding a machine
+
+A new `MachineId` and profile entry, a subsystem class for anything that is a
+different mechanism rather than a different number, and its ROMs. Nothing in
+the host needs to know.
 
 ### Paste / Typed Text
 
@@ -614,6 +679,16 @@ Single global `Emulator` instance in C++ (`wasm_interface.cpp`). WASM runs insid
 - `Thunderclock Plus ROM.bin` (2KB Thunderclock card ROM)
 - `Apple Mouse Interface Card ROM - 342-0270-C.bin` (2KB Mouse Interface Card ROM)
 - `Apple Parallel Interface Card ROM - 341-0057.bin` (512 bytes; upper half is 341-0005 "Parallel Printer" firmware)
+
+**Apple II Plus ROMs are optional.** Without them the II+ profile still exists
+and is listed, but reports itself unrunnable (see Machine Profiles). Supply
+either the six motherboard ROMs or one pre-combined 12KB image:
+
+- `341-0011.bin`, `341-0012.bin`, `341-0013.bin`, `341-0014.bin`,
+  `341-0015.bin` (Applesoft, `$D000-$F7FF`) and `341-0020.bin` (Autostart
+  monitor, `$F800-$FFFF`)
+- or `apple2plus.rom` (12KB, `$D000-$FFFF`)
+- `341-0036.bin` (2KB II+ character generator)
 
 ## Code Organization
 

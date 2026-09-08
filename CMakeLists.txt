@@ -69,6 +69,20 @@ set(ROM_FILES
     "roms/Apple Parallel Interface Card ROM - 341-0057.bin" # Parallel Interface Card PROM (341-0005/341-0019)
 )
 
+# Apple II Plus ROMs are optional — the generator emits empty arrays when they
+# are missing, and the II+ profile then reports having no ROM. Listed separately
+# so a missing file is not a broken dependency for the //e build.
+set(ROM_FILES_OPTIONAL
+    roms/341-0011.bin   # Applesoft $D000-$D7FF
+    roms/341-0012.bin   # Applesoft $D800-$DFFF
+    roms/341-0013.bin   # Applesoft $E000-$E7FF
+    roms/341-0014.bin   # Applesoft $E800-$EFFF
+    roms/341-0015.bin   # Applesoft $F000-$F7FF
+    roms/341-0020.bin   # Autostart monitor $F800-$FFFF
+    roms/apple2plus.rom # ...or one combined 12KB image instead of the six
+    roms/341-0036.bin   # II+ character generator
+)
+
 # Custom command to generate ROM header
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/generated/roms.cpp
@@ -116,6 +130,9 @@ if(EMSCRIPTEN)
                 \"_getMachineName\", \
                 \"_getMachineProfileJSON\", \
                 \"_getMachineProfileJSONAt\", \
+                \"_hasSystemROM\", \
+                \"_isMachineRunnable\", \
+                \"_setMachine\", \
                 \"_forceRenderFrame\", \
                 \"_isFrameReady\", \
                 \"_keyDown\", \
@@ -676,18 +693,13 @@ else()
         src/core/cards/thunderclock/thunderclock_card.cpp
     )
 
-    # Machine profile (profile header + the subsystems that read it)
+    # Machine profile. Links the whole core: the point of these tests is that a
+    # profile reaches the subsystems that read it, including the Emulator that
+    # selects the CPU and the ROMs.
     add_catch2_test(test_machine_profile
         tests/unit/test_machine_profile.cpp
-        src/core/mmu/mmu.cpp
-        src/core/noslot_clock.cpp
-        src/core/video/video.cpp
-        src/core/video/ntsc.cpp
-        src/core/audio/audio.cpp
-        src/core/cards/mockingboard/mockingboard_card.cpp
-        src/core/cards/mockingboard/via6522.cpp
-        src/core/cards/mockingboard/ay8910.cpp
-        src/core/debug/debug_log.cpp
+        ${CORE_TEST_SOURCES}
+        ${TEST_COMMON_SOURCES}
     )
 
     # NTSC composite decoding (standalone — no MMU needed)

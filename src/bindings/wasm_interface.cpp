@@ -26,6 +26,10 @@
 // Global emulator instance
 static a2e::Emulator *g_emulator = nullptr;
 
+// Which machine init() will build. Changing it takes effect on the next
+// construction, which is what setMachine() forces.
+static a2e::MachineId g_machineId = a2e::MachineId::AppleIIe;
+
 // Helper macros to reduce repetitive null checks
 #define REQUIRE_EMULATOR() do { if (!g_emulator) return; } while(0)
 #define REQUIRE_EMULATOR_OR(default_val) do { if (!g_emulator) return (default_val); } while(0)
@@ -46,7 +50,7 @@ void init() {
       EM_ASM({ console.log(UTF8ToString($0)); }, message);
     });
 
-    g_emulator = new a2e::Emulator();
+    g_emulator = new a2e::Emulator(g_machineId);
     g_emulator->init();
     // Install the parallel (Centronics) printer tx callback at construction so
     // EVERY ParallelCard created later (when the saved slot config is applied)
@@ -240,6 +244,47 @@ const char *getMachineProfileJSONAt(int index) {
   static std::string buffer;
   buffer = machineProfileToJSON(a2e::machineProfileAt(index));
   return buffer.c_str();
+}
+
+// Whether the running machine's system ROM was built into this binary. A
+// machine can be fully described and still have no ROM to run — the II+ set is
+// optional at build time — and a host that cannot tell the difference would
+// present a machine that never reaches a prompt.
+EMSCRIPTEN_KEEPALIVE
+bool hasSystemROM() {
+  REQUIRE_EMULATOR_OR(false);
+  return g_emulator->hasSystemROM();
+}
+
+// Whether a machine could actually be started, without switching to it.
+EMSCRIPTEN_KEEPALIVE
+bool isMachineRunnable(const char *key) {
+  const auto *profile = a2e::findMachineProfile(key);
+  if (!profile) return false;
+  return a2e::Emulator::isMachineRunnable(profile->id);
+}
+
+// Switch machines. There is no way to convert a running machine into a
+// different one — the RAM, the cards and the save state are all shaped to the
+// machine that made them — so this destroys the emulator and builds the new
+// one from scratch. Inserted media and host state do not survive; the caller
+// is expected to reload them, exactly as it does after a page reload.
+//
+// Returns false and changes nothing if the key names no machine.
+EMSCRIPTEN_KEEPALIVE
+bool setMachine(const char *key) {
+  const auto *profile = a2e::findMachineProfile(key);
+  if (!profile) return false;
+
+  if (g_emulator && profile->id == g_emulator->getMachine().id) {
+    return true; // Already this machine
+  }
+
+  g_machineId = profile->id;
+  delete g_emulator;
+  g_emulator = nullptr;
+  init();
+  return g_emulator != nullptr;
 }
 
 EMSCRIPTEN_KEEPALIVE

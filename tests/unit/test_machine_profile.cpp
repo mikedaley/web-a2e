@@ -12,6 +12,7 @@
 #include "catch.hpp"
 
 #include "audio/audio.hpp"
+#include "emulator.hpp"
 #include "machine/machine_profile.hpp"
 #include "mmu/mmu.hpp"
 #include "video/video.hpp"
@@ -86,8 +87,84 @@ TEST_CASE("The //e profile describes an Apple //e", "[machine]") {
     }
 }
 
+TEST_CASE("The II+ profile describes an Apple II Plus", "[machine]") {
+    const auto &m = machineProfile(MachineId::AppleIIPlus);
+
+    SECTION("identity") {
+        REQUIRE(std::string(m.key) == "apple2plus");
+        // The II+ predates the 65C02. The CPU core models both variants and
+        // the profile is what selects one.
+        REQUIRE(m.cpu == CPUVariant::NMOS_6502);
+    }
+
+    SECTION("the video timing is the same circuit as a //e") {
+        const auto &iie = machineProfile(MachineId::AppleIIe);
+        REQUIRE(m.timing.cpuClockHz == iie.timing.cpuClockHz);
+        REQUIRE(m.timing.cyclesPerScanline == iie.timing.cyclesPerScanline);
+        REQUIRE(m.timing.scanlinesPerFrame == iie.timing.scanlinesPerFrame);
+        REQUIRE(m.timing.visibleScanlines == iie.timing.visibleScanlines);
+        REQUIRE(m.display.pixelWidth == iie.display.pixelWidth);
+        REQUIRE(m.display.pixelHeight == iie.display.pixelHeight);
+    }
+
+    SECTION("it has no auxiliary bank and none of what depends on one") {
+        REQUIRE(m.memory.auxRamSize == 0);
+        REQUIRE_FALSE(m.caps.hasAuxRam);
+        REQUIRE_FALSE(m.caps.has80Column);
+        REQUIRE_FALSE(m.caps.hasDoubleHires);
+        REQUIRE_FALSE(m.caps.hasAltCharSet);
+        REQUIRE_FALSE(m.caps.hasLowercase);
+    }
+
+    SECTION("48KB on the motherboard, and 12KB of ROM starting at $D000") {
+        REQUIRE(m.memory.mainRamSize == 48 * 1024);
+        REQUIRE(m.memory.romSize == 12 * 1024);
+        REQUIRE(m.memory.romBaseAddress == 0xD000);
+        // Nothing on the motherboard answers at $C100-$CFFF.
+        REQUIRE_FALSE(m.caps.hasInternalSlotRom);
+    }
+
+    SECTION("it never inhibits colour burst") {
+        // This is the whole difference between a //e's crisp white text and a
+        // II+ fringing green and violet in every mode.
+        REQUIRE_FALSE(m.caps.inhibitsBurstInText);
+        REQUIRE(machineProfile(MachineId::AppleIIe).caps.inhibitsBurstInText);
+    }
+
+    SECTION("slot 0 exists and the language card is not built in") {
+        REQUIRE(m.firstSlot == 0);
+        REQUIRE(m.hasSlot(0));
+        REQUIRE_FALSE(machineProfile(MachineId::AppleIIe).hasSlot(0));
+        REQUIRE_FALSE(m.caps.hasLanguageCard);
+    }
+
+    SECTION("nothing is fixed in a slot the way the //e's 80-column card is") {
+        for (int slot = 0; slot < MACHINE_SLOT_COUNT; slot++) {
+            REQUIRE(m.slots[slot].fixedCard == nullptr);
+        }
+    }
+}
+
+TEST_CASE("Every registered profile is internally consistent", "[machine]") {
+    // profileIsSelfConsistent and profileFitsCompiledStorage run as
+    // static_asserts at build time, so a broken profile cannot compile. This
+    // repeats them at runtime so a failure names the machine that broke.
+    for (int i = 0; i < MACHINE_COUNT; i++) {
+        const auto &m = machineProfileAt(i);
+        INFO("machine: " << m.key);
+        REQUIRE(profileIsSelfConsistent(m));
+        REQUIRE(profileFitsCompiledStorage(m));
+    }
+}
+
 TEST_CASE("The registry finds machines by key", "[machine]") {
     REQUIRE(findMachineProfile("apple2e") == &APPLE_IIE_PROFILE);
+    REQUIRE(findMachineProfile("apple2plus") == &APPLE_II_PLUS_PROFILE);
+
+    SECTION("keys are distinct") {
+        REQUIRE(std::string(APPLE_IIE_PROFILE.key) !=
+                std::string(APPLE_II_PLUS_PROFILE.key));
+    }
 
     SECTION("an unknown key is reported as unknown, not silently a //e") {
         REQUIRE(findMachineProfile("apple2gs") == nullptr);
@@ -168,6 +245,94 @@ TEST_CASE("Audio measures a sample against the machine's clock", "[machine]") {
     audio.reset();
     const auto span = static_cast<uint64_t>(256 * m.timing.cyclesPerSample(48000));
     REQUIRE(audio.generateStereoSamples(buffer, 256, span) == 256);
+}
+
+TEST_CASE("A machine without an auxiliary bank ignores the //e's switches",
+          "[machine]") {
+    // $C000-$C00F are the //e's memory and display management switches. On a
+    // II+ that range manages no memory at all, and this is the single guard
+    // that makes every 80-column and double-resolution path unreachable —
+    // Video selects those modes from the 80COL switch, which can never be set.
+    MMU iiPlus(machineProfile(MachineId::AppleIIPlus));
+
+    iiPlus.write(0xC00D, 0); // 80COL on
+    iiPlus.write(0xC001, 0); // 80STORE on
+    iiPlus.write(0xC003, 0); // RAMRD on
+    iiPlus.write(0xC005, 0); // RAMWRT on
+    iiPlus.write(0xC009, 0); // ALTZP on
+    iiPlus.write(0xC00F, 0); // ALTCHARSET on
+
+    const auto &sw = iiPlus.getSoftSwitches();
+    REQUIRE_FALSE(sw.col80);
+    REQUIRE_FALSE(sw.store80);
+    REQUIRE_FALSE(sw.ramrd);
+    REQUIRE_FALSE(sw.ramwrt);
+    REQUIRE_FALSE(sw.altzp);
+    REQUIRE_FALSE(sw.altCharSet);
+
+    SECTION("while a //e honours every one of them") {
+        MMU iie(machineProfile(MachineId::AppleIIe));
+        iie.write(0xC00D, 0);
+        iie.write(0xC001, 0);
+        iie.write(0xC003, 0);
+        REQUIRE(iie.getSoftSwitches().col80);
+        REQUIRE(iie.getSoftSwitches().store80);
+        REQUIRE(iie.getSoftSwitches().ramrd);
+    }
+
+    SECTION("the keyboard strobe still works, since it is not one of them") {
+        // $C010 sits just past the guarded range and belongs to every machine.
+        bool cleared = false;
+        iiPlus.setKeyStrobeCallback([&cleared]() { cleared = true; });
+        iiPlus.write(0xC010, 0);
+        REQUIRE(cleared);
+    }
+}
+
+TEST_CASE("Colour burst follows the machine, not the video mode", "[machine]") {
+    // A //e kills the burst on text lines, so an all-text screen is crisp
+    // white. A II+ sends a reference on every line whatever the mode, which is
+    // why its text fringes green and violet. Video reads the flag, so the
+    // behaviour follows from the profile alone.
+    struct Fixture {
+        MMU mmu;
+        Video video;
+        explicit Fixture(const MachineProfile &m) : mmu(m), video(mmu) {
+            mmu.loadROM(roms::ROM_SYSTEM, roms::ROM_SYSTEM_SIZE,
+                        roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+        }
+    };
+
+    Fixture iie(machineProfile(MachineId::AppleIIe));
+    Fixture iiPlus(machineProfile(MachineId::AppleIIPlus));
+
+    // Full text mode: every visible line is a text line.
+    iie.mmu.write(0xC051, 0);
+    iiPlus.mmu.write(0xC051, 0);
+
+    iie.video.forceRenderFrame();
+    iiPlus.video.forceRenderFrame();
+
+    REQUIRE_FALSE(iie.video.isChromaEnabled());
+    REQUIRE(iiPlus.video.isChromaEnabled());
+}
+
+TEST_CASE("A machine cannot be started without its ROM", "[machine]") {
+    // The //e's ROM is built in unconditionally. The II+ set is optional, so
+    // this asserts the relationship rather than a fixed answer: whether the
+    // machine is runnable must match whether its ROM is actually present.
+    REQUIRE(Emulator::isMachineRunnable(MachineId::AppleIIe));
+
+    Emulator iie(MachineId::AppleIIe);
+    iie.init();
+    REQUIRE(iie.hasSystemROM());
+    REQUIRE(iie.getMachine().id == MachineId::AppleIIe);
+
+    Emulator iiPlus(MachineId::AppleIIPlus);
+    iiPlus.init();
+    REQUIRE(iiPlus.getMachine().id == MachineId::AppleIIPlus);
+    REQUIRE(iiPlus.hasSystemROM() ==
+            Emulator::isMachineRunnable(MachineId::AppleIIPlus));
 }
 
 TEST_CASE("The legacy constants still agree with the profile", "[machine]") {

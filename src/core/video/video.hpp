@@ -29,6 +29,11 @@ public:
   // The machine this video generator is modelling.
   const MachineProfile &getMachine() const { return *machine_; }
 
+  // Whether the colour killer is letting chroma through for the current field.
+  // False means the picture is being decoded as monochrome because no burst
+  // was seen — an all-text screen on a machine that inhibits burst in text.
+  bool isChromaEnabled() const { return chromaEnabled_; }
+
   // Render a complete frame to the framebuffer
   void renderFrame();
 

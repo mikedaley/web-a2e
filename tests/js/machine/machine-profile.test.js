@@ -10,11 +10,13 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   APPLE_IIE_FALLBACK,
   getMachineProfile,
+  hasSystemRom,
   listMachineProfiles,
   loadMachineProfile,
   machineDisplay,
   machineTiming,
   setMachineProfileForTesting,
+  switchMachine,
 } from "../../../src/js/machine/machine-profile.js";
 
 // A machine that is deliberately not a //e, so a test cannot pass by accident
@@ -32,10 +34,28 @@ const OTHER_MACHINE = {
   slots: [],
 };
 
+// A core that behaves like the real one: exports taking a `const char *` see a
+// pointer, never a JavaScript string. Recording what was written to the heap is
+// how these tests catch a key that was never marshalled — passing the string
+// straight through does not throw, it silently looks up the wrong thing.
 function fakeWasm(profile) {
+  const heap = new Map();
+  let nextPtr = 0x1000;
+
   return {
+    heap,
     callString: vi.fn(async () => JSON.stringify(profile)),
     _getMachineCount: vi.fn(async () => 1),
+    _malloc: vi.fn(async (size) => {
+      const ptr = nextPtr;
+      nextPtr += size;
+      return ptr;
+    }),
+    _free: vi.fn(),
+    stringToUTF8: vi.fn(async (text, ptr) => heap.set(ptr, text)),
+    _isMachineRunnable: vi.fn(async (ptr) => (heap.has(ptr) ? 1 : 0)),
+    _hasSystemROM: vi.fn(async () => 1),
+    _setMachine: vi.fn(async (ptr) => (heap.has(ptr) ? 1 : 0)),
   };
 }
 
@@ -108,13 +128,75 @@ describe("machine profile", () => {
     expect(result).toBe(APPLE_IIE_FALLBACK);
   });
 
-  it("lists the machines the core can run", async () => {
+  it("lists the machines the core knows about", async () => {
     const wasm = fakeWasm(OTHER_MACHINE);
     const all = await listMachineProfiles(wasm);
 
     expect(all).toHaveLength(1);
     expect(all[0].key).toBe("test-machine");
     expect(wasm.callString).toHaveBeenCalledWith("_getMachineProfileJSONAt", 0);
+  });
+
+  it("marks a listed machine that has no ROM as not runnable", async () => {
+    // A machine can be fully described and still be unable to start: the II+
+    // ROM set is optional at build time. A chooser that ignored this would
+    // offer a machine that never reaches a prompt.
+    const wasm = fakeWasm(OTHER_MACHINE);
+    wasm._isMachineRunnable = vi.fn(async () => 0);
+
+    const all = await listMachineProfiles(wasm);
+    expect(all[0].runnable).toBe(false);
+  });
+
+  it("passes a machine key as a pointer, not a JavaScript string", async () => {
+    // A string handed straight to a WASM export is coerced to a number and
+    // read as an address, so the call succeeds against the wrong memory. Both
+    // the runnable check and the switch have to copy the key into the heap.
+    const wasm = fakeWasm(OTHER_MACHINE);
+    await listMachineProfiles(wasm);
+    await switchMachine(wasm, "test-machine");
+
+    for (const call of [
+      ...wasm._isMachineRunnable.mock.calls,
+      ...wasm._setMachine.mock.calls,
+    ]) {
+      expect(typeof call[0]).toBe("number");
+      expect(wasm.heap.get(call[0])).toBe("test-machine");
+    }
+
+    // And the pointer is released each time.
+    expect(wasm._free).toHaveBeenCalledTimes(2);
+  });
+
+  it("adopts the new machine after a switch", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    const result = await switchMachine(wasm, "test-machine");
+
+    const ptr = wasm._setMachine.mock.calls[0][0];
+    expect(wasm.heap.get(ptr)).toBe("test-machine");
+    expect(result.key).toBe("test-machine");
+    // The switch must re-read the profile, not assume it worked.
+    expect(machineDisplay().width).toBe(640);
+  });
+
+  it("reports a refused switch rather than pretending it happened", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    wasm._setMachine = vi.fn(async () => 0);
+
+    expect(await switchMachine(wasm, "nonexistent")).toBeNull();
+    // And the machine in force is unchanged.
+    expect(machineDisplay().width).toBe(560);
+  });
+
+  it("reports no ROM when the core says the machine cannot start", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    expect(await hasSystemRom(wasm)).toBe(true);
+
+    wasm._hasSystemROM = vi.fn(async () => 0);
+    expect(await hasSystemRom(wasm)).toBe(false);
+
+    // A worker that has gone away is not a running machine either.
+    expect(await hasSystemRom({})).toBe(false);
   });
 
   it("falls back to the current machine when listing fails", async () => {

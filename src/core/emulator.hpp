@@ -49,6 +49,16 @@ public:
   // The machine being modelled.
   const MachineProfile &getMachine() const { return *machine_; }
 
+  // Whether this machine's system ROM was built into the binary. False means
+  // the machine is described but cannot run — see init().
+  bool hasSystemROM() const { return systemRomLoaded_; }
+
+  // The same question about a machine that is not running. Lets a host offer a
+  // choice of machines and say which of them it can actually start, without
+  // building one to find out. The ROM arrays live in emulator.cpp, so asking
+  // here keeps them out of every other translation unit.
+  static bool isMachineRunnable(MachineId machine);
+
   // Initialization
   void init();
   void reset();     // Cold reset - clears memory
@@ -407,6 +417,9 @@ private:
   // Not owned: profiles are static constexpr objects with program lifetime.
   // Declared first so the subsystems below can be constructed from it.
   const MachineProfile *machine_ = &defaultMachineProfile();
+
+  // Set by init(): whether this machine's ROM is present in the build.
+  bool systemRomLoaded_ = false;
 
   std::unique_ptr<MMU> mmu_;
   std::unique_ptr<CPU6502> cpu_;
