@@ -305,16 +305,56 @@ export class WebGLRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.fbVertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, fbPositions, gl.STATIC_DRAW);
 
+    // Framebuffer-sized textures. Extracted so a machine whose picture is a
+    // different size can have them rebuilt without re-running the whole of
+    // init() — see setMachineDisplay().
+    this.initTextures();
+
+    // Set initial canvas size if not already set
+    if (!this.canvas.width || !this.canvas.height) {
+      this.canvas.width = this.width;
+      this.canvas.height = this.height;
+    }
+
+    // Set viewport
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+    // Enable blending for rounded corners transparency
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  /**
+   * Create (or re-create) every texture sized to the machine's framebuffer:
+   * the source texture, the burn-in ping-pong pair and their framebuffers,
+   * and the selection overlay. Safe to call again after a size change; the
+   * previous objects are deleted first so nothing is leaked.
+   */
+  initTextures() {
+    const gl = this.gl;
+    if (!gl) return;
+
+    if (this.texture) gl.deleteTexture(this.texture);
+    if (this.selectionTexture) gl.deleteTexture(this.selectionTexture);
+    for (let i = 0; i < 2; i++) {
+      if (this.burnInTextures?.[i]) gl.deleteTexture(this.burnInTextures[i]);
+      if (this.burnInFramebuffers?.[i]) {
+        gl.deleteFramebuffer(this.burnInFramebuffers[i]);
+      }
+    }
+
     // Create main texture
     this.texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    // Default to nearest neighbor filtering (sharp pixels)
-    this.useNearestFilter = true;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    // Nearest neighbour by default (sharp pixels), but a re-create after a
+    // machine change must not throw away a filter the user chose.
+    if (this.useNearestFilter === undefined) this.useNearestFilter = true;
+    const filter = this.useNearestFilter ? gl.NEAREST : gl.LINEAR;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
 
     // Initialize with empty texture
     const emptyData = new Uint8Array(this.width * this.height * 4);
@@ -383,18 +423,6 @@ export class WebGLRenderer {
       emptyData,
     );
 
-    // Set initial canvas size if not already set
-    if (!this.canvas.width || !this.canvas.height) {
-      this.canvas.width = this.width;
-      this.canvas.height = this.height;
-    }
-
-    // Set viewport
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-
-    // Enable blending for rounded corners transparency
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   compileShader(type, source) {
@@ -776,6 +804,32 @@ export class WebGLRenderer {
    * through the core's NTSC decoder, which sees only emulator video. Leaving
    * the mode uploads nothing: the first real frame overwrites it.
    */
+  /**
+   * Adopt a different machine's framebuffer geometry.
+   *
+   * The source texture is the machine's framebuffer, so a machine with a
+   * different picture needs the texture, the burn-in pair and the selection
+   * overlay rebuilt at the new size. Nothing to do when the size is unchanged,
+   * which is the case for every machine modelled so far — the //e and the II+
+   * emit the same 560 dots across the same 192 doubled lines.
+   */
+  setMachineDisplay(display) {
+    if (!display || !display.width || !display.height) return;
+    if (display.width === this.width && display.height === this.height) return;
+
+    this.width = display.width;
+    this.height = display.height;
+
+    // The powered-off picture is drawn at the framebuffer size, so it has to
+    // be rebuilt too rather than stretched.
+    this._noSignalFrame = null;
+
+    if (this.gl) {
+      this.initTextures();
+      if (this._noSignal) this.setNoSignal(true);
+    }
+  }
+
   setNoSignal(enabled) {
     this._noSignal = enabled;
     if (!enabled) return;

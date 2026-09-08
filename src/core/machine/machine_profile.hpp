@@ -79,12 +79,37 @@ struct MachineTiming {
 // Sizes only. How the address space is *decoded* is the MMU's business and
 // differs by mechanism, not by number.
 // ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Character generator layout
+//
+// The //e and the II+ hold the same glyphs, but their ROMs store them
+// differently, and neither arrangement is more correct than the other — it is
+// how the part was wired to the video shift register.
+//
+// A //e's ROM puts bit 0 at the left of the glyph and leaves the blank
+// scanline at the end of each eight-byte cell. A II+'s puts bit 6 at the left
+// and the blank scanline first. Get either wrong and every character on screen
+// is drawn mirrored, or slides a scanline out of its cell.
+//
+// This is normalised once when the ROM is loaded rather than tested per dot:
+// it is a property of the ROM image, and the dot loop is the hottest code in
+// the video path.
+// ----------------------------------------------------------------------------
+struct MachineCharRom {
+  // Bit 6 rather than bit 0 is the leftmost pixel of a glyph row.
+  bool bitReversed;
+  // Rows to rotate each eight-byte cell upwards, moving a leading blank
+  // scanline to the end where the renderer expects it.
+  int rowRotate;
+};
+
 struct MachineMemory {
   size_t mainRamSize;
   size_t auxRamSize;         // 0 when the machine has no auxiliary bank
   size_t romSize;
   uint16_t romBaseAddress;   // Where the system ROM starts in the address space
   size_t charRomSize;
+  MachineCharRom charRom;
   size_t lcBankSize;         // Language card $D000 bank, 4KB
   size_t lcHighSize;         // Language card $E000-$FFFF, 8KB
 
@@ -121,8 +146,13 @@ struct MachineCapabilities {
   bool hasAuxRam;
   bool has80Column;
   bool hasDoubleHires;
-  bool hasLanguageCard;       // Built into the machine, rather than a card
+  bool hasLanguageCard;       // Responds to the $C080-$C08F bank switches
   bool hasAltCharSet;
+  // A second character set in the same ROM, selected as a whole. The //e's
+  // 8KB generator holds a US and a UK set; a II+'s 2KB one holds a single set,
+  // and asking it for a second reads past the end of the image — every glyph
+  // comes back blank, leaving a screen showing nothing but the cursor.
+  bool hasUkCharSet;
   bool hasLowercase;          // An unmodified II+ cannot display lower case
   bool hasOpenAppleKeys;      // Open/Closed Apple on $C061/$C062
   bool hasIOUDisable;         // $C07E/$C07F
@@ -199,6 +229,7 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
         16 * 1024, // romSize — $C000-$FFFF, including the internal slot ROM
         0xC000,    // romBaseAddress
         8 * 1024,  // charRomSize — US and UK sets
+        {false, 0}, // charRom: bit 0 leftmost, blank scanline last
         4 * 1024,  // lcBankSize
         8 * 1024,  // lcHighSize
     },
@@ -214,8 +245,9 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
         true,  // hasAuxRam
         true,  // has80Column
         true,  // hasDoubleHires
-        true,  // hasLanguageCard — on the motherboard, not a card
+        true,  // hasLanguageCard — on the //e's motherboard
         true,  // hasAltCharSet
+        true,  // hasUkCharSet
         true,  // hasLowercase
         true,  // hasOpenAppleKeys
         true,  // hasIOUDisable
@@ -282,6 +314,7 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
         12 * 1024, // romSize — $D000-$FFFF: Applesoft plus the monitor
         0xD000,    // romBaseAddress
         2 * 1024,  // charRomSize — upper case and the flashing/inverse sets
+        {true, 1}, // charRom: bit 6 leftmost, blank scanline first
         4 * 1024,  // lcBankSize — for a language card fitted in slot 0
         8 * 1024,  // lcHighSize
     },
@@ -297,8 +330,16 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
         false, // hasAuxRam
         false, // has80Column
         false, // hasDoubleHires
-        false, // hasLanguageCard — it is a card in slot 0, not built in
+        // A bare II+ has no language card; one in slot 0 is how a 48K machine
+        // becomes the 64K machine that nearly all II+ software expects, and it
+        // is fitted here for the same reason every II+ emulator fits one. The
+        // hardware is the same bank switching at $C080-$C08F that the //e has
+        // on its motherboard, so the MMU needs no second implementation. That
+        // the card is in a slot rather than built in is recorded by firstSlot
+        // being 0, not by this flag.
+        true,  // hasLanguageCard
         false, // hasAltCharSet
+        false, // hasUkCharSet — its ROM holds one set and nothing else
         false, // hasLowercase — unmodified, the II+ cannot display it
         false, // hasOpenAppleKeys — $C061/$C062 are the paddle buttons
         false, // hasIOUDisable

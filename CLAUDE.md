@@ -219,6 +219,24 @@ matter, because each exercises a different part of the mechanism:
   fringes green and violet in every mode. `Video::burstForScanline()` reads
   `caps.inhibitsBurstInText`, so this follows from the profile alone.
 
+**Its character generator stores glyphs the other way round.** A //e's 8KB ROM
+puts bit 0 at the left of a glyph row and leaves the blank scanline at the end
+of each eight-byte cell; a II+'s 2KB ROM puts bit 6 at the left and the blank
+scanline first. Neither is more correct — it is how the part was wired to the
+video shift register — but the renderer reads one layout, so `MMU::loadROM`
+rewrites the image into it (`normaliseCharROM`, driven by `MachineCharRom` in
+the profile). This is done once at load rather than per dot, because it is a
+property of the ROM image and the dot loop is the hottest code in the video
+path. Get it wrong and every character on screen is drawn mirrored, which is
+exactly what the II+ did before this existed.
+
+**It has only one character set, and asking for a second blanks the screen.**
+The UK set is a second bank inside the //e's larger ROM, reached by adding
+0x1000 to the glyph offset. A II+ has nothing there, so every glyph reads back
+blank and the display shows nothing but the cursor — which survives because it
+is the inverse of a blank and so still solid. `caps.hasUkCharSet` gates the
+offset, and the host hides the toggle on a machine that has no second set.
+
 **The II+ ROMs are optional and are not in the repository.** A II+ motherboard
 carries six 2KB ROMs in sockets D0 to F8 covering `$D000-$FFFF`: five of
 Applesoft and the Autostart monitor at `$F800`. `scripts/generate_roms.sh`
@@ -238,10 +256,32 @@ global emulator and constructs the new one. Inserted media and host state do
 not survive, exactly as they would not across a page reload, and the caller is
 responsible for putting them back.
 
-One thing the II+ still needs beyond ROMs: **slot 0**. The profile says it
-exists (`firstSlot` is 0, and slot 0 is where a language card goes), but
-`MMU::insertCard` still rejects it because `slots_` is indexed `slot - 1` and
-has no room. Widening that array is the remaining work.
+**Slot 0 exists on a II+.** `slots_` is indexed by slot number with room for
+eight, and `MMU::insertCard` asks the profile rather than assuming 1-7. What
+goes in slot 0 on a real II+ is the 16K language card, which is how a 48K
+machine becomes the 64K one nearly all II+ software expects; the profile fits
+one, because the bank switching at `$C080-$C08F` is the same hardware the //e
+carries on its motherboard and needs no second implementation.
+
+#### Choosing a machine
+
+**View > Machine** opens `MachineSelectorWindow`
+(`src/js/machine/machine-selector-window.js`), which lists every machine the
+core knows with its CPU, memory, video and slot range, draws each one, and
+marks the one that is running with the six-stripe Apple rainbow and a lit power
+light. A machine whose ROMs are not in the build is shown but cannot be
+selected.
+
+Switching is destructive and the window says so before doing it: the core
+rebuilds the emulator, so inserted media and anything in memory are lost, just
+as they would be on a reload. What is *not* lost is the user's preferences —
+`AppleIIeEmulator.onMachineChanged()` pushes the display settings, volume,
+character set and clock speed back into the new core, because those were the
+user's choices rather than machine state. The chosen machine is remembered in
+localStorage under `a2e-machine` and restored at startup, before the renderer
+and windows are built, so they are made for the right machine rather than
+rebuilt for it a moment later. A remembered machine the build cannot run is
+ignored rather than honoured.
 
 #### Adding a machine
 

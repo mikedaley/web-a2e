@@ -182,16 +182,28 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += std::string(",\"hasDoubleHires\":") + boolean(m.caps.hasDoubleHires);
   json += std::string(",\"hasLanguageCard\":") + boolean(m.caps.hasLanguageCard);
   json += std::string(",\"hasAltCharSet\":") + boolean(m.caps.hasAltCharSet);
+  json += std::string(",\"hasUkCharSet\":") + boolean(m.caps.hasUkCharSet);
+  json += std::string(",\"hasLowercase\":") + boolean(m.caps.hasLowercase);
+  json += std::string(",\"hasInternalSlotRom\":") +
+          boolean(m.caps.hasInternalSlotRom);
   json += std::string(",\"hasOpenAppleKeys\":") + boolean(m.caps.hasOpenAppleKeys);
   json += std::string(",\"hasIOUDisable\":") + boolean(m.caps.hasIOUDisable);
   json += std::string(",\"inhibitsBurstInText\":") +
           boolean(m.caps.inhibitsBurstInText);
   json += "}";
 
+  json += ",\"firstSlot\":" + std::to_string(m.firstSlot);
+  json += ",\"lastSlot\":" + std::to_string(m.lastSlot);
+
+  // Only the slots this machine actually has. A II+ has a slot 0 and a //e
+  // does not, so a host that assumed the list started at 1 would silently drop
+  // the one slot that differs.
   json += ",\"slots\":[";
-  for (int slot = 1; slot < a2e::MACHINE_SLOT_COUNT; slot++) {
+  bool firstEntry = true;
+  for (int slot = m.firstSlot; slot <= m.lastSlot; slot++) {
     const auto &s = m.slots[slot];
-    if (slot > 1) json += ",";
+    if (!firstEntry) json += ",";
+    firstEntry = false;
     json += "{\"slot\":" + std::to_string(slot);
     json += ",\"fixedCard\":";
     json += s.fixedCard ? "\"" + std::string(s.fixedCard) + "\"" : "null";

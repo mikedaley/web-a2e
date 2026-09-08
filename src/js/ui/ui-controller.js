@@ -14,6 +14,7 @@ import { clearStateFromStorage } from "../state/state-persistence.js";
 import { ThemeManager } from "./theme-manager.js";
 import { showConfirm } from "./confirm.js";
 import { FullscreenDrivePopouts } from "./fullscreen-drive-popouts.js";
+import { getMachineProfile } from "../machine/machine-profile.js";
 
 // Timing constants
 const REMINDER_DISMISS_DELAY_MS = 2000;
@@ -594,6 +595,15 @@ export class UIController {
       });
     }
 
+    const machineBtn = document.getElementById("btn-machine");
+    if (machineBtn) {
+      machineBtn.addEventListener("click", () => {
+        this.windowManager.toggleWindow("machine-selector");
+        this.closeAllMenus();
+        this.refocusCanvas();
+      });
+    }
+
     const slotsBtn = document.getElementById("btn-slots");
     if (slotsBtn) {
       slotsBtn.addEventListener("click", () => {
@@ -1166,9 +1176,7 @@ export class UIController {
     };
 
     // Initialize from saved setting
-    const savedCharset = localStorage.getItem("a2e-charset");
-    const isUKInitial = savedCharset === "uk";
-    this.wasmModule._setUKCharacterSet(isUKInitial);
+    const isUKInitial = this.applyCharacterSet();
     if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = !isUKInitial;
 
     // Screen window header toggle listener
@@ -1210,6 +1218,30 @@ export class UIController {
    * Update power button appearance based on running state
    * @param {boolean} isRunning - Whether the emulator is running
    */
+  /**
+   * Push the saved character set into the core and report whether it is UK.
+   *
+   * Called at startup, and again after a machine switch: rebuilding the
+   * emulator gives us a core that has never been told which character set the
+   * user picked.
+   */
+  applyCharacterSet() {
+    const machine = getMachineProfile();
+    // Only offer the switch on a machine that has a second set. A II+'s
+    // character generator holds one, and asking for another would leave the
+    // screen blank; the toggle is hidden rather than left there doing harm.
+    const supported = machine.caps?.hasUkCharSet !== false;
+
+    const toggle = document.getElementById("screen-window-charset-toggle");
+    const row = toggle?.closest("label, .header-toggle, .screen-window-toggle");
+    if (row) row.hidden = !supported;
+    if (toggle) toggle.disabled = !supported;
+
+    const isUK = supported && localStorage.getItem("a2e-charset") === "uk";
+    this.wasmModule._setUKCharacterSet(isUK);
+    return isUK;
+  }
+
   updatePowerButton(isRunning) {
     const powerBtn = document.getElementById("btn-power");
 

@@ -59,6 +59,9 @@ const APPLE_IIE_FALLBACK = Object.freeze({
     hasDoubleHires: true,
     hasLanguageCard: true,
     hasAltCharSet: true,
+    hasUkCharSet: true,
+    hasLowercase: true,
+    hasInternalSlotRom: true,
     hasOpenAppleKeys: true,
     hasIOUDisable: true,
     inhibitsBurstInText: true,
@@ -67,6 +70,36 @@ const APPLE_IIE_FALLBACK = Object.freeze({
 });
 
 let current = APPLE_IIE_FALLBACK;
+
+/*
+ * The machine the user last chose, remembered across sessions.
+ *
+ * Stored as the profile's key rather than its numeric id: ids are an
+ * implementation detail of the core's registry and could be renumbered, while
+ * a key names a machine for good. An unrecognised or unrunnable key is ignored
+ * rather than honoured, so a build without the II+ ROMs, or a stored value
+ * from a later version, quietly falls back to the machine that does work.
+ */
+const MACHINE_STORAGE_KEY = "a2e-machine";
+
+/** The machine key remembered from a previous session, or null. */
+export function loadRememberedMachine() {
+  try {
+    const key = localStorage.getItem(MACHINE_STORAGE_KEY);
+    return key && key.trim() ? key.trim() : null;
+  } catch {
+    return null; // Private windows and blocked site data are not an error here
+  }
+}
+
+/** Remember a machine for the next session. */
+export function rememberMachine(key) {
+  try {
+    if (key) localStorage.setItem(MACHINE_STORAGE_KEY, key);
+  } catch {
+    // A preference we could not save is not worth interrupting anyone over.
+  }
+}
 
 /*
  * Call a core export that takes a `const char *`.
@@ -173,11 +206,41 @@ export async function switchMachine(wasmModule, key) {
   try {
     const ok = await callWithString(wasmModule, "_setMachine", key);
     if (!ok) return null;
-    return await loadMachineProfile(wasmModule);
+    const profile = await loadMachineProfile(wasmModule);
+    if (profile) rememberMachine(profile.key);
+    return profile;
   } catch (err) {
     console.warn(`Could not switch to machine "${key}":`, err);
     return null;
   }
+}
+
+/**
+ * Start the session on the machine the user last chose.
+ *
+ * Called once, before anything sizes itself to the picture. A remembered
+ * machine that the core does not know, or cannot run for want of its ROMs, is
+ * ignored: the session stays on whichever machine the core built by default,
+ * which is always one that works.
+ */
+export async function restoreRememberedMachine(wasmModule) {
+  const key = loadRememberedMachine();
+  if (!key || key === current.key) return current;
+
+  try {
+    const runnable = await callWithString(wasmModule, "_isMachineRunnable", key);
+    if (!runnable) {
+      console.info(
+        `Remembered machine "${key}" cannot be started here; staying on ` +
+          `${current.name}.`,
+      );
+      return current;
+    }
+  } catch {
+    return current;
+  }
+
+  return (await switchMachine(wasmModule, key)) || current;
 }
 
 /** Whether the running machine has the ROM it needs to start. */

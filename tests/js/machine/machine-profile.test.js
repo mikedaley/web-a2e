@@ -6,13 +6,16 @@
  * callers with nothing, and a fetched profile not actually reaching them.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   APPLE_IIE_FALLBACK,
   getMachineProfile,
   hasSystemRom,
   listMachineProfiles,
   loadMachineProfile,
+  loadRememberedMachine,
+  rememberMachine,
+  restoreRememberedMachine,
   machineDisplay,
   machineTiming,
   setMachineProfileForTesting,
@@ -38,6 +41,29 @@ const OTHER_MACHINE = {
 // pointer, never a JavaScript string. Recording what was written to the heap is
 // how these tests catch a key that was never marshalled — passing the string
 // straight through does not throw, it silently looks up the wrong thing.
+/** Minimal stand-in for localStorage; these tests run in plain node. */
+function fakeStorage(initial = {}) {
+  const data = { ...initial };
+  return {
+    data,
+    getItem: (k) => (k in data ? data[k] : null),
+    setItem: (k, v) => {
+      data[k] = String(v);
+    },
+    clear: () => {
+      for (const k of Object.keys(data)) delete data[k];
+    },
+  };
+}
+
+beforeEach(() => {
+  globalThis.localStorage = fakeStorage();
+});
+
+afterEach(() => {
+  delete globalThis.localStorage;
+});
+
 function fakeWasm(profile) {
   const heap = new Map();
   let nextPtr = 0x1000;
@@ -213,5 +239,100 @@ describe("machine profile", () => {
     await loadMachineProfile(fakeWasm(OTHER_MACHINE));
     const profile = getMachineProfile();
     expect(Object.isFrozen(profile)).toBe(true);
+  });
+});
+
+describe("remembering the machine between sessions", () => {
+  beforeEach(() => {
+    setMachineProfileForTesting(null);
+  });
+
+  it("remembers nothing until a machine is chosen", () => {
+    expect(loadRememberedMachine()).toBeNull();
+  });
+
+  it("stores the machine by key, not by id", () => {
+    // Ids are an implementation detail of the core's registry and could be
+    // renumbered; a key names a machine for good.
+    rememberMachine("apple2plus");
+    expect(loadRememberedMachine()).toBe("apple2plus");
+    expect(localStorage.getItem("a2e-machine")).toBe("apple2plus");
+  });
+
+  it("records the machine whenever one is switched to", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    await switchMachine(wasm, "test-machine");
+    expect(loadRememberedMachine()).toBe("test-machine");
+  });
+
+  it("does not record a switch the core refused", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    wasm._setMachine = vi.fn(async () => 0);
+
+    await switchMachine(wasm, "nonexistent");
+    expect(loadRememberedMachine()).toBeNull();
+  });
+
+  it("starts the session on the remembered machine", async () => {
+    rememberMachine("test-machine");
+    const wasm = fakeWasm(OTHER_MACHINE);
+
+    const profile = await restoreRememberedMachine(wasm);
+
+    expect(profile.key).toBe("test-machine");
+    expect(machineDisplay().width).toBe(640);
+  });
+
+  it("stays put when nothing is remembered", async () => {
+    const wasm = fakeWasm(OTHER_MACHINE);
+    const profile = await restoreRememberedMachine(wasm);
+
+    expect(profile).toBe(APPLE_IIE_FALLBACK);
+    expect(wasm._setMachine).not.toHaveBeenCalled();
+  });
+
+  it("ignores a remembered machine whose ROMs are not in this build", async () => {
+    // A build without the II+ ROMs must not start on the II+ and show a blank
+    // screen; it falls back to the machine that does work.
+    rememberMachine("test-machine");
+    const wasm = fakeWasm(OTHER_MACHINE);
+    wasm._isMachineRunnable = vi.fn(async () => 0);
+
+    const profile = await restoreRememberedMachine(wasm);
+
+    expect(profile).toBe(APPLE_IIE_FALLBACK);
+    expect(wasm._setMachine).not.toHaveBeenCalled();
+  });
+
+  it("ignores a remembered machine the core does not know", async () => {
+    rememberMachine("apple2gs");
+    const wasm = fakeWasm(OTHER_MACHINE);
+    wasm._isMachineRunnable = vi.fn(async () => 0);
+
+    expect(await restoreRememberedMachine(wasm)).toBe(APPLE_IIE_FALLBACK);
+  });
+
+  it("does not switch when the remembered machine is already running", async () => {
+    rememberMachine("apple2e");
+    const wasm = fakeWasm(OTHER_MACHINE);
+
+    await restoreRememberedMachine(wasm);
+    expect(wasm._setMachine).not.toHaveBeenCalled();
+  });
+
+  it("survives storage being unavailable", () => {
+    // Private windows and blocked site data throw on access. A preference we
+    // cannot save is not worth breaking startup over.
+    globalThis.localStorage = {
+      getItem() {
+        throw new Error("site data blocked");
+      },
+      setItem() {
+        throw new Error("site data blocked");
+      },
+    };
+
+    expect(() => rememberMachine("apple2plus")).not.toThrow();
+    expect(loadRememberedMachine()).toBeNull();
   });
 });

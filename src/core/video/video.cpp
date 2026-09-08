@@ -163,9 +163,13 @@ Video::CharROMInfo Video::getCharROMInfo(uint8_t ch, bool inverse, bool flash,
     needsXor = false;
   }
 
-  // Apply UK character set offset if enabled
-  if (ukCharSet_) {
-    romOffset += 0x1000;
+  // The UK set is a second bank inside the same character ROM. A machine whose
+  // generator holds only one set has nothing at that offset, and reading there
+  // returns blanks for every glyph — a screen with nothing on it but the
+  // cursor, which is the inverse of a blank and so still solid.
+  if (ukCharSet_ && machine_->caps.hasUkCharSet) {
+    constexpr uint16_t UK_CHAR_SET_OFFSET = 0x1000;
+    romOffset += UK_CHAR_SET_OFFSET;
   }
 
   // Handle flash - toggle inverse state when flash is active

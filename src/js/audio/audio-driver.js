@@ -40,6 +40,17 @@ export class AudioDriver {
     this.onFreeRunChange = null;
 
     // Sync C++ audio state with saved JS settings (fire-and-forget via proxy)
+    this.applyVolumeToEmulator();
+  }
+
+  /**
+   * Push the current volume and mute state into the core.
+   *
+   * Called at construction, and again whenever the core has been rebuilt
+   * underneath us — a machine switch constructs a new emulator, which knows
+   * nothing of the volume the user set on the old one.
+   */
+  applyVolumeToEmulator() {
     this.wasmModule._setAudioVolume(this.volume);
     this.wasmModule._setAudioMuted(this.muted);
   }

@@ -218,6 +218,10 @@ private:
   void handleLanguageCardSwitchWrite(uint8_t reg);
 
   // Memory banks
+  // Rewrites a freshly loaded character ROM into the single layout the video
+  // renderer reads, per the machine's MachineCharRom.
+  void normaliseCharROM(size_t length);
+
   // Not owned: profiles are static constexpr objects with program lifetime.
   const MachineProfile *machine_ = &defaultMachineProfile();
 
@@ -265,7 +269,11 @@ private:
   std::unique_ptr<NoSlotClock> noSlotClock_;
 
   // Expansion slots (1-7, index 0-6)
-  std::array<std::unique_ptr<ExpansionCard>, 7> slots_;
+  // Indexed by slot number, so slots_[6] is slot 6. There are eight entries
+  // rather than seven because slot 0 is a real slot on a II+ — it is where the
+  // 16K language card goes — even though a //e has nothing there. Which of
+  // them exist on a given machine is the profile's answer, not this array's.
+  std::array<std::unique_ptr<ExpansionCard>, MACHINE_SLOT_COUNT> slots_;
   uint8_t activeExpansionSlot_ = 0;  // Which card owns $C800-$CFFF (0 = none)
 
   // Memory access tracking for debugger heat map

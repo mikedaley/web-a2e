@@ -12,11 +12,16 @@
 #include "catch.hpp"
 
 #include "audio/audio.hpp"
+#include "cards/thunderclock/thunderclock_card.hpp"
 #include "emulator.hpp"
 #include "machine/machine_profile.hpp"
 #include "mmu/mmu.hpp"
 #include "video/video.hpp"
 #include "roms.cpp"
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 using namespace a2e;
 
@@ -131,11 +136,13 @@ TEST_CASE("The II+ profile describes an Apple II Plus", "[machine]") {
         REQUIRE(machineProfile(MachineId::AppleIIe).caps.inhibitsBurstInText);
     }
 
-    SECTION("slot 0 exists and the language card is not built in") {
+    SECTION("slot 0 exists, which is where its language card goes") {
+        // A //e carries the language card on the motherboard and has no slot
+        // 0 at all; on a II+ the same bank switching arrives on a card.
         REQUIRE(m.firstSlot == 0);
         REQUIRE(m.hasSlot(0));
         REQUIRE_FALSE(machineProfile(MachineId::AppleIIe).hasSlot(0));
-        REQUIRE_FALSE(m.caps.hasLanguageCard);
+        REQUIRE(m.caps.hasLanguageCard);
     }
 
     SECTION("nothing is fixed in a slot the way the //e's 80-column card is") {
@@ -333,6 +340,304 @@ TEST_CASE("A machine cannot be started without its ROM", "[machine]") {
     REQUIRE(iiPlus.getMachine().id == MachineId::AppleIIPlus);
     REQUIRE(iiPlus.hasSystemROM() ==
             Emulator::isMachineRunnable(MachineId::AppleIIPlus));
+}
+
+// Run a machine for roughly the given number of frames of emulated time.
+static void runFrames(Emulator &e, int frames) {
+    const int cyclesPerFrame = e.getMachine().timing.cyclesPerFrame();
+    for (int i = 0; i < frames; i++) e.runCycles(cyclesPerFrame);
+}
+
+// The text the machine is showing, with blank lines dropped.
+static std::vector<std::string> visibleLines(Emulator &e) {
+    const char *raw = e.readScreenText(0, 0, 23, 39);
+    std::vector<std::string> lines;
+    if (!raw) return lines;
+
+    std::string text(raw);
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t nl = text.find('\n', start);
+        if (nl == std::string::npos) nl = text.size();
+        std::string line = text.substr(start, nl - start);
+        if (line.find_first_not_of(' ') != std::string::npos) {
+            lines.push_back(line);
+        }
+        if (nl == text.size()) break;
+        start = nl + 1;
+    }
+    return lines;
+}
+
+// Whether any visible line shows the Applesoft prompt.
+static bool showsApplesoftPrompt(Emulator &e) {
+    for (const auto &line : visibleLines(e)) {
+        if (line.find(']') != std::string::npos) return true;
+    }
+    return false;
+}
+
+TEST_CASE("Each machine boots to its own prompt", "[machine][boot]") {
+    // The real test of the profile layer: two machines, two CPUs, two ROMs at
+    // two different base addresses, one emulator.
+    //
+    // Both ship with a Disk II and no disk in it, so both sit at their boot
+    // screen waiting for a drive that will never answer. Ctrl+Reset is what
+    // drops a real machine into BASIC, and it is what these do here.
+    auto bootToBasic = [](Emulator &e) {
+        runFrames(e, 120);
+        e.warmReset();
+        runFrames(e, 120);
+    };
+
+    SECTION("the //e reaches Applesoft") {
+        Emulator e(MachineId::AppleIIe);
+        e.init();
+        REQUIRE(e.hasSystemROM());
+
+        bootToBasic(e);
+
+        // Reaching the prompt means the reset vector, the ROM mapping and the
+        // CPU all did their jobs.
+        INFO("screen: " << visibleLines(e).back());
+        REQUIRE(showsApplesoftPrompt(e));
+    }
+
+    SECTION("the II+ reaches Applesoft on an NMOS 6502 and a $D000 ROM") {
+        // Skipped rather than failed when the optional II+ ROMs are not in the
+        // build — the machine is still described, it just cannot start.
+        if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) {
+            WARN("II+ ROMs not built in; skipping the boot test");
+            return;
+        }
+
+        Emulator e(MachineId::AppleIIPlus);
+        e.init();
+        REQUIRE(e.hasSystemROM());
+        REQUIRE(e.getMachine().cpu == CPUVariant::NMOS_6502);
+
+        bootToBasic(e);
+
+        INFO("screen: " << visibleLines(e).back());
+        REQUIRE(showsApplesoftPrompt(e));
+
+        // And it got there without ever setting a //e switch.
+        const auto &sw = e.getMMU().getSoftSwitches();
+        REQUIRE_FALSE(sw.col80);
+        REQUIRE_FALSE(sw.ramrd);
+        REQUIRE_FALSE(sw.altzp);
+    }
+}
+
+TEST_CASE("Character ROMs are normalised to one layout", "[machine][video]") {
+    // The //e and the II+ hold the same glyphs but store them differently: a
+    // //e puts bit 0 at the left of a glyph row and the blank scanline last, a
+    // II+ puts bit 6 at the left and the blank scanline first. The renderer
+    // reads one layout, so the ROM is rewritten when it is loaded.
+    //
+    // Getting this wrong is not subtle and it is not safe: every character on
+    // screen comes out mirrored. That is exactly what the II+ did before the
+    // normalisation existed, and its boot banner read "]["  backwards.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) {
+        WARN("II+ ROMs not built in; skipping the character ROM test");
+        return;
+    }
+
+    Emulator iie(MachineId::AppleIIe);
+    iie.init();
+    Emulator iiPlus(MachineId::AppleIIPlus);
+    iiPlus.init();
+
+    SECTION("both machines present identical letters to the renderer") {
+        // Cells 1-26 are 'A' to 'Z', which both ROM revisions draw the same
+        // way. Compared rather than merely inspected because a mirrored or
+        // row-shifted glyph fails here immediately and unmistakably.
+        //
+        // The comparison stops at 'Z' on purpose. Beyond the letters the two
+        // ROMs genuinely differ — they are parts eight years apart, and the
+        // //e draws its underscore on a different scanline from the II+ — so
+        // insisting on byte equality there would be asserting something that
+        // was never true.
+        for (int cell = 1; cell <= 26; cell++) {
+            for (int row = 0; row < 8; row++) {
+                const uint16_t at = static_cast<uint16_t>(cell * 8 + row);
+                INFO("cell " << cell << " row " << row);
+                REQUIRE(iiPlus.getMMU().readCharROM(at) ==
+                        iie.getMMU().readCharROM(at));
+            }
+        }
+    }
+
+    SECTION("an asymmetric glyph is not mirrored") {
+        // 'F' is the clearest test there is: a mirrored F is obvious, and a
+        // symmetric letter like 'A' or 'H' would pass either way.
+        const uint16_t f = 6 * 8;
+
+        // Row 0 is the full top bar; row 3 the shorter middle bar. Both start
+        // at the left of the glyph, so bit 1 is set and bit 6 is not.
+        const uint8_t top = iiPlus.getMMU().readCharROM(f);
+        const uint8_t middle = iiPlus.getMMU().readCharROM(f + 3);
+        REQUIRE((top & 0x02) != 0);
+        REQUIRE((middle & 0x02) != 0);
+
+        // The stem is on the left, so no row reaches the rightmost dot.
+        for (int row = 0; row < 8; row++) {
+            REQUIRE((iiPlus.getMMU().readCharROM(f + row) & 0x40) == 0);
+        }
+
+        // And the blank scanline ends the cell rather than starting it.
+        REQUIRE(iiPlus.getMMU().readCharROM(f + 7) == 0);
+        REQUIRE(iiPlus.getMMU().readCharROM(f) != 0);
+    }
+}
+
+TEST_CASE("A machine with one character set ignores the UK switch",
+          "[machine][video]") {
+    // The UK set is a second bank inside the //e's 8KB character ROM, reached
+    // by adding 0x1000 to the glyph offset. A II+'s generator is 2KB and holds
+    // a single set, so that offset lands past the end of the image and every
+    // glyph comes back blank — a screen showing nothing but the cursor, which
+    // survives because it is the inverse of a blank and so still solid.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) {
+        WARN("II+ ROMs not built in; skipping the UK character set test");
+        return;
+    }
+
+    auto rendersText = [](Emulator &e) {
+        // Put a word on the top line and count the lit dots in it.
+        const char *word = "HELLO";
+        for (int i = 0; word[i]; i++) {
+            e.getMMU().writeRAM(static_cast<uint16_t>(0x400 + i),
+                                static_cast<uint8_t>(word[i] | 0x80));
+        }
+        e.getVideo().forceRenderFrame();
+
+        const uint8_t *fb = e.getVideo().getFramebuffer();
+        const int width = e.getMachine().display.pixelWidth;
+        int lit = 0;
+        for (int row = 0; row < 14; row++) {
+            for (int x = 0; x < 70; x++) {
+                const size_t o = static_cast<size_t>(row) * width * 4 +
+                                 static_cast<size_t>(x) * 4;
+                if (fb[o] > 90 || fb[o + 1] > 90 || fb[o + 2] > 90) lit++;
+            }
+        }
+        return lit;
+    };
+
+    Emulator iiPlus(MachineId::AppleIIPlus);
+    iiPlus.init();
+    const int normal = rendersText(iiPlus);
+    REQUIRE(normal > 100); // The word is plainly there
+
+    iiPlus.getVideo().setUKCharacterSet(true);
+    REQUIRE(rendersText(iiPlus) == normal); // ...and the switch changes nothing
+
+    SECTION("while a //e does have a second set to switch to") {
+        REQUIRE(machineProfile(MachineId::AppleIIe).caps.hasUkCharSet);
+        REQUIRE_FALSE(machineProfile(MachineId::AppleIIPlus).caps.hasUkCharSet);
+
+        Emulator iie(MachineId::AppleIIe);
+        iie.init();
+        const int us = rendersText(iie);
+        iie.getVideo().setUKCharacterSet(true);
+        REQUIRE(rendersText(iie) > 100); // Still legible, just a different set
+        REQUIRE(us > 100);
+    }
+}
+
+TEST_CASE("Text fringes on a II+ and not on a //e", "[machine][video]") {
+    // The consequence of caps.inhibitsBurstInText, and the most visible
+    // difference between the two machines: an all-text screen on a //e kills
+    // the burst and comes out crisp white, while a II+ sends a reference on
+    // every line and its text picks up colour on a colour monitor. This is
+    // what real hardware did, and it is why II+ owners used green screens for
+    // text work.
+    auto colouredPixels = [](Emulator &e, VideoColorMode mode) {
+        e.getVideo().setColorMode(mode);
+        const char *word = "HELLO WORLD";
+        for (int i = 0; word[i]; i++) {
+            e.getMMU().writeRAM(static_cast<uint16_t>(0x400 + i),
+                                static_cast<uint8_t>(word[i] | 0x80));
+        }
+        e.getVideo().forceRenderFrame();
+
+        const uint8_t *fb = e.getVideo().getFramebuffer();
+        const int width = e.getMachine().display.pixelWidth;
+        int coloured = 0;
+        for (int row = 0; row < 16; row++) {
+            for (int x = 0; x < 160; x++) {
+                const size_t o = static_cast<size_t>(row) * width * 4 +
+                                 static_cast<size_t>(x) * 4;
+                const int r = fb[o], g = fb[o + 1], b = fb[o + 2];
+                const int hi = std::max(r, std::max(g, b));
+                const int lo = std::min(r, std::min(g, b));
+                if (hi - lo > 40) coloured++; // Not a grey
+            }
+        }
+        return coloured;
+    };
+
+    Emulator iie(MachineId::AppleIIe);
+    iie.init();
+
+    SECTION("a //e's text is grey in every mode, because it kills the burst") {
+        REQUIRE(colouredPixels(iie, VideoColorMode::PIXEL_EXACT) == 0);
+        REQUIRE(colouredPixels(iie, VideoColorMode::RGB_MONITOR) == 0);
+        REQUIRE(colouredPixels(iie, VideoColorMode::COMPOSITE) == 0);
+        REQUIRE(colouredPixels(iie, VideoColorMode::MONOCHROME) == 0);
+    }
+
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIPlus)) return;
+
+    Emulator iiPlus(MachineId::AppleIIPlus);
+    iiPlus.init();
+
+    SECTION("a II+'s text carries colour wherever a decoder is running") {
+        // Even the sharp modes tint the strokes when the burst is live; what
+        // they refuse to do is let the colour spread past them.
+        REQUIRE(colouredPixels(iiPlus, VideoColorMode::PIXEL_EXACT) > 0);
+        REQUIRE(colouredPixels(iiPlus, VideoColorMode::COMPOSITE) >
+                colouredPixels(iiPlus, VideoColorMode::PIXEL_EXACT));
+    }
+
+    SECTION("...but a monochrome monitor has no chroma to show") {
+        REQUIRE(colouredPixels(iiPlus, VideoColorMode::MONOCHROME) == 0);
+    }
+}
+
+TEST_CASE("A II+ has a slot 0 and a //e does not", "[machine]") {
+    // slots_ is indexed by slot number and has room for slot 0; which machines
+    // actually have one is the profile's answer.
+    MMU iiPlus(machineProfile(MachineId::AppleIIPlus));
+    MMU iie(machineProfile(MachineId::AppleIIe));
+
+    REQUIRE(iiPlus.isSlotEmpty(0));
+    auto card = std::make_unique<ThunderclockCard>();
+    REQUIRE(iiPlus.insertCard(0, std::move(card)) == nullptr);
+    REQUIRE_FALSE(iiPlus.isSlotEmpty(0));
+    REQUIRE(iiPlus.getCard(0) != nullptr);
+
+    SECTION("a //e refuses slot 0 and hands the card back") {
+        auto rejected = std::make_unique<ThunderclockCard>();
+        auto *raw = rejected.get();
+        auto returned = iie.insertCard(0, std::move(rejected));
+        REQUIRE(returned.get() == raw);
+        REQUIRE(iie.isSlotEmpty(0));
+    }
+
+    SECTION("both machines still take an ordinary slot") {
+        REQUIRE(iie.insertCard(5, std::make_unique<ThunderclockCard>()) == nullptr);
+        REQUIRE_FALSE(iie.isSlotEmpty(5));
+        REQUIRE(iiPlus.insertCard(5, std::make_unique<ThunderclockCard>()) == nullptr);
+        REQUIRE_FALSE(iiPlus.isSlotEmpty(5));
+    }
+
+    SECTION("a slot neither machine has is still refused") {
+        auto tooHigh = std::make_unique<ThunderclockCard>();
+        auto *raw = tooHigh.get();
+        REQUIRE(iiPlus.insertCard(8, std::move(tooHigh)).get() == raw);
+    }
 }
 
 TEST_CASE("The legacy constants still agree with the profile", "[machine]") {

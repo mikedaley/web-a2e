@@ -29,6 +29,7 @@ import "../css/documentation.css";
 import "../css/window-switcher.css";
 import "../css/docking.css";
 import "../css/fullscreen-popouts.css";
+import "../css/machine-selector.css";
 import "../css/responsive.css";
 
 import { VERSION } from "./config/version.js";
@@ -37,7 +38,11 @@ import { DEFAULT_LAYOUT } from "./config/default-layout.js";
 import { WebGLRenderer } from "./display/webgl-renderer.js";
 import { AudioDriver } from "./audio/audio-driver.js";
 import { WasmProxy } from "./worker/wasm-proxy.js";
-import { loadMachineProfile, machineDisplay } from "./machine/machine-profile.js";
+import {
+  loadMachineProfile,
+  machineDisplay,
+  restoreRememberedMachine,
+} from "./machine/machine-profile.js";
 import {
   allocateSharedBuffers,
   FB_BYTES,
@@ -60,6 +65,7 @@ import { UIController } from "./ui/ui-controller.js";
 import { ThemeManager } from "./ui/theme-manager.js";
 import { showToast } from "./ui/toast.js";
 import { SlotConfigurationWindow } from "./ui/slot-configuration-window.js";
+import { MachineSelectorWindow } from "./machine/machine-selector-window.js";
 import { SerialConnectionWindow } from "./serial/serial-connection-window.js";
 import { PrinterWindow } from "./printer/printer-window.js";
 import { PrinterManager } from "./printer/printer-manager.js";
@@ -134,6 +140,11 @@ class AppleIIeEmulator {
       // the screenshot canvas, the selection overlay, the printer's screen
       // dump — reads the answer instead of assuming a //e.
       this.machine = await loadMachineProfile(this.wasmModule);
+
+      // ...then move to whichever machine the user last chose. This happens
+      // before the renderer and the windows exist, so they are built for the
+      // right machine rather than being rebuilt for it a moment later.
+      this.machine = await restoreRememberedMachine(this.wasmModule);
 
       // Set up renderer
       const canvas = document.getElementById("screen");
@@ -380,6 +391,22 @@ class AppleIIeEmulator {
       await slotConfigWindow.create();
       this.windowManager.register(slotConfigWindow);
 
+      // Machine selector. Switching rebuilds the emulator in the core, so the
+      // host has to put itself back together afterwards: the machine's picture
+      // may be a different size, the slots are back to that machine's defaults,
+      // and nothing is in a drive.
+      this.machineSelectorWindow = new MachineSelectorWindow(
+        this.wasmModule,
+        async (profile) => {
+          this.machine = profile;
+          this.renderer.setMachineDisplay(profile.display);
+          await this.onMachineChanged();
+          showToast(`Switched to ${profile.name}`, "info", 4000);
+        },
+      );
+      await this.machineSelectorWindow.create();
+      this.windowManager.register(this.machineSelectorWindow);
+
       // Release notes window
       this.releaseNotesWindow = new ReleaseNotesWindow();
       this.releaseNotesWindow.create();
@@ -615,6 +642,33 @@ class AppleIIeEmulator {
     } else {
       this.mouseHandler.disable();
     }
+  }
+
+  /**
+   * Put the host back together after the core has rebuilt itself as a
+   * different machine.
+   *
+   * A switch destroys the emulator and constructs a new one, so everything the
+   * host had pushed *into* the core is gone with it: the picture it had chosen,
+   * the volume, the character set, the clock speed. None of that is machine
+   * state — it is the user's preferences, and they were true a moment ago and
+   * are still true now. Re-applying them is what makes a switch feel like
+   * changing computers rather than losing your settings.
+   */
+  async onMachineChanged() {
+    // The picture first, so nothing is drawn with the core's defaults.
+    if (this.displaySettings) {
+      this.displaySettings.applyAllSettings();
+    }
+    if (this.audioDriver) {
+      this.audioDriver.applyVolumeToEmulator?.();
+    }
+    if (this.emulationSpeed) this.emulationSpeed.apply();
+    if (this.uiController) this.uiController.applyCharacterSet?.();
+
+    await this.updateMouseHandlerState();
+    if (this.diskManager) this.diskManager.syncWithEmulatorState?.();
+    if (this.hardDriveManager) this.hardDriveManager.syncWithEmulatorState();
   }
 
   /**

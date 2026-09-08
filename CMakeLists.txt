@@ -72,7 +72,7 @@ set(ROM_FILES
 # Apple II Plus ROMs are optional — the generator emits empty arrays when they
 # are missing, and the II+ profile then reports having no ROM. Listed separately
 # so a missing file is not a broken dependency for the //e build.
-set(ROM_FILES_OPTIONAL
+set(ROM_FILES_OPTIONAL_CANDIDATES
     roms/341-0011.bin   # Applesoft $D000-$D7FF
     roms/341-0012.bin   # Applesoft $D800-$DFFF
     roms/341-0013.bin   # Applesoft $E000-$E7FF
@@ -83,12 +83,27 @@ set(ROM_FILES_OPTIONAL
     roms/341-0036.bin   # II+ character generator
 )
 
+# Only the candidates that are actually present become build dependencies. A
+# DEPENDS entry with no rule to build it is a hard error, and these are
+# alternatives — supplying the six motherboard ROMs means apple2plus.rom will
+# never exist, and vice versa. Re-run cmake after adding ROMs.
+set(ROM_FILES_OPTIONAL "")
+foreach(candidate ${ROM_FILES_OPTIONAL_CANDIDATES})
+    if(EXISTS ${CMAKE_SOURCE_DIR}/${candidate})
+        list(APPEND ROM_FILES_OPTIONAL ${candidate})
+    endif()
+endforeach()
+
 # Custom command to generate ROM header
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/generated/roms.cpp
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/generated
     COMMAND ${CMAKE_SOURCE_DIR}/scripts/generate_roms.sh ${CMAKE_SOURCE_DIR}/roms ${CMAKE_BINARY_DIR}/generated/roms.cpp
-    DEPENDS ${ROM_FILES} ${CMAKE_SOURCE_DIR}/scripts/generate_roms.sh
+    # ROM_FILES_OPTIONAL must be listed too. Without it, dropping the II+ ROMs
+    # into roms/ changed nothing the build was watching, so roms.cpp stayed as
+    # it was and the machine reported having no ROM long after its ROM existed.
+    DEPENDS ${ROM_FILES} ${ROM_FILES_OPTIONAL}
+            ${CMAKE_SOURCE_DIR}/scripts/generate_roms.sh
     COMMENT "Generating ROM data arrays"
 )
 
