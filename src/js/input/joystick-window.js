@@ -6,6 +6,19 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
+import {
+  GAME_PORT_APPLE,
+  GAME_PORT_CODE,
+  GAME_PORT_DEVICES,
+  GAME_PORT_JOYPORT,
+  JOYPORT_STICKS,
+  SWITCH,
+  describeSwitches,
+  isGamePortDevice,
+  switchesFromDirections,
+  loadStoredGamePort,
+  storeGamePort,
+} from "./game-port.js";
 
 // Soft switch state bits for the Apple buttons, matching soft-switch-window.js.
 const BTN0_BIT = 24; // $C061 Open Apple
@@ -13,6 +26,14 @@ const BTN1_BIT = 25; // $C062 Closed Apple
 
 // Fast enough to feel instant on a key press without polling every frame.
 const BUTTON_POLL_MS = 50;
+
+// The four directions of a digital stick, in the order the D-pad draws them.
+const JOYPORT_DIRECTIONS = [
+  { bit: SWITCH.UP, name: "up", glyph: "\u25B2", area: "u" },
+  { bit: SWITCH.LEFT, name: "left", glyph: "\u25C0", area: "l" },
+  { bit: SWITCH.RIGHT, name: "right", glyph: "\u25B6", area: "r" },
+  { bit: SWITCH.DOWN, name: "down", glyph: "\u25BC", area: "d" },
+];
 
 /**
  * Extract the two Apple button states from a soft switch word.
@@ -32,10 +53,10 @@ export class JoystickWindow extends BaseWindow {
     super({
       id: "joystick",
       title: "Joystick",
-      defaultWidth: 250,
-      defaultHeight: 470,
-      minWidth: 250,
-      minHeight: 480,
+      defaultWidth: 260,
+      defaultHeight: 540,
+      minWidth: 260,
+      minHeight: 540,
       resizeDirections: [],
     });
     this.wasmModule = wasmModule;
@@ -49,6 +70,16 @@ export class JoystickWindow extends BaseWindow {
     this.cursorKeysEnabled = localStorage.getItem("joystick-cursor-keys") === "true";
     this.cursorKeysState = { left: false, right: false, up: false, down: false };
     this.onCursorKeysChanged = null; // callback when toggle changes
+
+    // What is plugged into the game I/O connector. The Joyport drives the same
+    // three pushbutton inputs the Apple keys do, and drives them inverted, so
+    // the two devices replace each other rather than coexisting.
+    this.gamePort = loadStoredGamePort();
+    this.joyportSticks = new Array(JOYPORT_STICKS).fill(0);
+    // Which switch the mouse is currently holding, so leaving the button
+    // releases exactly that one.
+    this.joyportHeld = null;
+    this.onGamePortChanged = null;
   }
 
   /**
@@ -86,7 +117,7 @@ export class JoystickWindow extends BaseWindow {
 
   show() {
     super.show();
-    this.startButtonPolling();
+    if (!this.isJoyport()) this.startButtonPolling();
   }
 
   hide() {
@@ -97,8 +128,18 @@ export class JoystickWindow extends BaseWindow {
   }
 
   renderContent() {
+    const options = GAME_PORT_DEVICES.map(
+      (d) =>
+        `<option value="${d.id}" title="${d.description}">${d.label}</option>`,
+    ).join("");
+
     return `
       <div class="joystick-container">
+        <div class="game-port-row">
+          <span class="game-port-label">Game port</span>
+          <select class="settings-select game-port-select">${options}</select>
+        </div>
+        <div class="joystick-apple-panel">
         <div class="joystick-area-wrapper">
           <span class="joystick-axis-label joystick-axis-l">L</span>
           <span class="joystick-axis-label joystick-axis-r">R</span>
@@ -142,6 +183,10 @@ export class JoystickWindow extends BaseWindow {
         <div class="joystick-center-btn-container">
           <button class="joystick-center-btn" title="Center (reset to 128,128)">&#x2316;</button>
         </div>
+        </div>
+        <div class="joyport-panel">
+          ${this.renderJoyportSticks()}
+        </div>
         <div class="gamepad-section">
           <div class="gamepad-status-row">
             <label class="gamepad-toggle-label">
@@ -161,6 +206,41 @@ export class JoystickWindow extends BaseWindow {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * One card per Joyport stick: a D-pad of the four switches and a fire
+   * button, each holdable with the mouse and each lit by whatever is driving
+   * the stick — mouse, gamepad or cursor keys.
+   */
+  renderJoyportSticks() {
+    let html = "";
+    for (let stick = 0; stick < JOYPORT_STICKS; stick++) {
+      const pad = JOYPORT_DIRECTIONS.map(
+        (dir) => `
+            <button class="joyport-dir joyport-dir-${dir.area}"
+                    data-stick="${stick}" data-switch="${dir.bit}"
+                    title="${dir.name}">${dir.glyph}</button>`,
+      ).join("");
+
+      html += `
+        <div class="joyport-stick" data-stick="${stick}">
+          <div class="joyport-stick-header">
+            <span class="joyport-stick-name">Stick ${stick + 1}</span>
+            <span class="joyport-stick-readout" data-stick="${stick}">Centred</span>
+          </div>
+          <div class="joyport-stick-body">
+            <div class="joyport-dpad">${pad}
+              <span class="joyport-dpad-hub"></span>
+            </div>
+            <button class="joyport-fire" data-stick="${stick}" data-switch="${SWITCH.FIRE}">
+              <span class="joystick-btn-led"></span>
+              <span class="joystick-btn-label">FIRE</span>
+            </button>
+          </div>
+        </div>`;
+    }
+    return html;
   }
 
   onContentRendered() {
@@ -193,7 +273,13 @@ export class JoystickWindow extends BaseWindow {
       ".gamepad-deadzone-value",
     );
 
+    this.applePanel = this.contentElement.querySelector(".joystick-apple-panel");
+    this.joyportPanel = this.contentElement.querySelector(".joyport-panel");
+    this.gamePortSelect = this.contentElement.querySelector(".game-port-select");
+
     this.setupJoystickEventListeners();
+    this.setupJoyportEventListeners();
+    this.setupGamePortSelector();
     this.setupGamepadEventListeners();
     this.updateKnobPosition();
     this.updatePaddleValues();
@@ -295,6 +381,129 @@ export class JoystickWindow extends BaseWindow {
       this.updateKnobPosition();
       this.updatePaddleValues();
     });
+  }
+
+  // ==========================================================================
+  // Game port device
+  // ==========================================================================
+
+  setupGamePortSelector() {
+    if (!this.gamePortSelect) return;
+    this.gamePortSelect.value = this.gamePort;
+    this.gamePortSelect.addEventListener("change", () => {
+      this.setGamePort(this.gamePortSelect.value);
+    });
+    this.reflectGamePort();
+  }
+
+  /**
+   * Choose what is on the game connector and tell the core.
+   *
+   * Kept separate from `reflectGamePort` so startup can push the remembered
+   * choice into a freshly built core — after a machine switch, say — without
+   * rewriting storage or re-firing the change callback.
+   */
+  setGamePort(device, { persist = true } = {}) {
+    const next = isGamePortDevice(device) ? device : GAME_PORT_APPLE;
+    this.gamePort = next;
+    if (persist) storeGamePort(next);
+    if (this.gamePortSelect) this.gamePortSelect.value = next;
+
+    // Nothing held on the old device is held on the new one.
+    this.joyportHeld = null;
+    for (let stick = 0; stick < JOYPORT_STICKS; stick++) {
+      this.joyportSticks[stick] = 0;
+      this.paintJoyportStick(stick);
+    }
+
+    this.applyGamePort();
+    this.reflectGamePort();
+    this.gamepadHandler?.setGamePort?.(next);
+    if (this.onGamePortChanged) this.onGamePortChanged(next);
+  }
+
+  /** Push the selected device into WASM. */
+  applyGamePort() {
+    this.wasmModule?._setGamePortDevice?.(GAME_PORT_CODE[this.gamePort] ?? 0);
+  }
+
+  isJoyport() {
+    return this.gamePort === GAME_PORT_JOYPORT;
+  }
+
+  /** Show the panel that belongs to the selected device. */
+  reflectGamePort() {
+    const joyport = this.isJoyport();
+    if (this.applePanel) this.applePanel.hidden = joyport;
+    if (this.joyportPanel) this.joyportPanel.hidden = !joyport;
+    // The PB0/PB1 LEDs belong to the Apple panel, and in Joyport mode those
+    // lines read inverted, so there is nothing worth polling for.
+    if (joyport) this.stopButtonPolling();
+    else if (this.isVisible) this.startButtonPolling();
+  }
+
+  // ==========================================================================
+  // Joyport sticks
+  // ==========================================================================
+
+  setupJoyportEventListeners() {
+    const switches = this.contentElement.querySelectorAll("[data-switch]");
+    for (const el of switches) {
+      const stick = Number(el.dataset.stick);
+      const bit = Number(el.dataset.switch);
+
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this.joyportHeld = { stick, bit };
+        this.holdJoyportSwitch(stick, bit, true);
+      });
+      el.addEventListener("mouseup", () => this.releaseHeldJoyportSwitch());
+      el.addEventListener("mouseleave", () => this.releaseHeldJoyportSwitch());
+    }
+  }
+
+  releaseHeldJoyportSwitch() {
+    if (!this.joyportHeld) return;
+    const { stick, bit } = this.joyportHeld;
+    this.joyportHeld = null;
+    this.holdJoyportSwitch(stick, bit, false);
+  }
+
+  /** Close or open one switch on one stick and push the whole mask across. */
+  holdJoyportSwitch(stick, bit, closed) {
+    if (stick < 0 || stick >= JOYPORT_STICKS) return;
+    const mask = closed
+      ? this.joyportSticks[stick] | bit
+      : this.joyportSticks[stick] & ~bit;
+    this.setJoyportStick(stick, mask, { push: true });
+  }
+
+  /**
+   * Show a stick's switch state, and optionally send it.
+   *
+   * The gamepad handler has already written to WASM by the time it calls here,
+   * so it leaves `push` alone; the mouse and the cursor keys need the write.
+   */
+  setJoyportStick(stick, mask, { push = false } = {}) {
+    if (stick < 0 || stick >= JOYPORT_STICKS) return;
+    this.joyportSticks[stick] = mask;
+    if (push) this.wasmModule?._setJoyportStick?.(stick, mask);
+    this.paintJoyportStick(stick);
+  }
+
+  paintJoyportStick(stick) {
+    if (!this.contentElement) return;
+    const mask = this.joyportSticks[stick];
+    const controls = this.contentElement.querySelectorAll(
+      `[data-switch][data-stick="${stick}"]`,
+    );
+    for (const el of controls) {
+      el.classList.toggle("pressed", (mask & Number(el.dataset.switch)) !== 0);
+    }
+    const readout = this.contentElement.querySelector(
+      `.joyport-stick-readout[data-stick="${stick}"]`,
+    );
+    if (readout) readout.textContent = describeSwitches(mask);
   }
 
   updateKnobFromMouse(e) {
@@ -422,6 +631,23 @@ export class JoystickWindow extends BaseWindow {
 
   updateCursorKeysPaddle() {
     const s = this.cursorKeysState;
+    if (this.isJoyport()) {
+      // The Joyport's switches are exactly what the cursor keys already are,
+      // so they drive stick 1 directly rather than through a paddle position.
+      this.setJoyportStick(
+        0,
+        switchesFromDirections({
+          up: s.up,
+          down: s.down,
+          left: s.left,
+          right: s.right,
+          fire: (this.joyportSticks[0] & SWITCH.FIRE) !== 0,
+        }),
+        { push: true },
+      );
+      return;
+    }
+
     // Map to 0, 0.5, or 1 per axis
     let x = 0.5;
     let y = 0.5;
@@ -475,17 +701,23 @@ export class JoystickWindow extends BaseWindow {
 
   /**
    * Called by GamepadHandler when connection state changes.
-   * @param {string|null} name - Controller name or null if disconnected
+   *
+   * The Joyport takes two sticks, so this is a list rather than one name: with
+   * two pads connected it says so instead of naming only the first.
+   *
+   * @param {string[]|string|null} names - Connected controller names
    * @param {boolean} enabled - Whether gamepad input is enabled
    */
-  updateGamepadStatus(name, enabled) {
+  updateGamepadStatus(names, enabled) {
+    const list = Array.isArray(names) ? names : names ? [names] : [];
     if (this.gamepadStatusText) {
-      this.gamepadStatusText.textContent = name
-        ? name.substring(0, 30)
-        : "No controller";
+      let text = "No controller";
+      if (list.length === 1) text = list[0].substring(0, 30);
+      else if (list.length > 1) text = `${list.length} controllers`;
+      this.gamepadStatusText.textContent = text;
     }
     if (this.gamepadStatusDot) {
-      this.gamepadStatusDot.classList.toggle("connected", !!name);
+      this.gamepadStatusDot.classList.toggle("connected", list.length > 0);
     }
     if (this.gamepadToggle) {
       this.gamepadToggle.checked = enabled;
@@ -503,6 +735,7 @@ export class JoystickWindow extends BaseWindow {
       knobX: this.knobX,
       knobY: this.knobY,
       cursorKeysEnabled: this.cursorKeysEnabled,
+      gamePort: this.gamePort,
     };
   }
 
@@ -513,6 +746,9 @@ export class JoystickWindow extends BaseWindow {
     if (state.cursorKeysEnabled !== undefined) {
       this.cursorKeysEnabled = state.cursorKeysEnabled;
       if (this.onCursorKeysChanged) this.onCursorKeysChanged(this.cursorKeysEnabled);
+    }
+    if (isGamePortDevice(state.gamePort)) {
+      this.setGamePort(state.gamePort);
     }
     // Update visuals after restoring
     if (this.knobElement) {

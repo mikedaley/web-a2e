@@ -757,6 +757,189 @@
     border-color: var(--control-border-hover);
 }
 
+/* ---- Game port device selector ---- */
+.game-port-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.game-port-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.game-port-select {
+    flex: 1;
+    min-width: 0;
+}
+
+/* The two devices are alternatives, so exactly one panel is ever laid out.
+   Both panels are flex containers, which would otherwise win over [hidden]. */
+.joystick-apple-panel[hidden],
+.joyport-panel[hidden] {
+    display: none;
+}
+
+.joystick-apple-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 6px;
+}
+
+/* ---- Sirius Joyport ---- */
+.joyport-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 8px;
+}
+
+/* Two equal cards filling the panel, so the window is as full on a Joyport as
+   it is on the Apple joystick it replaces. */
+.joyport-stick {
+    flex: 1 1 0;
+    min-height: 0;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    background: var(--glass-bg-header);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.joyport-stick-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.joyport-stick-name {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-primary);
+}
+
+.joyport-stick-readout {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--accent-green);
+    opacity: 0.85;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.joyport-stick-body {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.joyport-dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 32px);
+    grid-template-rows: repeat(3, 32px);
+    grid-template-areas:
+        ".  u  ."
+        "l  h  r"
+        ".  d  .";
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.joyport-dir {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 0.6rem;
+    line-height: 1;
+    color: var(--text-primary);
+    background: var(--control-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.1s ease;
+}
+
+.joyport-dir-u { grid-area: u; }
+.joyport-dir-l { grid-area: l; }
+.joyport-dir-r { grid-area: r; }
+.joyport-dir-d { grid-area: d; }
+
+.joyport-dpad-hub {
+    grid-area: h;
+    border-radius: 50%;
+    background: var(--text-muted);
+    opacity: 0.18;
+    margin: 8px;
+}
+
+.joyport-dir:hover {
+    background: var(--control-bg-hover);
+    border-color: var(--control-border-hover);
+}
+
+.joyport-dir.pressed,
+.joyport-dir:active {
+    background: var(--accent-green-bg);
+    border-color: var(--accent-green-border);
+    color: var(--accent-green);
+}
+
+.joyport-fire {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-primary);
+    background: var(--control-bg);
+    border: 1px solid var(--glass-border);
+    border-bottom: 3px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.1s ease;
+    user-select: none;
+}
+
+.joyport-fire:hover {
+    background: var(--control-bg-hover);
+    border-color: var(--control-border-hover);
+}
+
+.joyport-fire.pressed,
+.joyport-fire:active {
+    background: var(--accent-green-bg);
+    border-color: var(--accent-green-border);
+    border-bottom-width: 1px;
+    transform: translateY(2px);
+    color: var(--accent-green);
+}
+
+.joyport-fire.pressed .joystick-btn-led,
+.joyport-fire:active .joystick-btn-led {
+    background: var(--accent-green);
+    opacity: 1;
+    box-shadow: 0 0 6px var(--accent-green-bg-stronger), 0 0 2px var(--accent-green);
+}
+
 /* Gamepad section */
 .gamepad-section {
     border-top: 1px solid var(--glass-border);

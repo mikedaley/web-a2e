@@ -40,7 +40,9 @@ from `PrinterBase.setEventSink()`), the Applesoft listing parser, input
 mapping, and the host-side machine profile (that a fetch failure leaves callers
 with a usable //e rather than nothing, that a fetched profile actually reaches
 them, and that a machine key is marshalled into the core's heap as a pointer
-rather than passed as a JavaScript string).
+rather than passed as a JavaScript string), and the game port device (that an
+edited storage value falls back to the Apple joystick, and that an opposing
+pair of Joyport directions is dropped rather than sent).
 
 ### Consistency checks
 
@@ -64,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, and that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode), and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, and that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode), and full emulator integration.
 
 ## Architecture
 
@@ -81,6 +83,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `disassembler/` - 65C02 instruction disassembler
 - `assembler/` - Merlin-compatible 65C02 assembler (see Assembler below)
 - `input/keyboard.cpp` - Keyboard input handling
+- `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk2/` - Disk II controller card
@@ -402,6 +405,50 @@ Shift, Control, Caps Lock and the Apple buttons deliberately do not assert AKD
 — they are separate lines on real hardware, not keys in the matrix. Losing
 window focus releases everything, held keys included, because a key held
 across a blur never delivers its key-up.
+
+### The Game Port
+
+The game I/O connector takes one device, and which one is a user choice:
+`GamePortDevice` in `src/core/input/joyport.hpp` — the Apple resistive
+joystick, or Sirius Software's **Joyport**.
+
+The Joyport put two Atari CX40-style digital sticks on the connector. Each has
+five switches and the connector has three pushbutton inputs, so it multiplexes:
+AN0 selects the stick, AN1 selects the axis pair, and PB0-PB2 report fire, the
+first of the pair, and the second.
+
+    AN0   AN1   PB0 ($C061)   PB1 ($C062)   PB2 ($C063)
+    off   off   fire 1        left 1        right 1
+    off   on    fire 1        up 1          down 1
+    on    off   fire 2        left 2        right 2
+    on    on    fire 2        up 2          down 2
+
+**The switches are active low, which is why this is a device choice rather than
+an addition.** A line reads *high* while nothing is pressed — the opposite of a
+pushbutton — so a Joyport cannot share PB0/PB1 with the Open and Closed Apple
+keys. `Emulator::getButtonState()` therefore consults the Joyport *instead of*
+`buttonState_` when it is selected, and switching devices releases whatever the
+old one was holding. It is not a slot card and does not want to be: it hangs
+off the 16-pin connector, so the emulator owns it and the pushbutton read path
+consults it.
+
+The device is a host preference like the speed multiplier — `reset()` clears
+the sticks but keeps the device, and neither is written into a save state. The
+core starts every machine on an Apple joystick, so `main.js` pushes the
+remembered choice back in after startup and again in `onMachineChanged()`.
+
+Host-side, `src/js/input/game-port.js` owns the selection, its storage and the
+mapping from a browser gamepad to five switches (unit-tested in
+`tests/js/input/game-port.test.js`); `JoystickWindow` shows one panel per
+device and `GamepadHandler` now tracks *every* connected pad rather than the
+first, because the Joyport takes two. A single pad drives both sticks — a
+one-player game that happens to read stick 2 then still plays, which is worth
+more than a dead second stick. An opposing pair is dropped rather than sent:
+a real gate cannot close left and right at once, and a program that saw both
+would take whichever it tested first.
+
+`test_joyport.cpp` pins the table above and `test_emulator.cpp` pins it through
+the machine's own read path.
 
 ### CPU Speed
 
@@ -784,7 +831,7 @@ src/
 │   ├── disk-image/     # Disk image formats (DSK/DO/PO/NIB/WOZ), GCR encoding, format conversion
 │   ├── disassembler/   # 65C02 disassembler
 │   ├── assembler/      # Merlin-compatible 65C02 assembler
-│   ├── input/          # Keyboard handling
+│   ├── input/          # Keyboard handling, Sirius Joyport
 │   ├── machine/        # Machine profiles (timing, memory, display, capabilities, slots)
 │   ├── cards/          # Expansion card system
 │   │   ├── disk2/         # Disk II controller card

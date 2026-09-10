@@ -22,6 +22,7 @@ set(CORE_SOURCES
     src/core/disk-image/woz_disk_image.cpp
     src/core/disk-image/disk_converter.cpp
     src/core/disk-image/gcr_encoding.cpp
+    src/core/input/joyport.cpp
     src/core/input/keyboard.cpp
     src/core/disassembler/disassembler.cpp
     src/core/cards/mockingboard/ay8910.cpp
@@ -414,6 +415,10 @@ if(EMSCRIPTEN)
                 \"_setAudioMuted\", \
                 \"_setButton\", \
                 \"_setPaddleValue\", \
+                \"_setGamePortDevice\", \
+                \"_getGamePortDevice\", \
+                \"_setJoyportStick\", \
+                \"_getJoyportStick\", \
                 \"_getPaddleValue\", \
                 \"_getDiskSectorData\", \
                 \"_stopDiskMotor\", \
@@ -524,6 +529,7 @@ else()
         src/core/disk-image/woz_disk_image.cpp
         src/core/disk-image/disk_converter.cpp
         src/core/disk-image/gcr_encoding.cpp
+        src/core/input/joyport.cpp
         src/core/input/keyboard.cpp
         src/core/disassembler/disassembler.cpp
         src/core/cards/mockingboard/ay8910.cpp
@@ -651,6 +657,12 @@ else()
     add_catch2_test(test_keyboard
         tests/unit/test_keyboard.cpp
         src/core/input/keyboard.cpp
+    )
+
+    # Sirius Joyport (only joyport.cpp)
+    add_catch2_test(test_joyport
+        tests/unit/test_joyport.cpp
+        src/core/input/joyport.cpp
     )
 
     # AY-3-8910 (only ay8910.cpp)

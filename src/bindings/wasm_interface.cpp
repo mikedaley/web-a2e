@@ -390,6 +390,34 @@ int getPaddleValue(int paddle) {
   return g_emulator->getPaddleValue(paddle);
 }
 
+// Game I/O connector device: 0 = Apple resistive joystick, 1 = Sirius Joyport.
+EMSCRIPTEN_KEEPALIVE
+void setGamePortDevice(int device) {
+  REQUIRE_EMULATOR();
+  g_emulator->setGamePortDevice(device == 1 ? a2e::GamePortDevice::SiriusJoyport
+                                            : a2e::GamePortDevice::AppleJoystick);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int getGamePortDevice() {
+  REQUIRE_EMULATOR_OR(0);
+  return static_cast<int>(g_emulator->gamePortDevice());
+}
+
+// One call per stick rather than one per switch: the host knows all five
+// switches at once, and this is a fire-and-forget RPC on an input path.
+EMSCRIPTEN_KEEPALIVE
+void setJoyportStick(int stick, int switches) {
+  REQUIRE_EMULATOR();
+  g_emulator->setJoyportStick(stick, switches);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int getJoyportStick(int stick) {
+  REQUIRE_EMULATOR_OR(0);
+  return g_emulator->getJoyportStick(stick);
+}
+
 EMSCRIPTEN_KEEPALIVE
 bool isKeyboardReady() {
   REQUIRE_EMULATOR_OR(true);

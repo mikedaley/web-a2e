@@ -166,6 +166,7 @@ void Emulator::reset() {
   // Clear Apple button states
   setButton(0, false);
   setButton(1, false);
+  joyport_.reset();
 
   keyboardLatch_ = 0;
   keyDown_ = false;
@@ -222,6 +223,7 @@ void Emulator::warmReset() {
   // Clear Apple button states
   setButton(0, false);
   setButton(1, false);
+  joyport_.reset();
 
   // Reset video to clean frame state
   video_->beginNewFrame(cpu_->getTotalCycles());
@@ -796,7 +798,26 @@ int Emulator::getPaddleValue(int paddle) const {
   return mmu_->getPaddleValue(paddle);
 }
 
+void Emulator::setGamePortDevice(GamePortDevice device) {
+  if (device == gamePortDevice_) return;
+  gamePortDevice_ = device;
+  // Whatever was held on the old device is not held on the new one, and a
+  // switch mid-game would otherwise leave a direction stuck down.
+  joyport_.reset();
+  setButton(0, false);
+  setButton(1, false);
+  setButton(2, false);
+}
+
+void Emulator::setJoyportStick(int stick, int switches) {
+  joyport_.setStickState(stick, static_cast<uint8_t>(switches));
+}
+
 uint8_t Emulator::getButtonState(int button) {
+  if (gamePortDevice_ == GamePortDevice::SiriusJoyport) {
+    const SoftSwitches &sw = mmu_->getSoftSwitches();
+    return joyport_.readPushButton(button, sw.an0, sw.an1);
+  }
   if (button >= 0 && button < 3 && buttonState_[button]) {
     return 0x80; // Bit 7 set = button pressed
   }

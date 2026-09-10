@@ -42,6 +42,7 @@ const FIRE_AND_FORGET = new Set([
   '_forceRenderFrame',
   '_setSpeedMultiplier',
   '_setButton', '_setPaddleValue',
+  '_setGamePortDevice', '_setJoyportStick',
   '_runCycles',
   '_stepInstruction',
   '_stepBasicStatement', '_stepBasicLine',

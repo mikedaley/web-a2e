@@ -319,9 +319,17 @@ class AppleIIeEmulator {
       joystickWindow.create();
       this.windowManager.register(joystickWindow);
 
-      this.gamepadHandler = new GamepadHandler(this.wasmModule, joystickWindow);
+      this.gamepadHandler = new GamepadHandler(
+        this.wasmModule,
+        joystickWindow,
+        joystickWindow.gamePort,
+      );
       joystickWindow.gamepadHandler = this.gamepadHandler;
       this.inputHandler.joystickWindow = joystickWindow;
+      this.joystickWindow = joystickWindow;
+      // The core starts every machine on an Apple joystick, so a remembered
+      // Joyport has to be pushed back in.
+      joystickWindow.applyGamePort();
 
       // Show accelerated speeds in the monitor title bar
       this.emulationSpeed.onChange((multiplier) => {
@@ -664,6 +672,9 @@ class AppleIIeEmulator {
     }
     if (this.emulationSpeed) this.emulationSpeed.apply();
     if (this.uiController) this.uiController.applyCharacterSet?.();
+    // A rebuilt core is back on the Apple joystick; the game port is the
+    // user's choice, not the machine's.
+    this.joystickWindow?.applyGamePort();
 
     // The slots a machine has, and which of them the user may touch, are the
     // machine's own business — a II+ has a slot 0 and no built-in 80-column
