@@ -44,6 +44,12 @@ static a2e::iigs::IIgsMachine *g_iigs = nullptr;
 // construction, which is what setMachine() forces.
 static a2e::MachineId g_machineId = a2e::MachineId::AppleIIe;
 
+// How much fast RAM the next IIgs is built with. A ROM 01 shipped with 256K on
+// the board and a memory expansion card took it further, which is what most of
+// them had; anything bigger than ProDOS 8 expects to find one. Like the
+// machine, it takes effect at the next construction.
+static size_t g_iigsFastRam = a2e::iigs::FAST_RAM_SIZE_ROM01;
+
 // Helper macros to reduce repetitive null checks
 #define REQUIRE_EMULATOR() do { if (!g_emulator) return; } while(0)
 #define REQUIRE_EMULATOR_OR(default_val) do { if (!g_emulator) return (default_val); } while(0)
@@ -86,7 +92,7 @@ void init() {
     const uint8_t *rom = a2e::Emulator::systemROMFor(g_machineId, romSize);
     const uint8_t *characters =
         a2e::Emulator::characterROMFor(g_machineId, characterSize);
-    g_iigs = new a2e::iigs::IIgsMachine();
+    g_iigs = new a2e::iigs::IIgsMachine(g_iigsFastRam);
     g_iigs->init(rom, romSize, characters, characterSize);
     return;
   }
@@ -387,6 +393,35 @@ bool setMachine(const char *key) {
   g_iigs = nullptr;
   init();
   return g_emulator != nullptr || g_iigs != nullptr;
+}
+
+// How much fast RAM a IIgs has, in kilobytes.
+//
+// Setting it rebuilds the machine, for the same reason switching machines
+// does: the RAM, the cards and anything in memory are shaped to the machine
+// that made them, and there is no way to grow one underneath a running
+// program. A machine that is not a IIgs remembers the size for when one is
+// built, and is otherwise untouched.
+EMSCRIPTEN_KEEPALIVE
+int getIIgsMemoryKB() {
+  const size_t bytes = g_iigs ? g_iigs->memory().fastRamSize() : g_iigsFastRam;
+  return static_cast<int>(bytes / 1024);
+}
+
+EMSCRIPTEN_KEEPALIVE
+bool setIIgsMemoryKB(int kilobytes) {
+  if (kilobytes <= 0) return false;
+  const size_t requested =
+      a2e::iigs::clampFastRamSize(static_cast<size_t>(kilobytes) * 1024);
+  if (requested == g_iigsFastRam && g_iigs) return true;
+
+  g_iigsFastRam = requested;
+  if (!g_iigs) return true; // Remembered for when a IIgs is built
+
+  delete g_iigs;
+  g_iigs = nullptr;
+  init();
+  return g_iigs != nullptr;
 }
 
 EMSCRIPTEN_KEEPALIVE

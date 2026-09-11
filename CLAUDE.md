@@ -258,6 +258,14 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
+**How much fast RAM a IIgs has is a user choice**, from 256K to 8M, in the
+Machine menu and remembered in localStorage. `_setIIgsMemoryKB` rebuilds the
+machine, as switching machines does, and `main.js` applies the remembered size
+*before* the machine is built rather than after. `clampFastRamSize` rounds to
+whole 64K banks; banks above what is fitted must not answer, because the
+firmware sizes memory by writing to one and reading it back. GS/OS does not yet
+run whatever the size — see `wiki/Apple-IIgs.md` for how far that is understood.
+
 **Slot 5 is the IIgs's SmartPort, and it is part of the machine** — no card to
 fit, no Control Panel setting. `IIgsMemory::setInternalCardSlot` names the slot
 that answers at `$Cn00` whatever `$C02D` says, because a part the machine has is
@@ -1142,7 +1150,7 @@ src/
     ├── file-explorer/  # DOS 3.3 and ProDOS file browser, disassembler
     ├── help/           # Documentation and release notes
     ├── input/          # Keyboard input, text selection, joystick, mouse
-    ├── machine/        # Host-side machine profile fetched from the core
+    ├── machine/        # Host-side machine profile fetched from the core; the IIgs memory size
     ├── state/          # Save state manager and persistence
     ├── ui/             # Menu wiring, reminders, slot configuration
     ├── utils/          # Shared utilities (storage, string, BASIC)

@@ -44,6 +44,10 @@ import {
   restoreRememberedMachine,
 } from "./machine/machine-profile.js";
 import {
+  applyMemoryKB,
+  loadRememberedMemoryKB,
+} from "./machine/iigs-memory.js";
+import {
   allocateSharedBuffers,
   FB_BYTES,
   FB_WIDTH,
@@ -140,6 +144,13 @@ class AppleIIeEmulator {
       // the screenshot canvas, the selection overlay, the printer's screen
       // dump — reads the answer instead of assuming a //e.
       this.machine = await loadMachineProfile(this.wasmModule);
+
+      // How much memory a IIgs has is the user's choice too, and the core has
+      // to be told before one is built rather than after: RAM cannot grow
+      // underneath a running machine, so setting it afterwards would throw
+      // away the machine we just started. On any other machine this is
+      // remembered and nothing else happens.
+      await applyMemoryKB(this.wasmModule, loadRememberedMemoryKB());
 
       // ...then move to whichever machine the user last chose. This happens
       // before the renderer and the windows exist, so they are built for the

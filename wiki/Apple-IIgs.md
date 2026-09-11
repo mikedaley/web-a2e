@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, and it boots a disk.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots, reads both its drives, and you can say how much memory it has.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -108,6 +108,38 @@ live. The drive panel, the activity lights, the seek and motor sounds, the track
 heat map, the file explorer, the display settings, the volume slider and the mute
 button are all the same code they were; they were only ever asking a `DiskController`,
 a `Video` and an `Audio`, and a IIgs has all three.
+
+## Memory
+
+**How much fast RAM the machine has is a choice, and the menu makes it.** A ROM
+01 shipped with 256K soldered to the board and almost nobody left it there — a
+memory expansion card was the first thing most owners fitted. So the Machine
+menu carries a row of sizes under the IIgs, from 256K to the eight megabytes the
+24-bit bus reaches, and the choice is remembered like the machine itself.
+
+Setting it rebuilds the machine, for the same reason switching machines does:
+RAM cannot grow underneath a running program. It is applied before the machine
+is built at startup rather than after, or the size would throw away the machine
+it had just started.
+
+`clampFastRamSize` rounds a requested size to whole 64K banks and holds it
+between what a machine could have, because RAM arrives a bank at a time; a size
+somebody typed, or one written by a later version, gives a machine that starts
+rather than an error. The empty banks above what is fitted must *not* answer —
+the firmware sizes memory by writing to a bank and reading it back, so a machine
+whose unpopulated banks answered would report memory it has not got.
+
+**GS/OS still does not run, and it is not the RAM.** System 6.0.4 stops with
+*Error allocating memory for GS/OS. Error =$0201* — Memory Manager error 1,
+"unable to allocate" — and it stops in exactly the same place with 256K, 1M, 2M
+and 4M fitted. The firmware's own sizing is right: the byte at `$E1:1624` that
+counts the machine's banks goes from `$04` to `$10` when 1M is fitted, and
+`$E1:03CA`, `$E1:177A` and their neighbours follow it. What fails is the tool
+call — `NewHandle` ($0902), after the loader has asked `FreeMem` and `MaxBlock`
+about a dozen times. So the Memory Manager knows how many banks exist and still
+refuses; somewhere the memory model is not giving that firmware what it expects.
+That is the next thing to chase, and it is a separate piece of work from
+fitting the RAM.
 
 ## The SmartPort
 

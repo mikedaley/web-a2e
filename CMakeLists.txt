@@ -162,6 +162,8 @@ if(EMSCRIPTEN)
                 \"_hasSystemROM\", \
                 \"_isMachineRunnable\", \
                 \"_setMachine\", \
+                \"_getIIgsMemoryKB\", \
+                \"_setIIgsMemoryKB\", \
                 \"_forceRenderFrame\", \
                 \"_isFrameReady\", \
                 \"_keyDown\", \

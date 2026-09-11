@@ -160,3 +160,54 @@
     border-radius: var(--radius-sm);
     background: var(--accent-orange-bg);
 }
+
+/* The memory row under the IIgs.
+   Its own line rather than beside the machine's name: six sizes and a label do
+   not fit in the width a name and a spec line share, and a row that wrapped
+   would read as two rows of unrelated things. */
+.machine-menu-ram {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 8px;
+}
+
+.machine-menu-ram-label {
+    flex: none;
+    font-size: 0.5625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.machine-menu-ram-chips {
+    display: flex;
+    gap: 3px;
+    flex: 1 1 auto;
+}
+
+.machine-menu-ram-chip {
+    flex: 1 1 0;
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    line-height: 1;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 4px 0;
+    cursor: pointer;
+}
+
+.machine-menu-ram-chip:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-green-border);
+}
+
+/* The size actually fitted, in the same green as the lit screen above it. */
+.machine-menu-ram-chip.on {
+    color: var(--accent-green);
+    border-color: var(--accent-green-border);
+    background: var(--accent-green-bg);
+}

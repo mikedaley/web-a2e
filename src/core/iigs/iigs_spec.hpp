@@ -62,6 +62,20 @@ inline constexpr size_t BANK_SIZE = 64 * 1024;
 
 inline constexpr size_t FAST_RAM_SIZE_ROM01 = 256 * 1024; // What a ROM 01 shipped with
 inline constexpr size_t FAST_RAM_SIZE_MAX = 8 * 1024 * 1024;
+
+/**
+ * Round a requested amount of fast RAM to something a IIgs could have.
+ *
+ * RAM arrives a bank at a time — 64K — and the machine cannot have less than
+ * the 256K soldered to a ROM 01's board or more than the 24-bit bus can reach.
+ * Everything between is a memory expansion card, which is what most IIgs
+ * owners fitted and what anything bigger than ProDOS 8 expects to find.
+ */
+inline constexpr size_t clampFastRamSize(size_t bytes) {
+  if (bytes < FAST_RAM_SIZE_ROM01) return FAST_RAM_SIZE_ROM01;
+  if (bytes > FAST_RAM_SIZE_MAX) return FAST_RAM_SIZE_MAX;
+  return bytes - (bytes % BANK_SIZE);
+}
 inline constexpr size_t SLOW_RAM_SIZE = 128 * 1024; // Banks $E0-$E1: the Mega II's
 
 inline constexpr uint8_t SLOW_BANK_MAIN = 0xE0;

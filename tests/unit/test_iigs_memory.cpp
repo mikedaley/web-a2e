@@ -358,3 +358,46 @@ TEST_CASE("A IIgs has a register for its slots and one for its drives",
   memory.write(bankAddress(0x00, 0xC031), 0x00);
   REQUIRE_FALSE(memory.selects35Inch());
 }
+
+// ---------------------------------------------------------------------------
+// How much fast RAM the machine has, which is a choice rather than a constant
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Fast RAM is fitted a bank at a time, between what a machine could have",
+          "[iigs][memory]") {
+  // A ROM 01 had 256K on the board and a memory expansion card took it
+  // further; RAM arrives 64K at a time and the bus reaches eight megabytes.
+  // Anything the host asks for outside that is rounded rather than refused,
+  // because a size somebody typed should still give a machine that starts.
+  REQUIRE(clampFastRamSize(0) == FAST_RAM_SIZE_ROM01);
+  REQUIRE(clampFastRamSize(64 * 1024) == FAST_RAM_SIZE_ROM01);
+  REQUIRE(clampFastRamSize(FAST_RAM_SIZE_MAX * 4) == FAST_RAM_SIZE_MAX);
+
+  // A size between banks loses the remainder rather than gaining a part bank.
+  REQUIRE(clampFastRamSize(1024 * 1024 + 1) == 1024 * 1024);
+  REQUIRE(clampFastRamSize(1024 * 1024 + BANK_SIZE) == 1024 * 1024 + BANK_SIZE);
+}
+
+TEST_CASE("A bigger machine answers in the banks a smaller one does not",
+          "[iigs][memory]") {
+  // The point of the setting: banks above the built-in 256K have to be real
+  // memory, and banks above what is fitted have to not be — the firmware sizes
+  // RAM by writing to a bank and reading it back, so a machine whose empty
+  // banks answered would report memory it has not got.
+  IIgsMemory small(FAST_RAM_SIZE_ROM01);
+  IIgsMemory large(1024 * 1024);
+
+  const uint32_t inExpansion = (0x08u << 16) | 0x1234; // bank $08
+  const uint32_t beyondBoth = (0x40u << 16) | 0x1234;  // bank $40
+
+  small.write(inExpansion, 0x5A);
+  large.write(inExpansion, 0x5A);
+  REQUIRE(small.read(inExpansion) != 0x5A); // 256K stops at bank $03
+  REQUIRE(large.read(inExpansion) == 0x5A);
+
+  large.write(beyondBoth, 0x5A);
+  REQUIRE(large.read(beyondBoth) != 0x5A);
+
+  REQUIRE(small.fastRamSize() == FAST_RAM_SIZE_ROM01);
+  REQUIRE(large.fastRamSize() == 1024 * 1024);
+}

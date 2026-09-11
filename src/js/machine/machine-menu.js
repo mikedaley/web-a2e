@@ -11,6 +11,12 @@ import {
   listMachineProfiles,
   switchMachine,
 } from "./machine-profile.js";
+import {
+  IIGS_MEMORY_SIZES,
+  applyMemoryKB,
+  formatMemorySize,
+  readMemoryKB,
+} from "./iigs-memory.js";
 
 /*
  * The machines are drawn rather than photographed: a monitor sitting on the
@@ -116,10 +122,16 @@ function formatK(bytes) {
 }
 
 /** The one-line summary under a machine's name. */
-function specLine(m) {
-  const ram = m.memory?.auxRamSize
-    ? formatK(m.memory.mainRamSize + m.memory.auxRamSize)
-    : formatK(m.memory?.mainRamSize);
+function specLine(m, iigsMemoryKB) {
+  // A IIgs's memory is a choice rather than a fact about the model, so it
+  // reports what is actually fitted. The profile's figure is the Mega II's
+  // 128K, which is the part of a IIgs that cannot change.
+  const ram =
+    m.family === "apple2gs" && iigsMemoryKB
+      ? formatMemorySize(iigsMemoryKB)
+      : m.memory?.auxRamSize
+        ? formatK(m.memory.mainRamSize + m.memory.auxRamSize)
+        : formatK(m.memory?.mainRamSize);
   const columns = m.caps?.has80Column ? "40/80 col" : "40 col";
   return [m.cpu, ram, columns].filter(Boolean).join(" · ");
 }
@@ -139,6 +151,7 @@ export class MachineMenu {
     this.onMachineChanged = onMachineChanged;
     this.machines = [];
     this.switching = false;
+    this.iigsMemoryKB = null;
 
     this.container = document.getElementById("machine-menu-container");
     this.trigger = document.getElementById("btn-machine-chip");
@@ -176,6 +189,7 @@ export class MachineMenu {
   async refresh() {
     if (!this.menuEl || !this.wasmModule) return;
     this.machines = await listMachineProfiles(this.wasmModule);
+    this.iigsMemoryKB = await readMemoryKB(this.wasmModule);
     this.render();
   }
 
@@ -194,15 +208,49 @@ export class MachineMenu {
         this.choose(item.dataset.key);
       });
     }
+
+    for (const chip of this.menuEl.querySelectorAll(".machine-menu-ram-chip")) {
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.chooseMemory(parseInt(chip.dataset.kb, 10));
+      });
+    }
+  }
+
+  /**
+   * The row of memory sizes under the IIgs.
+   *
+   * It is offered only for the machine in use, because setting it builds that
+   * machine — there would be nothing to apply it to otherwise, and a size
+   * sitting under a machine you are not running reads like a promise the menu
+   * does not keep.
+   */
+  memoryRowHTML(m, isCurrent) {
+    if (m.family !== "apple2gs" || !isCurrent || !this.iigsMemoryKB) return "";
+
+    const chips = IIGS_MEMORY_SIZES.map((size) => {
+      const on = size.kb === this.iigsMemoryKB;
+      return `<button class="machine-menu-ram-chip${on ? " on" : ""}"
+                      type="button" data-kb="${size.kb}"
+                      ${size.note ? `title="${size.note}"` : ""}
+                      ${on ? 'aria-pressed="true"' : ""}>${size.label}</button>`;
+    }).join("");
+
+    return `
+      <div class="machine-menu-ram">
+        <span class="machine-menu-ram-label">Memory</span>
+        <span class="machine-menu-ram-chips">${chips}</span>
+      </div>`;
   }
 
   itemHTML(m, currentKey) {
     const isCurrent = m.key === currentKey;
     const unavailable = m.runnable === false;
     // A machine that runs but is not finished says so, because the difference
-    // between "will not start" and "starts but has no keyboard yet" matters to
-    // somebody choosing one. The IIgs boots its firmware and draws; what it
-    // has not got yet is its own video, its sound, and anything to type on.
+    // between "will not start" and "starts but cannot do the thing you wanted"
+    // matters to somebody choosing one. The IIgs boots, reads both its drives
+    // and makes a noise; what it has not got is a 3.5" drive, a Control Panel,
+    // or enough of the machine for GS/OS.
     const partial = m.family === "apple2gs" && !unavailable;
 
     const classes = ["header-menu-item", "machine-menu-item"];
@@ -228,16 +276,53 @@ export class MachineMenu {
                 unavailable
                   ? 'title="Its ROM images are not built in"'
                   : partial
-                    ? 'title="Boots its firmware; no keyboard, disk, sound or Super Hi-Res yet"'
+                    ? 'title="Boots DOS 3.3 and ProDOS 8; no 3.5\" drive, Control Panel or GS/OS yet"'
                     : ""
               }>
         <span class="machine-menu-art">${MACHINE_ART[m.key] || ""}</span>
         <span class="machine-menu-text">
           <span class="machine-menu-name">${m.name}</span>
-          <span class="machine-menu-spec">${specLine(m)}</span>
+          <span class="machine-menu-spec">${specLine(m, this.iigsMemoryKB)}</span>
         </span>
         ${mark}
-      </button>`;
+      </button>${this.memoryRowHTML(m, isCurrent)}`;
+  }
+
+  /**
+   * Fit a different amount of memory, which rebuilds the machine.
+   *
+   * Same bargain as switching machines, and said in the same words: RAM cannot
+   * grow underneath a running program, so everything in memory goes.
+   */
+  async chooseMemory(kb) {
+    if (this.switching || !Number.isFinite(kb)) return;
+    if (kb === this.iigsMemoryKB) {
+      this.close();
+      return;
+    }
+
+    this.close();
+    const ok = await showConfirm(
+      `Fit ${formatMemorySize(kb)} of memory?\n\n` +
+        "The machine is rebuilt from scratch. Inserted disks, hard drives and " +
+        "anything in memory are lost.",
+      "Fit",
+    );
+    if (!ok) return;
+
+    this.switching = true;
+    const settled = await applyMemoryKB(this.wasmModule, kb);
+    this.switching = false;
+
+    if (settled === null) {
+      console.warn(`The core refused ${formatMemorySize(kb)} of memory.`);
+      return;
+    }
+
+    if (this.onMachineChanged) {
+      await this.onMachineChanged(getMachineProfile());
+    }
+    await this.refresh();
   }
 
   async choose(key) {
