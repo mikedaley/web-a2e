@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), a //c's serial ports (where the ACIA answers, both directions of the line, and that its firmware drives them through PR# and IN#), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), a //c's serial ports (where the ACIA answers, both directions of the line, and that its firmware drives them through PR# and IN#), a //c's IOU mouse (each switch, one interrupt per step, and its own firmware tracking a mouse across the screen and back to the clamp), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
 
 ## Architecture
 
@@ -84,6 +84,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `assembler/` - Merlin-compatible 65C02 assembler (see Assembler below)
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
+- `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -355,8 +356,28 @@ machines, because the question is about a serial line rather than about what
 provides it: transmit goes to every port there is, and a byte arriving from
 outside goes to port 2, the modem port, since a printer does not talk back.
 
-**What is not implemented is the mouse**, which is the //e's mouse card — close,
-but not how a //c's is wired.
+**Its mouse is the IOU, and is the one part that is not a card at all.** A //e's
+mouse is an MC6821 in a slot with a ROM and a command protocol; a //c's is two
+quadrature lines into the IOU, so `MouseIOU` (`input/mouse_iou.cpp`) is owned by
+the `Emulator` and hooked into `MMU::readSoftSwitch`/`writeSoftSwitch` by a
+pointer that is null on every other machine — which is what keeps a //e's
+`$C015`, `$C063` and `$C066` exactly as they were. The profile names "mouse" in
+slot 4 only because that is where a //c's mouse *firmware* lives.
+
+Two things about it are load-bearing:
+
+- **Travel is interrupts, not a delta.** The IOU counts nothing. Each unit of
+  movement toggles X0, the edge raises an IRQ, and the firmware's handler reads
+  X1 for the direction and adds one to a position in slot 4's screen holes. So
+  host movement is banked and released one step at a time, and never onto a
+  flag the handler has not cleared — releasing them faster loses the ones in
+  between, which looks like a mouse that moves part of the way and sticks.
+- **`$C015` and `$C017` report; only `$C048` clears.** Table 9-2 of the //c
+  Technical Reference calls them RstXInt and RstYInt and says a read resets
+  them, and the machine's own handler proves otherwise: it reads `$C015` and
+  ORs `$C017` to see whether either fired, BITs each again to see which, then
+  writes `$C048` when it is done. A read that cleared would send every X
+  movement down the Y path. The firmware is the authority, not the table.
 
 #### Choosing a machine
 

@@ -6,6 +6,7 @@
  */
 
 #include "mmu.hpp"
+#include "../input/mouse_iou.hpp"
 #include "../cards/expansion_card.hpp"
 #include "../noslot_clock.hpp"
 #include <cstring>
@@ -32,6 +33,12 @@ void MMU::reset() {
 
   // Reset soft switches to default state
   switches_ = SoftSwitches{};
+  // IOUDIS comes up on, which is what a //c's firmware assumes: with it on,
+  // $C05E and $C05F are the double hi-res switch and the rest of that group is
+  // reserved, and the firmware turns it off only around the moment it needs a
+  // mouse switch. A machine without the switch at all is unaffected, since
+  // nothing else reads this.
+  switches_.ioudis = machine_->caps.hasIOUDisable;
 
   // Keyboard
   keyboardLatch_ = 0;
@@ -58,6 +65,7 @@ void MMU::warmReset() {
   // On real Apple IIe hardware, the reset signal resets the IOU/MMU
   // soft switches but does not clear memory
   switches_ = SoftSwitches{};
+  switches_.ioudis = machine_->caps.hasIOUDisable; // As after a cold reset
 
   // Keyboard
   keyboardLatch_ = 0;
@@ -351,6 +359,10 @@ uint8_t MMU::peekAux(uint16_t address) const {
 uint8_t MMU::peekSoftSwitch(uint16_t address) const {
   // Non-side-effecting soft switch read for debugger
   uint8_t reg = address & 0xFF;
+
+  if (mouseIOU_ && mouseIOU_->handles(reg, switches_.ioudis)) {
+    return mouseIOU_->peek(reg);
+  }
 
   switch (reg) {
   // Keyboard - return current latch without updating
@@ -880,8 +892,39 @@ uint8_t MMU::getFloatingBusValue() {
   return mainRAM_[address];
 }
 
+bool MMU::isInVerticalBlank() const {
+  const uint64_t cycles = cycleCallback_ ? cycleCallback_() : 0;
+  const uint32_t scanline = (cycles % machine_->timing.cyclesPerFrame()) /
+                            machine_->timing.cyclesPerScanline;
+  return scanline >= static_cast<uint32_t>(machine_->timing.visibleScanlines);
+}
+
 uint8_t MMU::readSoftSwitch(uint16_t address) {
   uint8_t reg = address & 0xFF;
+
+  // A //c's mouse lives in this range rather than in a slot: its movement
+  // interrupt flags, its masks, its edge selects, its direction lines and its
+  // button are a dozen addresses scattered through $C0xx, several of which are
+  // something else entirely on a //e. It gets first refusal on the ones it
+  // owns, and asking `handles` rather than testing the machine keeps the
+  // IOUDIS rule — $C058-$C05F are only the mouse's while IOU access is on — in
+  // one place.
+  if (mouseIOU_ && mouseIOU_->handles(reg, switches_.ioudis)) {
+    return mouseIOU_->read(reg) | (getFloatingBusValue() & 0x7F);
+  }
+
+  // IOUDIS, on a machine that has one. The Technical Reference names $C07E and
+  // $C07F, but the whole $C078-$C07F block decodes with the low address bit
+  // choosing — even turns IOU access off, odd turns it on — and the //c's own
+  // mouse firmware uses $C078/$C079, so honouring only the documented pair
+  // would leave the machine unable to reach its own switches.
+  if (mouseIOU_ && reg >= 0x78 && reg <= 0x7E) {
+    // A read is the switch too, and $C07E reports it: bit 7 set means IOU
+    // access is enabled, which the Reference words as "IOUDIS off".
+    const bool wasDisabled = switches_.ioudis;
+    switches_.ioudis = (reg & 0x01) == 0;
+    return (wasDisabled ? 0x00 : 0x80) | (getFloatingBusValue() & 0x7F);
+  }
 
   switch (reg) {
   // Keyboard
@@ -918,15 +961,14 @@ uint8_t MMU::readSoftSwitch(uint16_t address) {
     return (switches_.slotc3rom ? 0x80 : 0x00) | (getFloatingBusValue() & 0x7F); // RDC3ROM
   case 0x18:
     return (switches_.store80 ? 0x80 : 0x00) | (getFloatingBusValue() & 0x7F); // RD80STORE
-  case 0x19: { // RDVBLBAR - vertical blank status
-    // Bit 7 = 0 during vertical blank (scanlines 192-261), 1 during active display
-    uint64_t cycles = cycleCallback_ ? cycleCallback_() : 0;
-    uint32_t scanline = (cycles % machine_->timing.cyclesPerFrame()) /
-                        machine_->timing.cyclesPerScanline;
-    bool inVBL = (scanline >= static_cast<uint32_t>(
-                                  machine_->timing.visibleScanlines));
-    return (inVBL ? 0x00 : 0x80) | (getFloatingBusValue() & 0x7F);
-  }
+  case 0x19: // RDVBLBAR - vertical blank status
+    // Reading it is also how a //c acknowledges its VBL interrupt, which is
+    // why the mouse is told: the firmware's handler reads this to find out
+    // whether it was woken by vertical blanking, and never touches anything
+    // else that could clear the flag.
+    if (mouseIOU_) mouseIOU_->clearVblInterrupt();
+    // Bit 7 = 0 during vertical blank, 1 during active display
+    return (isInVerticalBlank() ? 0x00 : 0x80) | (getFloatingBusValue() & 0x7F);
   case 0x1A:
     return (switches_.text ? 0x80 : 0x00) | (getFloatingBusValue() & 0x7F); // RDTEXT
   case 0x1B:
@@ -1091,6 +1133,9 @@ uint8_t MMU::readSoftSwitch(uint16_t address) {
 
   // Paddle trigger reset - starts all paddle timers
   case 0x70: // PTRIG - reset paddle timers
+    // On a //c this also clears the VBL interrupt, as the Reference says of
+    // every $C07n access.
+    if (mouseIOU_) mouseIOU_->clearVblInterrupt();
     paddleTriggerCycle_ = cycleCallback_ ? cycleCallback_() : 0;
     return getFloatingBusValue();
 
@@ -1221,6 +1266,21 @@ void MMU::writeSoftSwitch(uint16_t address, uint8_t value) {
   // the group wholesale is what stops software probing for a //e from
   // convincing this MMU it has hardware the machine does not have.
   if (reg <= 0x0F && !machine_->caps.hasAuxRam) {
+    return;
+  }
+
+  if (mouseIOU_ && mouseIOU_->handles(reg, switches_.ioudis)) {
+    mouseIOU_->write(reg);
+    return;
+  }
+
+  // IOUDIS, on a machine that has one. The Technical Reference names $C07E and
+  // $C07F, but the whole $C078-$C07F block decodes with the low address bit
+  // choosing — even turns IOU access off, odd turns it on — and the //c's own
+  // mouse firmware uses $C078/$C079, so honouring only the documented pair
+  // would leave the machine unable to reach its own switches.
+  if (mouseIOU_ && reg >= 0x78 && reg <= 0x7F) {
+    switches_.ioudis = (reg & 0x01) == 0;
     return;
   }
 

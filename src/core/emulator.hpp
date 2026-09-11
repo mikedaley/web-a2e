@@ -21,6 +21,7 @@
 #include "cards/parallel/parallel_card.hpp"
 #include "cards/softcard/softcard_z80.hpp"
 #include "cards/serial/serial_port.hpp"
+#include "input/mouse_iou.hpp"
 #include "cards/ssc/ssc_card.hpp"
 #include "disk-image/disk_converter.hpp"
 #include "filesystem/fs_write_status.hpp"
@@ -375,6 +376,10 @@ public:
   MockingboardCard &getMockingboard() { return *mockingboard_; }
   MockingboardCard *getMockingboardPtr() { return mockingboard_; }
   MouseCard* getMouseCard() { return mouse_; }
+
+  // A //c's mouse, which is not a card: null on machines whose mouse is one.
+  MouseIOU* getMouseIOU() { return mouseIOU_.get(); }
+  bool isMouseInstalled() const { return mouse_ != nullptr || mouseIOU_ != nullptr; }
   SmartPortCard* getSmartPortCard() { return smartport_; }
   SoftCardZ80* getSoftCard() { return softcard_; }
   SSCCard* getSSCCard() { return ssc_; }
@@ -462,6 +467,9 @@ private:
   DiskController* disk_ = nullptr;
   MockingboardCard* mockingboard_ = nullptr;
   MouseCard* mouse_ = nullptr;
+  // Owned, unlike the cards: a //c's mouse is part of the machine, not
+  // something fitted to it, so there is no slot to hold it.
+  std::unique_ptr<MouseIOU> mouseIOU_;
   SmartPortCard* smartport_ = nullptr;
   SoftCardZ80* softcard_ = nullptr;
   SSCCard* ssc_ = nullptr;

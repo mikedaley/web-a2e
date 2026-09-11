@@ -710,6 +710,136 @@ TEST_CASE("A //c's serial ports are on the board, and its firmware uses them",
     }
 }
 
+TEST_CASE("A //c's mouse is the IOU, and its own firmware tracks it",
+          "[machine][mouse]") {
+    // A //e's mouse is a card: a PIA in a slot, a ROM on the card, and a
+    // command protocol over the PIA's ports. A //c's plugs into the back and
+    // its quadrature lines go into the IOU, so there is no card and no
+    // protocol — just an interrupt per unit of travel and a firmware handler
+    // in the system ROM that counts them.
+    //
+    // Which makes this the only test that proves the thing works: everything
+    // between the host moving a mouse and a program reading a position is
+    // Apple's code, and the only way to know it is being fed what it expects
+    // is to run it.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+        WARN("//c ROMs not built in; skipping the mouse test");
+        return;
+    }
+
+    Emulator e(MachineId::AppleIIc);
+    e.init();
+
+    REQUIRE(e.getMouseIOU() != nullptr);
+    REQUIRE(e.getMouseCard() == nullptr); // not a card, and not in a slot
+    REQUIRE(std::string(e.getSlotCardName(4)) == "mouse");
+    REQUIRE(e.isMouseInstalled());
+
+    runFrames(e, 120);
+    e.warmReset();
+    runFrames(e, 120);
+    REQUIRE(showsApplesoftPrompt(e));
+
+    auto &mmu = e.getMMU();
+
+    // The firmware's entry points are found the way any program finds them:
+    // through the offset table in the slot's ROM space, which on this machine
+    // is part of the system ROM.
+    auto entry = [&](uint16_t offsetAddress) {
+        return static_cast<uint16_t>(0xC400 | mmu.read(offsetAddress));
+    };
+    const uint16_t initMouse = entry(0xC419);
+    const uint16_t setMouse = entry(0xC412);
+    const uint16_t readMouse = entry(0xC414);
+
+    auto poke = [&](uint16_t address, const std::vector<uint8_t> &bytes) {
+        uint16_t at = address;
+        for (uint8_t byte : bytes) mmu.writeRAM(at++, byte);
+    };
+    // X = $Cn and Y = $n0, which is how every Apple mouse firmware call is
+    // made, whichever machine the firmware is on.
+    auto jsr = [](uint16_t routine) {
+        return std::vector<uint8_t>{0xA2, 0xC4, 0xA0, 0x40, 0x20,
+                                    static_cast<uint8_t>(routine & 0xFF),
+                                    static_cast<uint8_t>(routine >> 8)};
+    };
+    auto concat = [](std::vector<uint8_t> a, const std::vector<uint8_t> &b) {
+        a.insert(a.end(), b.begin(), b.end());
+        return a;
+    };
+
+    // $300: initialise the mouse, ask for movement interrupts (mode 1), and
+    // let interrupts in. Then back to BASIC, which carries on with the
+    // firmware's handler running underneath it.
+    poke(0x300, concat(concat(jsr(initMouse),
+                              {0xA2, 0xC4, 0xA0, 0x40, 0xA9, 0x01, 0x20,
+                               static_cast<uint8_t>(setMouse & 0xFF),
+                               static_cast<uint8_t>(setMouse >> 8)}),
+                       {0x58, 0x60})); // CLI, RTS
+
+    // $320: read the mouse, which is what a program does before looking.
+    poke(0x320, concat(jsr(readMouse), {0x60}));
+
+    e.pasteText("CALL 768\r");
+    runFrames(e, 60);
+
+    // Mode 1 is movement interrupts, and the firmware keeps it in the slot's
+    // screen hole. If this is not set, nothing below means anything.
+    REQUIRE(mmu.read(0x7FC) == 0x01);
+    REQUIRE(e.getMouseIOU()->movementInterruptsEnabled());
+
+    auto travel = [&](int dx, int dy) {
+        e.mouseMove(dx, dy);
+        runFrames(e, 30); // long enough for every step to be serviced
+    };
+    auto position = [&]() {
+        e.pasteText("CALL 800\r");
+        runFrames(e, 60);
+        return std::pair<int, int>{mmu.read(0x47C) | (mmu.read(0x57C) << 8),
+                                   mmu.read(0x4FC) | (mmu.read(0x5FC) << 8)};
+    };
+
+    travel(10, 5);
+    {
+        auto [x, y] = position();
+        INFO("x " << x << " y " << y);
+        REQUIRE(x == 10);
+        REQUIRE(y == 5); // down the screen is up in the count
+    }
+
+    SECTION("and it goes back the other way") {
+        travel(-4, -2);
+        auto [x, y] = position();
+        REQUIRE(x == 6);
+        REQUIRE(y == 3);
+    }
+
+    SECTION("and stops at the clamp rather than wrapping") {
+        // InitMouse clamps both axes to 0-1023, and the handler compares
+        // against those before it counts. A mouse shoved off the left edge
+        // stays at zero rather than becoming 65535.
+        travel(-500, 0);
+        auto [x, y] = position();
+        REQUIRE(x == 0);
+        REQUIRE(y == 5);
+    }
+
+    SECTION("the button arrives in the status byte") {
+        // Which is a second thing being proved: the button is only sampled in
+        // the firmware's vertical blanking path, so this only works if VBL
+        // interrupts reach it as well as movement ones.
+        e.mouseButton(true);
+        runFrames(e, 30);
+        position();
+        REQUIRE((mmu.read(0x77C) & 0x80) != 0); // bit 7: button is down
+
+        e.mouseButton(false);
+        runFrames(e, 30);
+        position();
+        REQUIRE((mmu.read(0x77C) & 0x80) == 0);
+    }
+}
+
 TEST_CASE("Character ROMs are normalised to one layout", "[machine][video]") {
     // The //e and the II+ hold the same glyphs but store them differently: a
     // //e puts bit 0 at the left of a glyph row and the blank scanline last, a

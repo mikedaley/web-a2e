@@ -79,8 +79,19 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   cpu_->setIRQStatusCallback([this]() {
     bool active = mockingboard_ ? mockingboard_->isIRQActive() : false;
     if (mouse_) active = active || mouse_->isIRQActive();
+    if (mouseIOU_) active = active || mouseIOU_->isIRQActive();
     return active;
   });
+
+  // A //c's mouse is not a card in slot 4; it is the IOU, and the profile
+  // names it in slot 4 only because that is where its firmware lives. A
+  // machine with sockets gets a MouseCard instead, when the user fits one.
+  if (!machine_->caps.hasExpansionSlots && machine_->slots[4].fixedCard &&
+      strcmp(machine_->slots[4].fixedCard, "mouse") == 0) {
+    mouseIOU_ = std::make_unique<MouseIOU>();
+    mouseIOU_->setIRQCallback([this]() { cpu_->irq(); });
+    mmu_->setMouseIOU(mouseIOU_.get());
+  }
 
   // Set up disk timing callback - allows disk reads to get accurate cycle count
   // during instruction execution (before disk_->update() is called)
@@ -193,6 +204,7 @@ void Emulator::reset() {
   cpu_->reset();
   audio_->reset();
   if (disk_) disk_->reset();
+  if (mouseIOU_) mouseIOU_->reset();
   keyboard_->reset();
   if (mockingboard_) mockingboard_->reset();
 
@@ -332,6 +344,8 @@ void Emulator::runCycles(int cycles) {
       if (disk_) disk_->update(static_cast<int>(cyclesUsed));
       if (mockingboard_) mockingboard_->update(static_cast<int>(cyclesUsed));
       if (mouse_) mouse_->update(static_cast<int>(cyclesUsed));
+      if (mouseIOU_)
+        mouseIOU_->update(cpu_->getTotalCycles(), mmu_->isInVerticalBlank());
       softcard_->update(static_cast<int>(cyclesUsed));
       if (parallelCard_) parallelCard_->update(static_cast<int>(cyclesUsed));
 
@@ -578,6 +592,8 @@ void Emulator::runCycles(int cycles) {
 
     // Update mouse card for VBL interrupt detection
     if (mouse_) mouse_->update(static_cast<int>(cyclesUsed));
+    if (mouseIOU_)
+      mouseIOU_->update(cpu_->getTotalCycles(), mmu_->isInVerticalBlank());
 
     // Update Z-80 SoftCard (runs Z80 T-states when active)
     if (softcard_) softcard_->update(static_cast<int>(cyclesUsed));
@@ -1019,6 +1035,8 @@ void Emulator::stepInstruction() {
 
   // Update mouse card
   if (mouse_) mouse_->update(static_cast<int>(cyclesUsed));
+  if (mouseIOU_)
+    mouseIOU_->update(cpu_->getTotalCycles(), mmu_->isInVerticalBlank());
 
   // Update Z-80 SoftCard
   if (softcard_) softcard_->update(static_cast<int>(cyclesUsed));
@@ -1182,14 +1200,23 @@ void Emulator::toggleSpeaker() {
 // ============================================================================
 
 void Emulator::mouseMove(int dx, int dy) {
+  // Whichever mouse this machine has. The host asks the machine to move a
+  // mouse; what is on the other end of the question — a card's PIA or a //c's
+  // IOU — is not its business.
   if (mouse_) {
     mouse_->addDelta(dx, dy);
+  }
+  if (mouseIOU_) {
+    mouseIOU_->addDelta(dx, dy);
   }
 }
 
 void Emulator::mouseButton(bool pressed) {
   if (mouse_) {
     mouse_->setMouseButton(pressed);
+  }
+  if (mouseIOU_) {
+    mouseIOU_->setButton(pressed);
   }
 }
 

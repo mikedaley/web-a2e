@@ -23,6 +23,7 @@ set(CORE_SOURCES
     src/core/disk-image/disk_converter.cpp
     src/core/disk-image/gcr_encoding.cpp
     src/core/input/joyport.cpp
+    src/core/input/mouse_iou.cpp
     src/core/input/keyboard.cpp
     src/core/disassembler/disassembler.cpp
     src/core/cards/mockingboard/ay8910.cpp
@@ -536,6 +537,7 @@ else()
         src/core/disk-image/disk_converter.cpp
         src/core/disk-image/gcr_encoding.cpp
         src/core/input/joyport.cpp
+        src/core/input/mouse_iou.cpp
         src/core/input/keyboard.cpp
         src/core/disassembler/disassembler.cpp
         src/core/cards/mockingboard/ay8910.cpp
@@ -668,10 +670,17 @@ else()
         src/core/input/keyboard.cpp
     )
 
+    # A //c's IOU mouse (only mouse_iou.cpp)
+    add_catch2_test(test_mouse_iou
+        tests/unit/test_mouse_iou.cpp
+        src/core/input/mouse_iou.cpp
+    )
+
     # Sirius Joyport (only joyport.cpp)
     add_catch2_test(test_joyport
         tests/unit/test_joyport.cpp
         src/core/input/joyport.cpp
+        src/core/input/mouse_iou.cpp
     )
 
     # AY-3-8910 (only ay8910.cpp)
@@ -718,6 +727,7 @@ else()
     add_catch2_test(test_mmu
         tests/unit/test_mmu.cpp
         src/core/mmu/mmu.cpp
+        src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp
     )
 
@@ -725,6 +735,7 @@ else()
     add_catch2_test(test_mmu_slots
         tests/unit/test_mmu_slots.cpp
         src/core/mmu/mmu.cpp
+        src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp
         src/core/cards/thunderclock/thunderclock_card.cpp
     )
@@ -750,6 +761,7 @@ else()
         src/core/video/video.cpp
         src/core/video/ntsc.cpp
         src/core/mmu/mmu.cpp
+        src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp
     )
 

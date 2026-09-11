@@ -80,7 +80,7 @@ Slot 3 is free, since there is no built-in 80-column card to occupy it.
 
 ## Apple //c
 
-The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots, reads disks, prints and runs software.
+The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots, reads disks, prints, takes a mouse and runs software.
 
 | | |
 |---|---|
@@ -126,9 +126,13 @@ Slots 1 and 2 each hold a 6551 ACIA — the same chip a Super Serial Card carrie
 
 What a port does not have is the card's other half: no DIP switches to set its speed (the firmware keeps that), and no ROM, since a //c's serial firmware is part of the system ROM.
 
-### What is not there yet
+### The mouse is the IOU, not a card
 
-The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
+A //e's mouse is a card in a slot: a PIA, a ROM, and a command protocol the firmware talks over the PIA's ports. A //c's mouse plugs into the back panel and its two quadrature lines go straight into the IOU, so what software gets is a handful of soft switches — `$C058-$C05F` to allow and shape the interrupts, `$C015` and `$C017` to say which axis moved, `$C066` and `$C067` for which way, `$C063` for the button, `$C048` to acknowledge.
+
+There is no counter in the hardware. Every unit of travel is an interrupt, and the firmware in the system ROM reads the direction and adds one to a position it keeps in slot 4's screen holes; the button is sampled in the same handler's vertical-blanking path. Slot 4 names "mouse" in the slot window for that firmware's sake, but there is nothing in a socket and nothing to remove.
+
+Mouse-driven software — MousePaint, AppleWorks' mouse support — therefore works on a //c with no card installed, and the mouse is captured in the browser exactly as it is on a //e (see [[Input-Devices]]).
 
 ## What Survives a Switch
 

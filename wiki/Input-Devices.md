@@ -210,11 +210,13 @@ The emulator has the Joyport let go of those two lines for about 50ms after a re
 
 ## Mouse
 
-The emulator supports the Apple Mouse Interface Card, providing mouse input to compatible software. The mouse uses the browser's Pointer Lock API for relative movement tracking.
+The emulator provides mouse input to compatible software using the browser's Pointer Lock API for relative movement tracking. How that reaches the machine depends on which machine it is.
 
 ### Enabling the Mouse
 
-The Apple Mouse Card must be installed in an expansion slot (typically slot 4). See [[Expansion-Slots]] for configuration.
+On a **//e** or a **II Plus**, the Apple Mouse Interface Card must be installed in an expansion slot (typically slot 4). See [[Expansion-Slots]] for configuration.
+
+A **//c** has a mouse already: the connector is on the back panel and the mouse is wired into the IOU rather than into a card, so there is nothing to install and nothing to remove. See [[Machines]].
 
 ### Engaging Mouse Capture
 
@@ -231,7 +233,9 @@ Press **Escape** to exit pointer lock mode. This is standard browser behavior fo
 
 ### Mouse Movement
 
-While pointer lock is active, the browser sends relative movement deltas (not absolute positions). These deltas are forwarded to the WASM emulator via `_mouseMove(dx, dy)`, and the mouse card firmware translates them into Apple II mouse coordinates through the standard screen-hole protocol.
+While pointer lock is active, the browser sends relative movement deltas (not absolute positions). These deltas are forwarded to the WASM emulator via `_mouseMove(dx, dy)`, and the mouse firmware translates them into Apple II mouse coordinates through the standard screen-hole protocol.
+
+The two machines get there by different routes. A card is told a delta and works out the rest for itself. A //c's IOU counts nothing: every unit of travel is one interrupt, and its firmware reads which way the mouse went and adds one to a position it keeps in the screen holes — so ten units of movement is ten interrupts, delivered one at a time as the handler services them.
 
 ## Mobile Input
 

@@ -18,6 +18,7 @@ namespace a2e {
 
 // Forward declarations
 class ExpansionCard;
+class MouseIOU;
 class NoSlotClock;
 
 class MMU {
@@ -163,6 +164,16 @@ public:
    */
   uint8_t getActiveExpansionSlot() const { return activeExpansionSlot_; }
 
+  // Whether the video is in vertical blanking, which $C019 reports and a //c's
+  // mouse interrupts on.
+  bool isInVerticalBlank() const;
+
+  // A //c's mouse, which is IOU soft switches rather than a card in a slot.
+  // Null on every other machine, and the null is what keeps those machines'
+  // $C015, $C063 and $C066 exactly as they were.
+  void setMouseIOU(MouseIOU *mouse) { mouseIOU_ = mouse; }
+  MouseIOU *getMouseIOU() const { return mouseIOU_; }
+
   // No-Slot Clock (DS1215)
   void enableNoSlotClock(bool enable);
   bool isNoSlotClockEnabled() const;
@@ -267,6 +278,7 @@ private:
 
   // No-Slot Clock (DS1215)
   std::unique_ptr<NoSlotClock> noSlotClock_;
+  MouseIOU *mouseIOU_ = nullptr; // Not owned: the Emulator holds it
 
   // Expansion slots (1-7, index 0-6)
   // Indexed by slot number, so slots_[6] is slot 6. There are eight entries
