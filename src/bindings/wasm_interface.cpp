@@ -187,6 +187,8 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += std::string(",\"hasLowercase\":") + boolean(m.caps.hasLowercase);
   json += std::string(",\"hasInternalSlotRom\":") +
           boolean(m.caps.hasInternalSlotRom);
+  json += std::string(",\"hasExpansionSlots\":") +
+          boolean(m.caps.hasExpansionSlots);
   json += std::string(",\"hasOpenAppleKeys\":") + boolean(m.caps.hasOpenAppleKeys);
   json += std::string(",\"hasIOUDisable\":") + boolean(m.caps.hasIOUDisable);
   json += std::string(",\"inhibitsBurstInText\":") +

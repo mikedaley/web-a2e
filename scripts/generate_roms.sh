@@ -89,6 +89,21 @@ else
 fi
 
 generate_array "$ROM_DIR/341-0036.bin" "ROM_CHAR_II_PLUS"
+
+# Apple //c. Optional in exactly the way the II+ set is: absent files give
+# empty arrays, the profile reports no ROM, and the machine is listed but
+# cannot be started.
+#
+# The original //c (ROM 255) carries one 16KB ROM covering $C000-$FFFF, and a
+# 4KB character generator. A single pre-combined apple2c.rom is accepted for
+# the first, as apple2plus.rom is above.
+if [ -f "$ROM_DIR/342-0033-A.bin" ]; then
+    generate_array "$ROM_DIR/342-0033-A.bin" "ROM_SYSTEM_IIC"
+else
+    generate_array "$ROM_DIR/apple2c.rom" "ROM_SYSTEM_IIC"
+fi
+
+generate_array "$ROM_DIR/342-0265-A.bin" "ROM_CHAR_IIC"
 generate_array "$ROM_DIR/341-0027.bin" "ROM_DISK2"
 generate_array "$ROM_DIR/Thunderclock Plus ROM.bin" "ROM_THUNDERCLOCK"
 generate_array "$ROM_DIR/Apple Mouse Interface Card ROM - 342-0270-C.bin" "ROM_MOUSE"

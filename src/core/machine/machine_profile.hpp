@@ -40,9 +40,10 @@ namespace a2e {
 enum class MachineId : uint8_t {
   AppleIIe = 0,
   AppleIIPlus = 1,
+  AppleIIc = 2,
 };
 
-inline constexpr int MACHINE_COUNT = 2;
+inline constexpr int MACHINE_COUNT = 3;
 
 // ----------------------------------------------------------------------------
 // Timing
@@ -157,6 +158,12 @@ struct MachineCapabilities {
   bool hasOpenAppleKeys;      // Open/Closed Apple on $C061/$C062
   bool hasIOUDisable;         // $C07E/$C07F
   bool hasInternalSlotRom;    // $C100-$CFFF ROM on the motherboard (INTCXROM)
+  // Whether the slots below are sockets. A //e and a II+ have real ones the
+  // user fills; a //c decodes the same slot addresses but every one of them
+  // answers to a peripheral soldered to the board, so there is nothing to
+  // pull out. The host reads this to know whether to offer a card at all —
+  // without it, a //c's empty slot 5 would look like somewhere to put a clock.
+  bool hasExpansionSlots;
   bool inhibitsBurstInText;   // Video generator kills burst on text lines
 };
 
@@ -259,6 +266,7 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
         true,  // hasOpenAppleKeys
         true,  // hasIOUDisable
         true,  // hasInternalSlotRom
+        true,  // hasExpansionSlots
         true,  // inhibitsBurstInText
     },
     1, // firstSlot
@@ -352,6 +360,7 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
         false, // hasOpenAppleKeys — $C061/$C062 are the paddle buttons
         false, // hasIOUDisable
         false, // hasInternalSlotRom — nothing answers at $C100-$CFFF
+        true,  // hasExpansionSlots — eight of them, and nothing fitted
         false, // inhibitsBurstInText — burst on every line, so text fringes
     },
     0, // firstSlot — slot 0 exists, and is where a language card goes
@@ -376,11 +385,108 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
 };
 
 // ============================================================================
+// The Apple //c
+//
+// A //e folded into a slab. The same 65C02, the same 128K, the same IOU and
+// MMU custom chips doing the same video, so every number in timing, memory and
+// display is the //e's and almost every capability is too.
+//
+// What differs is the back of the machine, and it is the reason this profile is
+// worth having: a //c has no expansion slots. The slot addresses are still
+// decoded — the firmware and every program written for a //e depend on it — but
+// each one answers to a peripheral soldered to the board. It is the first
+// machine here whose slots are entirely fixed, which is the part of MachineSlot
+// a //e exercises only in slot 3, and the first to need hasExpansionSlots so
+// that a host does not offer a card there is no socket for.
+//
+// Two smaller differences are real and modelled:
+//
+//   - 4KB of character generator rather than 8KB. A //e's holds a US and a UK
+//     set; a US //c's holds one, so hasUkCharSet is false for the same reason
+//     it is false on a II+ — asking for the second set reads past the image.
+//   - The disk is not a Disk II. A //c's drive hangs off an IWM on the
+//     motherboard at $C0E0-$C0EF, which is why slot 6 names "iwm" rather than
+//     the card the //e fits there. Nothing implements it yet, so a //c reaches
+//     its firmware but not a disk.
+//
+// The machine modelled is the original //c, ROM 255: one internal 5.25" drive
+// and an external port, no UniDisk 3.5 and no memory expansion, both of which
+// arrived on later ROMs and put different things in slots 4 and 5.
+// ============================================================================
+inline constexpr MachineProfile APPLE_IIC_PROFILE = {
+    MachineId::AppleIIc,
+    "apple2c",
+    "Apple //c",
+    "//c",
+    "//c",
+    CPUVariant::CMOS_65C02,
+    // timing — the //e's custom chips, so the //e's numbers
+    {
+        1023000.0, // cpuClockHz
+        65,        // cyclesPerScanline
+        25,        // hblankCycles
+        40,        // visibleColumns
+        262,       // scanlinesPerFrame
+        192,       // visibleScanlines
+        160,       // mixedModeTextScanline
+    },
+    // memory
+    {
+        64 * 1024, // mainRamSize
+        64 * 1024, // auxRamSize — 128K, soldered down, not an option
+        16 * 1024, // romSize — $C000-$FFFF, firmware and all seven slot ROMs
+        0xC000,    // romBaseAddress
+        4 * 1024,  // charRomSize — one set, primary and MouseText
+        {false, 0}, // charRom: bit 0 leftmost, blank scanline last, as a //e
+        4 * 1024,  // lcBankSize
+        8 * 1024,  // lcHighSize
+    },
+    // display — the same picture as a //e
+    {
+        560, // dotsPerLine
+        560, // pixelWidth
+        384, // pixelHeight
+        2,   // lineDoubling
+    },
+    // caps
+    {
+        true,  // hasAuxRam
+        true,  // has80Column
+        true,  // hasDoubleHires
+        true,  // hasLanguageCard — on the motherboard, as the //e's is
+        true,  // hasAltCharSet — MouseText
+        false, // hasUkCharSet — a US //c's generator holds one set
+        true,  // hasLowercase
+        true,  // hasOpenAppleKeys
+        true,  // hasIOUDisable
+        true,  // hasInternalSlotRom — $C100-$CFFF is all firmware
+        false, // hasExpansionSlots — soldered down, every one of them
+        true,  // inhibitsBurstInText
+    },
+    1, // firstSlot
+    7, // lastSlot
+    // Slots, all of them fixed, because none of them is a socket. Slots 5 and 7
+    // are left empty rather than omitted: the machine decodes their addresses
+    // and the firmware occupies the space, but no peripheral answers there.
+    {{
+        {nullptr, nullptr},       // 0: a //c has no slot 0
+        {"serial1", "serial1"},   // 1: printer port, a 6551 with no handshake
+        {"serial2", "serial2"},   // 2: modem port, a 6551 with the full set
+        {"80col", "80col"},       // 3: 80-column firmware, as the //e's card
+        {"mouse", "mouse"},       // 4: the mouse, built in rather than a card
+        {nullptr, nullptr},       // 5
+        {"iwm", "iwm"},           // 6: the built-in drive and its external port
+        {nullptr, nullptr},       // 7
+    }},
+};
+
+// ============================================================================
 // Registry
 // ============================================================================
 // Ordered by MachineId, which machineProfile() relies on and a test pins.
 inline constexpr std::array<const MachineProfile *, MACHINE_COUNT>
-    MACHINE_PROFILES = {{&APPLE_IIE_PROFILE, &APPLE_II_PLUS_PROFILE}};
+    MACHINE_PROFILES = {{&APPLE_IIE_PROFILE, &APPLE_II_PLUS_PROFILE,
+                         &APPLE_IIC_PROFILE}};
 
 constexpr const MachineProfile &defaultMachineProfile() {
   return APPLE_IIE_PROFILE;
@@ -469,6 +575,14 @@ constexpr bool profileIsSelfConsistent(const MachineProfile &m) {
   for (int slot = 0; slot < MACHINE_SLOT_COUNT; slot++) {
     if (m.hasSlot(slot)) continue;
     if (m.slots[slot].fixedCard || m.slots[slot].defaultCard) return false;
+  }
+  // A machine with no sockets cannot ship a card the user could then remove:
+  // anything fitted to a //c is fitted for good, so every default it carries
+  // must also be marked fixed.
+  if (!m.caps.hasExpansionSlots) {
+    for (int slot = m.firstSlot; slot <= m.lastSlot; slot++) {
+      if (m.slots[slot].defaultCard && !m.slots[slot].fixedCard) return false;
+    }
   }
   return true;
 }

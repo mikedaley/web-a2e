@@ -116,9 +116,18 @@ struct SystemRoms {
 };
 
 SystemRoms romsFor(MachineId machine) {
-  if (machine == MachineId::AppleIIPlus) {
+  // Named one at a time rather than defaulted: the fallback is the //e's ROM,
+  // and a machine that fell through to it would boot someone else's firmware
+  // and look like it worked.
+  switch (machine) {
+  case MachineId::AppleIIPlus:
     return {roms::ROM_SYSTEM_II_PLUS, roms::ROM_SYSTEM_II_PLUS_SIZE,
             roms::ROM_CHAR_II_PLUS, roms::ROM_CHAR_II_PLUS_SIZE};
+  case MachineId::AppleIIc:
+    return {roms::ROM_SYSTEM_IIC, roms::ROM_SYSTEM_IIC_SIZE,
+            roms::ROM_CHAR_IIC, roms::ROM_CHAR_IIC_SIZE};
+  case MachineId::AppleIIe:
+    break;
   }
   return {roms::ROM_SYSTEM, roms::ROM_SYSTEM_SIZE, roms::ROM_CHAR,
           roms::ROM_CHAR_SIZE};

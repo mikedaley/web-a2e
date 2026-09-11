@@ -167,6 +167,86 @@ TEST_CASE("The II+ profile describes an Apple II Plus", "[machine]") {
     }
 }
 
+TEST_CASE("The //c profile describes an Apple //c", "[machine]") {
+    const auto &m = machineProfile(MachineId::AppleIIc);
+    const auto &iie = machineProfile(MachineId::AppleIIe);
+
+    SECTION("identity") {
+        REQUIRE(m.id == MachineId::AppleIIc);
+        REQUIRE(std::string(m.key) == "apple2c");
+        REQUIRE(std::string(m.logotype) == "//c");
+        // The same processor as an enhanced //e, unlike the II+.
+        REQUIRE(m.cpu == CPUVariant::CMOS_65C02);
+    }
+
+    SECTION("it is a //e in the numbers that make the picture") {
+        REQUIRE(m.timing.cpuClockHz == iie.timing.cpuClockHz);
+        REQUIRE(m.timing.cyclesPerScanline == iie.timing.cyclesPerScanline);
+        REQUIRE(m.timing.scanlinesPerFrame == iie.timing.scanlinesPerFrame);
+        REQUIRE(m.timing.visibleScanlines == iie.timing.visibleScanlines);
+        REQUIRE(m.display.pixelWidth == iie.display.pixelWidth);
+        REQUIRE(m.display.pixelHeight == iie.display.pixelHeight);
+        // Same IOU, so text is as crisp as a //e's rather than fringed.
+        REQUIRE(m.caps.inhibitsBurstInText);
+    }
+
+    SECTION("128K soldered down, and the //e's 16KB of ROM") {
+        REQUIRE(m.memory.mainRamSize == 64 * 1024);
+        REQUIRE(m.memory.auxRamSize == 64 * 1024);
+        REQUIRE(m.caps.hasAuxRam);
+        REQUIRE(m.caps.has80Column);
+        REQUIRE(m.caps.hasDoubleHires);
+        REQUIRE(m.memory.romSize == 16 * 1024);
+        REQUIRE(m.memory.romBaseAddress == 0xC000);
+        REQUIRE(m.caps.hasInternalSlotRom);
+    }
+
+    SECTION("one character set, where a //e has two") {
+        // A //e's 8KB generator holds a US and a UK set; a US //c's 4KB one
+        // holds a single set, and asking for a second reads past the image.
+        REQUIRE(m.memory.charRomSize == 4 * 1024);
+        REQUIRE(m.caps.hasAltCharSet); // MouseText is in the same set
+        REQUIRE_FALSE(m.caps.hasUkCharSet);
+        REQUIRE(iie.caps.hasUkCharSet);
+        // The generator is wired as a //e's, not a II+'s.
+        REQUIRE(m.memory.charRom.bitReversed == iie.memory.charRom.bitReversed);
+        REQUIRE(m.memory.charRom.rowRotate == iie.memory.charRom.rowRotate);
+    }
+
+    SECTION("every slot it has is fixed, because none of them is a socket") {
+        REQUIRE_FALSE(m.caps.hasExpansionSlots);
+        REQUIRE(iie.caps.hasExpansionSlots);
+        REQUIRE(machineProfile(MachineId::AppleIIPlus).caps.hasExpansionSlots);
+
+        REQUIRE(m.firstSlot == 1); // No slot 0: the //e's arrangement
+        REQUIRE_FALSE(m.hasSlot(0));
+        REQUIRE(std::string(m.slots[1].fixedCard) == "serial1");
+        REQUIRE(std::string(m.slots[2].fixedCard) == "serial2");
+        REQUIRE(std::string(m.slots[3].fixedCard) == "80col");
+        REQUIRE(std::string(m.slots[4].fixedCard) == "mouse");
+        REQUIRE(std::string(m.slots[6].fixedCard) == "iwm");
+
+        // Nothing is fitted where nothing answers, and nothing anywhere is
+        // merely a default the user could then take out.
+        REQUIRE(m.slots[5].fixedCard == nullptr);
+        REQUIRE(m.slots[5].defaultCard == nullptr);
+        REQUIRE(m.slots[7].fixedCard == nullptr);
+        REQUIRE(m.slots[7].defaultCard == nullptr);
+        for (int slot = m.firstSlot; slot <= m.lastSlot; slot++) {
+            INFO("slot " << slot);
+            if (m.slots[slot].defaultCard)
+                REQUIRE(m.slots[slot].fixedCard != nullptr);
+        }
+    }
+
+    SECTION("its disk is not a Disk II") {
+        // A //c drives its 5.25" through an IWM on the motherboard, which is
+        // why slot 6 does not name the card a //e fits there.
+        REQUIRE(std::string(m.slots[6].fixedCard) != "disk2");
+        REQUIRE(std::string(iie.slots[6].defaultCard) == "disk2");
+    }
+}
+
 TEST_CASE("Every registered profile is internally consistent", "[machine]") {
     // profileIsSelfConsistent and profileFitsCompiledStorage run as
     // static_asserts at build time, so a broken profile cannot compile. This
@@ -182,9 +262,16 @@ TEST_CASE("Every registered profile is internally consistent", "[machine]") {
 TEST_CASE("The registry finds machines by key", "[machine]") {
     REQUIRE(findMachineProfile("apple2e") == &APPLE_IIE_PROFILE);
     REQUIRE(findMachineProfile("apple2plus") == &APPLE_II_PLUS_PROFILE);
+    REQUIRE(findMachineProfile("apple2c") == &APPLE_IIC_PROFILE);
 
     SECTION("keys are distinct") {
         REQUIRE(std::string(APPLE_IIE_PROFILE.key) !=
+                std::string(APPLE_II_PLUS_PROFILE.key));
+        REQUIRE(std::string(APPLE_IIC_PROFILE.key) !=
+                std::string(APPLE_IIE_PROFILE.key));
+        // "apple2c" is a prefix of nothing here, but it shares five characters
+        // with "apple2e" and the constexpr compare is hand-rolled.
+        REQUIRE(std::string(APPLE_IIC_PROFILE.key) !=
                 std::string(APPLE_II_PLUS_PROFILE.key));
     }
 

@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, and that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode), and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed), and full emulator integration.
 
 ## Architecture
 

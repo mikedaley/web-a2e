@@ -43,9 +43,19 @@ const SLOT_UI = {
 
 // Cards a machine has permanently fitted. These never appear in the tray —
 // there is nothing to drag, because there is nothing the user could remove.
+//
+// A //c fills every one of these: it decodes the slot addresses a //e does,
+// but each is a peripheral soldered to the board rather than a socket. A card
+// named here that is missing from this map would come out looking like an
+// empty slot the user could fill, which is why the //c's serial ports, mouse
+// and disk port all have an entry.
 const FIXED_CARD_LABELS = {
   "80col": { name: "80-Column", note: "80-Column (Built-in)" },
   languagecard: { name: "Language Card", note: "Language Card (16K)" },
+  serial1: { name: "Serial Port 1", note: "Printer Port (Built-in)" },
+  serial2: { name: "Serial Port 2", note: "Modem Port (Built-in)" },
+  mouse: { name: "Mouse", note: "Mouse (Built-in)" },
+  iwm: { name: "Disk Port", note: "5.25\" Drives (Built-in)" },
 };
 
 /**
@@ -215,6 +225,11 @@ export class SlotConfigurationWindow extends BaseWindow {
     const first = machine.firstSlot ?? 1;
     const last = machine.lastSlot ?? 7;
 
+    // A //c has the slot addresses but not the sockets. Its two empty ones
+    // are empty for good, so they offer nothing rather than the card list a
+    // machine with real slots would show there.
+    const sockets = machine.caps?.hasExpansionSlots !== false;
+
     this.slots = [];
     for (let slot = first; slot <= last; slot++) {
       const ui = SLOT_UI[slot] || { available: [], note: "" };
@@ -224,8 +239,8 @@ export class SlotConfigurationWindow extends BaseWindow {
       this.slots.push({
         slot,
         label: `Slot ${slot}`,
-        available: fixed ? [] : ui.available,
-        note: fixed ? fixed.note : ui.note,
+        available: fixed || !sockets ? [] : ui.available,
+        note: fixed ? fixed.note : sockets ? ui.note : "No socket",
         fixed: !!fixed,
         fixedName: fixed ? fixed.name : null,
       });

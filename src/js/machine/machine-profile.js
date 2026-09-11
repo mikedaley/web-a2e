@@ -63,6 +63,7 @@ const APPLE_IIE_FALLBACK = Object.freeze({
     hasUkCharSet: true,
     hasLowercase: true,
     hasInternalSlotRom: true,
+    hasExpansionSlots: true,
     hasOpenAppleKeys: true,
     hasIOUDisable: true,
     inhibitsBurstInText: true,

@@ -18,9 +18,10 @@ import {
  * away. They share that outline deliberately, because these are the same
  * computer eight years apart, and the details that differ are the ones the
  * profile actually models — a //e's three key rows and its two Apple keys
- * against a II+'s shallower deck and two rows.
+ * against a II+'s shallower deck and two rows, and the //c's drive slot in
+ * the flank of the case where the other two have a row of sockets.
  */
-function machineArt({ appleKeys, keyRows, deckTop }) {
+function machineArt({ appleKeys, keyRows, deckTop, driveSlot = false }) {
   const rows = [];
   for (let i = 0; i < keyRows; i++) {
     const y = deckTop + 7 + i * 6;
@@ -34,6 +35,14 @@ function machineArt({ appleKeys, keyRows, deckTop }) {
              stroke="currentColor" stroke-width="1"/>
        <rect x="100" y="${deckTop + 24}" width="6" height="5" rx="1"
              stroke="currentColor" stroke-width="1"/>`
+    : "";
+
+  // The //c is the machine with the disk in it. Everything else here is a box
+  // that needs a card and a cable before it can read one, so the slot cut into
+  // the right flank is the whole silhouette's worth of difference.
+  const drive = driveSlot
+    ? `<path d="M137 ${deckTop + 7} L135 ${deckTop + 19}" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>`
     : "";
 
   return `
@@ -55,12 +64,19 @@ function machineArt({ appleKeys, keyRows, deckTop }) {
       <rect x="66" y="${deckTop + 24}" width="28" height="5" rx="2"
             stroke="currentColor" stroke-width="1" opacity="0.7"/>
       ${apples}
+      ${drive}
     </svg>`;
 }
 
 const MACHINE_ART = {
   apple2e: machineArt({ appleKeys: true, keyRows: 3, deckTop: 82 }),
   apple2plus: machineArt({ appleKeys: false, keyRows: 2, deckTop: 86 }),
+  apple2c: machineArt({
+    appleKeys: true,
+    keyRows: 3,
+    deckTop: 84,
+    driveSlot: true,
+  }),
 };
 
 /** Bytes as the machine's own marketing would have said it. */
