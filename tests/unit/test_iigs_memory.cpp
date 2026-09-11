@@ -310,3 +310,51 @@ TEST_CASE("A reset puts the map back the way the firmware expects it",
   REQUIRE(memory.shadowRegister() == 0);
   REQUIRE_FALSE(memory.isFastSpeed());
 }
+
+TEST_CASE("The slow clock ticks on the accesses that reach the Mega II",
+          "[iigs][timing]") {
+  // A IIgs runs at 2.8MHz until it reaches across to the slow side, and that
+  // access is stretched to a Mega II cycle. The clock therefore advances
+  // *during* an instruction, at each access — which is what the drive needs,
+  // because a disk read loop is a few cycles with one access in it and a clock
+  // that only moved between instructions would show it to the drive in lumps.
+  IIgsMemory memory;
+  memory.resetClock();
+
+  const uint64_t start = memory.slowCycles();
+  memory.read(bankAddress(0x02, 0x1000)); // fast RAM: no charge
+  REQUIRE(memory.slowCycles() == start);
+
+  memory.read(bankAddress(0x00, 0xC019)); // I/O: a slow cycle
+  REQUIRE(memory.slowCycles() == start + 1);
+
+  memory.read(bankAddress(SLOW_BANK_MAIN, 0x0400)); // the Mega II's RAM: another
+  REQUIRE(memory.slowCycles() == start + 2);
+
+  memory.write(bankAddress(0x00, 0xC000), 0); // and writes cost the same
+  REQUIRE(memory.slowCycles() == start + 3);
+
+  SECTION("and the rest of an instruction is added by whoever knows the speed") {
+    const uint64_t before = memory.slowCycles();
+    memory.addFastCycles(2.5);
+    memory.addFastCycles(2.5); // the halves add up rather than being lost
+    REQUIRE(memory.slowCycles() == before + 5);
+  }
+}
+
+TEST_CASE("A IIgs has a register for its slots and one for its drives",
+          "[iigs]") {
+  IIgsMemory memory;
+
+  // $C02D says which slots answer from a card and which from the machine's own
+  // firmware; $C031 points the one disk chip at one of four drives. The
+  // firmware polls both early, and a machine that answers the floating bus
+  // here never gets as far as looking for a disk.
+  memory.write(bankAddress(0x00, 0xC02D), 0x80);
+  REQUIRE(memory.read(bankAddress(0x00, 0xC02D)) == 0x80);
+
+  memory.write(bankAddress(0x00, 0xC031), IIgsMemory::DISK_SELECT_35);
+  REQUIRE(memory.selects35Inch());
+  memory.write(bankAddress(0x00, 0xC031), 0x00);
+  REQUIRE_FALSE(memory.selects35Inch());
+}

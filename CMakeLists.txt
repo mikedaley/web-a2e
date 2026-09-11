@@ -558,6 +558,11 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
@@ -636,6 +641,11 @@ else()
     add_catch2_test(test_iigs_video
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/input/keyboard.cpp
@@ -663,6 +673,11 @@ else()
     add_catch2_test(test_iigs_boot
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/input/keyboard.cpp

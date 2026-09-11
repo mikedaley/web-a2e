@@ -223,14 +223,14 @@ the other three: it owns the CPU, the memory and the video, and runs them. The
 video is the //e's `Video` class reading the Mega II's MMU, because that is
 what a IIgs's //e-mode picture is drawn by.
 
-**The machine has two clocks and the video counts in the slower one.** The
-65816 runs at 2.8MHz except where it is talking to the Mega II; the video is on
-the Mega II's side at 1.023MHz. `IIgsMachine::step` converts as it goes and
-hands the video the slow-side count, so a frame takes a frame's worth of time
-whichever speed the machine is running at. What it does not do yet is charge
-the slow clock per *access* — an instruction that touches bank `$E0` really
-does run at the slow rate for those cycles — so the conversion is right on
-average and wrong in the small.
+**The machine has two clocks, and the slow one lives in `IIgsMemory`.** The
+65816 runs at 2.8MHz until it reaches the Mega II, and that *access* is
+stretched to a 1.023MHz cycle — so the clock ticks inside the memory, as each
+slow-side access happens, and `IIgsMachine` adds the rest of the instruction
+afterwards at whatever the speed register says. Keeping it there is what lets
+it advance *during* an instruction: a disk read loop is a few cycles with one
+access in it, and a drive whose clock only moved between instructions sees that
+loop in lumps.
 
 **Two devices had to exist before the machine would draw anything**, which is
 earlier than the plan expected: the firmware's power-on diagnostics sync and

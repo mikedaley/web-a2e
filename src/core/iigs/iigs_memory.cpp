@@ -17,6 +17,8 @@ namespace a2e::iigs {
 namespace {
 // The registers that are the IIgs's own. Everything else in $C0xx is the //e's
 // and belongs to the Mega II.
+constexpr uint16_t REG_SLOT_SELECT = 0xC02D;
+constexpr uint16_t REG_DISK_SELECT = 0xC031;
 constexpr uint16_t REG_CLOCK_DATA = 0xC033;
 constexpr uint16_t REG_CLOCK_CONTROL = 0xC034;
 constexpr uint16_t REG_NEW_VIDEO = 0xC029;
@@ -86,9 +88,12 @@ void IIgsMemory::loadROM(const uint8_t *rom, size_t size) {
 void IIgsMemory::reset() {
   // Shadowing all on, slow clock: a IIgs comes up pretending to be a //e as
   // hard as it can, and the firmware turns things on from there.
+  resetClock();
   shadow_ = 0;
   speed_ = 0;
   newVideo_ = 0;
+  slotSelect_ = 0;
+  diskSelect_ = 0;
   adb_.reset();
   clock_.reset();
   sound_.reset();
@@ -129,7 +134,12 @@ uint8_t IIgsMemory::read(uint32_t address) {
   const uint8_t bank = static_cast<uint8_t>(address >> 16);
   const uint16_t offset = static_cast<uint16_t>(address);
 
-  switch (regionFor(address, bank, offset)) {
+  const Region region = regionFor(address, bank, offset);
+  // Reaching the Mega II costs the Mega II's time, whichever clock the
+  // processor is running at.
+  if (region == Region::IO || region == Region::MegaII) slowCycles_++;
+
+  switch (region) {
   case Region::IO:
     return readIO(offset);
 
@@ -173,7 +183,10 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
   const uint8_t bank = static_cast<uint8_t>(address >> 16);
   const uint16_t offset = static_cast<uint16_t>(address);
 
-  switch (regionFor(address, bank, offset)) {
+  const Region region = regionFor(address, bank, offset);
+  if (region == Region::IO || region == Region::MegaII) slowCycles_++;
+
+  switch (region) {
   case Region::IO:
     writeIO(offset, value);
     return;
@@ -261,6 +274,10 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_SLOT_SELECT:
+    return slotSelect_;
+  case REG_DISK_SELECT:
+    return diskSelect_;
   case REG_CLOCK_DATA:
     return clock_.readData();
   case REG_CLOCK_CONTROL:
@@ -308,6 +325,12 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
     return;
   case REG_SOUND_ADDRESS_HIGH:
     sound_.writeAddressHigh(value);
+    return;
+  case REG_SLOT_SELECT:
+    slotSelect_ = value;
+    return;
+  case REG_DISK_SELECT:
+    diskSelect_ = value;
     return;
   case REG_CLOCK_DATA:
     clock_.writeData(value);

@@ -11,6 +11,8 @@
 #include "iigs_spec.hpp"
 #include "iigs_video.hpp"
 
+#include <string>
+
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -18,6 +20,7 @@
 
 namespace a2e {
 class CPU65816;
+class DiskController;
 class Keyboard;
 class Video;
 } // namespace a2e
@@ -88,8 +91,22 @@ public:
   /** The machine's screen, which is that picture or Super Hi-Res. */
   IIgsVideo &screen() { return *screen_; }
 
-  /** Slow-side cycles since reset: the clock the video is counted in. */
-  uint64_t slowCycles() const { return slowCycles_; }
+  /** Slow-side cycles since reset: the clock the video and the drive run on. */
+  uint64_t slowCycles() const { return memory_->slowCycles(); }
+
+  // ===== The drive =====
+  //
+  // A IIgs's 5.25" port is an IWM, which is the chip a //c has and the same
+  // class: what is between it and the disk — two drives, the stepper, the
+  // motor, the sequencer — is DiskController, shared with the card a //e takes.
+  // It answers at slot 6's addresses, and the boot code that drives it is the
+  // machine's own firmware rather than a ROM on a card.
+
+  DiskController &disk() { return *disk_; }
+  bool insertDisk(int drive, const uint8_t *data, size_t size,
+                  const std::string &filename);
+  void ejectDisk(int drive);
+  bool hasDisk(int drive) const;
 
   // ===== Somebody typing =====
   //
@@ -165,9 +182,7 @@ private:
   std::unique_ptr<Video> video_;
   std::unique_ptr<IIgsVideo> screen_;
   std::unique_ptr<Keyboard> keyboard_;
-
-  uint64_t slowCycles_ = 0;
-  double slowCycleRemainder_ = 0.0;
+  DiskController *disk_ = nullptr; // Owned by the Mega II's slot
 
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;

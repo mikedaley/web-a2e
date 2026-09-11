@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: there is no sound and no disk to boot. You can type at it, though there is not yet much that listens. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: there is no sound, and the drive is fitted but does not yet read a disk. You can type at it, though there is not yet much that listens. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -33,6 +33,18 @@ A IIgs is a different computer:
 None of that is a number. The rule the codebase has followed from the start says what to do about it: **a number or a flag goes in the profile; a different mechanism goes in a different class that the profile names.** The IIgs is where the second half of that sentence finally gets used.
 
 `MachineProfile` therefore gained one field — `MachineFamily`, which is `AppleII` or `AppleIIgs` — and it is what selects the parts, once, at construction. It is also what the compile-time validation asks before applying a rule that only holds for one design: a IIgs is not checked against the //e-sized arrays it does not use, or against "a visible column clocks out 14 dots" when its picture is 640 dots wide.
+
+## The Two Clocks
+
+A IIgs runs at 2.8MHz until it reaches across to the Mega II, and then it runs at the Mega II's 1.023MHz for that access. So the machine is not "a //e at 2.8MHz": how fast a program goes depends on where it is reading.
+
+The slow clock lives in `IIgsMemory` rather than in the machine, and ticks on each access that reaches the slow side — during an instruction, not between instructions. That matters for one thing in particular: a disk read loop is a handful of cycles with a single I/O access in it, and a drive whose clock only moved when an instruction ended would see that loop in lumps. Everything else — the video, the frame boundary — is counted in the same clock.
+
+## The Drive
+
+Slot 6 holds an `IWM`, the same class a //c has, with `DiskController` under it: the drives, the stepper, the motor and the sequencer are shared with the card a //e takes. There is no card ROM, because the boot code that drives it is the machine's own firmware.
+
+**A IIgs does not yet boot from a disk.** The firmware finds the chip, sets its mode register, starts the motor, steps the head to track zero and reads — and the bytes the sequencer assembles are not yet the ones on the disk. What is known to be right: the registers it polls first (`$C02D` and `$C031`, which returned floating-bus garbage before and stopped the firmware from looking at all), the mode write (which reaches the chip on Q7 alone — requiring Q6 as well hangs the machine in a loop writing the mode and reading it back), and the timing of the polls. What is not yet right is somewhere between the sequencer's clock and the bit stream.
 
 ## Super Hi-Res
 

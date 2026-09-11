@@ -82,6 +82,41 @@ public:
   /** As the debugger sees it: no soft switch is touched by looking. */
   uint8_t peek(uint32_t address) const;
 
+  // ===== The slow clock =====
+  //
+  // The Mega II's 1.023MHz, and the one the video and the drive are counted
+  // in. It lives here rather than in the machine because this is where the
+  // thing that advances it happens: a IIgs runs at 2.8MHz until it reaches
+  // across to the Mega II, and *that access* is stretched to a slow cycle.
+  //
+  // Keeping it here is what lets it tick during an instruction rather than
+  // between instructions. A disk read loop is a few cycles with one access in
+  // it, and a drive whose clock only moves when an instruction ends sees that
+  // loop in lumps: the sequencer runs past a completed byte before the
+  // firmware can read it, which looks exactly like a drive returning garbage.
+  // It is the difference between a machine that boots a disk and one that does
+  // not.
+
+  uint64_t slowCycles() const { return slowCycles_; }
+
+  /**
+   * The rest of an instruction — the cycles that did not reach the slow side —
+   * converted to slow time by whoever knows which clock is selected.
+   */
+  void addFastCycles(double slowEquivalent) {
+    remainder_ += slowEquivalent;
+    const uint64_t whole = static_cast<uint64_t>(remainder_);
+    remainder_ -= static_cast<double>(whole);
+    slowCycles_ += whole;
+  }
+
+  void resetClock() {
+    slowCycles_ = 0;
+    remainder_ = 0.0;
+  }
+
+
+
   // ===== The two sides =====
 
   /** The battery-backed clock and its settings, at $C033-$C034. */
@@ -127,6 +162,27 @@ public:
   void setNewVideoRegister(uint8_t value) { newVideo_ = value; }
   bool superHiResEnabled() const { return (newVideo_ & NEW_VIDEO_SHR) != 0; }
 
+  /**
+   * $C02D SLOTROMSEL: which slots answer from a card and which from the
+   * machine's own firmware. A IIgs has seven slots and a Control Panel setting
+   * for each, and this is where that setting ends up.
+   */
+  uint8_t slotRegister() const { return slotSelect_; }
+  void setSlotRegister(uint8_t value) { slotSelect_ = value; }
+
+  /**
+   * $C031 DISKREG: which drive the one IWM is talking to.
+   *
+   * A IIgs has a single disk chip and four drives to point it at — two 3.5"
+   * and two 5.25" — so this register is the pointer. Bit 7 chooses 3.5" over
+   * 5.25" and bit 6 chooses the second drive of the pair. The firmware polls
+   * it early and often, and a machine that answers the floating bus here never
+   * gets as far as looking for a disk.
+   */
+  uint8_t diskSelectRegister() const { return diskSelect_; }
+  void setDiskSelectRegister(uint8_t value) { diskSelect_ = value; }
+  bool selects35Inch() const { return (diskSelect_ & DISK_SELECT_35) != 0; }
+
   /** $C036 CYAREG: bit 7 chooses the fast clock. */
   uint8_t speedRegister() const { return speed_; }
   void setSpeedRegister(uint8_t value) { speed_ = value; }
@@ -150,6 +206,8 @@ public:
 
   static constexpr uint8_t SPEED_FAST = 0x80;
   static constexpr uint8_t NEW_VIDEO_SHR = 0x80;
+  static constexpr uint8_t DISK_SELECT_35 = 0x80;
+  static constexpr uint8_t DISK_SELECT_DRIVE2 = 0x40;
 
   // State register bits.
   static constexpr uint8_t STATE_ALTZP = 0x80;
@@ -216,9 +274,13 @@ private:
   // ROM must have in the same place.
   bool romHighBankFirst_ = false;
 
+  uint64_t slowCycles_ = 0;
+  double remainder_ = 0.0;
   uint8_t shadow_ = 0;
   uint8_t speed_ = 0;
   uint8_t newVideo_ = 0;
+  uint8_t slotSelect_ = 0;
+  uint8_t diskSelect_ = 0;
 };
 
 } // namespace a2e::iigs

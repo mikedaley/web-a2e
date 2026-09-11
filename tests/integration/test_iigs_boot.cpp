@@ -33,10 +33,12 @@ bool romAvailable() {
   return roms::ROM_SYSTEM_IIGS_SIZE >= ROM_SIZE_ROM01;
 }
 
-// Long enough for the diagnostics, the splash and the boot attempt; a real
-// machine takes a couple of seconds over it.
+// Long enough for the diagnostics, the splash and the boot attempt: about
+// seven seconds of the machine's own time, which is what a IIgs takes over its
+// power-on tests. Counted in instructions rather than cycles because that is
+// what the test can drive directly.
 void runToPrompt(IIgsMachine &machine) {
-  for (int i = 0; i < 2000000 && !machine.cpu().isStopped(); i++) {
+  for (int i = 0; i < 5000000 && !machine.cpu().isStopped(); i++) {
     machine.step();
   }
 }

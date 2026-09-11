@@ -9,6 +9,8 @@
 
 #include "../cpu/65816/cpu65816.hpp"
 #include "../mmu/mmu.hpp"
+#include "../cards/disk_controller.hpp"
+#include "../cards/iwm/iwm.hpp"
 #include "../input/keyboard.hpp"
 #include "../machine/machine_profile.hpp"
 #include "../video/video.hpp"
@@ -30,6 +32,16 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   video_ = std::make_unique<Video>(memory_->megaII());
   screen_ = std::make_unique<IIgsVideo>(*video_, *memory_);
 
+  // The 5.25" port. A IIgs has an IWM where a //e has a slot, and the firmware
+  // that drives it is in the system ROM — so the chip goes into the Mega II's
+  // slot 6, where its sixteen addresses are, and nothing needs a card ROM.
+  {
+    auto iwm = std::make_unique<IWM>();
+      iwm->setCycleCallback([this]() { return memory_->slowCycles(); });
+    disk_ = iwm.get();
+    memory_->megaII().insertCard(6, std::move(iwm));
+  }
+
   // The keyboard translation is the //e's — a browser key event becomes an
   // Apple II code the same way whichever machine is listening — and what it
   // feeds is the ADB controller, which is what a IIgs has instead of wires.
@@ -50,8 +62,8 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
     if (button == 1) return keyboard_->isClosedApplePressed() ? 0x80 : 0x00;
     return 0x00;
   });
-  video_->setCycleCallback([this]() { return slowCycles_; });
-  memory_->megaII().setCycleCallback([this]() { return slowCycles_; });
+  video_->setCycleCallback([this]() { return memory_->slowCycles(); });
+  memory_->megaII().setCycleCallback([this]() { return memory_->slowCycles(); });
   memory_->megaII().setVideoSwitchCallback(
       [this]() { video_->onVideoSwitchChanged(); });
 }
@@ -69,8 +81,6 @@ void IIgsMachine::init(const uint8_t *rom, size_t romSize,
 
 void IIgsMachine::reset() {
   memory_->reset();
-  slowCycles_ = 0;
-  slowCycleRemainder_ = 0.0;
   lastFrameCycle_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
@@ -92,10 +102,10 @@ int IIgsMachine::step() {
   cpu_->executeInstruction();
   const int cycles = cpu_->getCycleCount();
 
-  slowCycleRemainder_ += slowCyclesFor(cycles);
-  const uint64_t whole = static_cast<uint64_t>(slowCycleRemainder_);
-  slowCycleRemainder_ -= static_cast<double>(whole);
-  slowCycles_ += whole;
+  // The slow-side accesses have already charged themselves, as they happened;
+  // what is left is the rest of the instruction, at whatever speed the machine
+  // is running.
+  memory_->addFastCycles(slowCyclesFor(cycles));
 
   // Draw the scanlines this instruction's time covered, and close the frame
   // when its time is up. Both halves matter: without the boundary the picture
@@ -103,10 +113,11 @@ int IIgsMachine::step() {
   // it. The boundary advances by exactly one frame rather than to the current
   // cycle, so it cannot drift away from where $C019 thinks vertical blanking
   // is — a program timing itself against the beam would see it wander.
-  video_->renderUpToCycle(slowCycles_);
+  if (disk_) disk_->update(cycles);
+  video_->renderUpToCycle(memory_->slowCycles());
 
   const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
-  if (slowCycles_ - lastFrameCycle_ >=
+  if (memory_->slowCycles() - lastFrameCycle_ >=
       static_cast<uint64_t>(timing.cyclesPerFrame())) {
     lastFrameCycle_ += timing.cyclesPerFrame();
     video_->renderFrame();
@@ -117,15 +128,30 @@ int IIgsMachine::step() {
 }
 
 void IIgsMachine::runCycles(int slowCyclesToRun) {
-  const uint64_t target = slowCycles_ + static_cast<uint64_t>(slowCyclesToRun);
-  while (slowCycles_ < target) {
+  const uint64_t target =
+      memory_->slowCycles() + static_cast<uint64_t>(slowCyclesToRun);
+  while (memory_->slowCycles() < target) {
     if (cpu_->isStopped()) {
       // STP: the clock is stopped until a reset, and there is nothing to run.
-      slowCycles_ = target;
+      memory_->addFastCycles(
+          static_cast<double>(target - memory_->slowCycles()));
       break;
     }
     step();
   }
+}
+
+bool IIgsMachine::insertDisk(int drive, const uint8_t *data, size_t size,
+                             const std::string &filename) {
+  return disk_ && disk_->insertDisk(drive, data, size, filename);
+}
+
+void IIgsMachine::ejectDisk(int drive) {
+  if (disk_) disk_->ejectDisk(drive);
+}
+
+bool IIgsMachine::hasDisk(int drive) const {
+  return disk_ && disk_->hasDisk(drive);
 }
 
 int IIgsMachine::handleRawKeyDown(int browserKeycode, bool shift, bool ctrl,
