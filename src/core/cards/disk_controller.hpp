@@ -145,6 +145,22 @@ public:
     bool isMotorOn() const;
 
     /**
+     * The drive ENABLE line, as the CPU last set it.
+     *
+     * This is not `isMotorOn()`. That one answers "is the disk still turning",
+     * and it stays true for about a second after the CPU switches the drive
+     * off, because a motor takes that long to stop — which is the whole point
+     * of it, and why a read a moment after $C0E8 still finds data. ENABLE is
+     * the wire, and it goes low the instant the CPU touches that address.
+     *
+     * The difference matters wherever the electronics, rather than the
+     * mechanism, is what is being asked about: nothing is written to a disk
+     * whose drive is not enabled, however long the platter takes to stop, and
+     * an IWM's mode register is writable exactly while ENABLE is low.
+     */
+    bool isDriveEnabled() const { return motorOn_ && motorOffCycle_ == 0; }
+
+    /**
      * Stop the motor immediately (for warm reset)
      * Does not reset other controller state like track position
      */

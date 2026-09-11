@@ -74,10 +74,18 @@ void IWM::writeIO(uint8_t offset, uint8_t value) {
     if (selectedRegister() != Register::Write) return;
 
     // With both latches high the chip takes a byte, and which byte depends on
-    // whether it has a disk turning: the mode register is only writable while
-    // the motor is off, which is how the firmware sets the chip up before it
-    // starts a drive and cannot disturb it mid-write afterwards.
-    if (isMotorOn()) {
+    // whether a drive is enabled: the mode register is only writable while it
+    // is not, which is how the firmware sets the chip up before it starts a
+    // drive and cannot disturb it mid-write afterwards.
+    //
+    // ENABLE is the wire, not the motor. A drive keeps turning for about a
+    // second after the CPU switches it off, and `isMotorOn()` says so — but
+    // the chip's registers answer to the line, which went low immediately. The
+    // firmware writes the mode register the instruction after it touches
+    // $C0E8, reads it back, and will not go on until the two agree; asking
+    // about the mechanism instead of the wire sends that byte to the write
+    // data register for a second, and the read-back never matches.
+    if (isDriveEnabled()) {
         busData_ = value;
     } else {
         mode_ = value & MODE_MASK;

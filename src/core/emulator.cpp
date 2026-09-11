@@ -1447,6 +1447,11 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
     card->setSetP([this](uint8_t v) { cpu_->setP(v); });
     card->setGetSP([this]() { return cpu_->getSP(); });
     card->setSetSP([this](uint8_t v) { cpu_->setSP(v); });
+    // A 6502 fetches with `read(pc_++)`, so by the time a read reaches a card
+    // the counter has already moved past the opcode.
+    card->setExecutingAt([this](uint16_t address) {
+      return cpu_->getPC() == static_cast<uint16_t>(address + 1);
+    });
     card->setGetPC([this]() { return cpu_->getPC(); });
     card->setSetPC([this](uint16_t v) { cpu_->setPC(v); });
     card->setSetX([this](uint8_t v) { cpu_->setX(v); });

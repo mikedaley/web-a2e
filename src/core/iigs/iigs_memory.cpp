@@ -7,6 +7,7 @@
 
 #include "iigs_memory.hpp"
 
+#include "../cards/expansion_card.hpp"
 #include "../mmu/mmu.hpp"
 
 #include <algorithm>
@@ -22,6 +23,7 @@ constexpr uint16_t REG_DISK_SELECT = 0xC031;
 constexpr uint16_t REG_CLOCK_DATA = 0xC033;
 constexpr uint16_t REG_CLOCK_CONTROL = 0xC034;
 constexpr uint16_t REG_NEW_VIDEO = 0xC029;
+constexpr uint16_t REG_TEXT_COLOUR = 0xC022;
 constexpr uint16_t REG_SHADOW = 0xC035;
 constexpr uint16_t REG_SPEED = 0xC036;
 constexpr uint16_t REG_STATE = 0xC068;
@@ -137,7 +139,10 @@ uint8_t IIgsMemory::read(uint32_t address) {
   const Region region = regionFor(address, bank, offset);
   // Reaching the Mega II costs the Mega II's time, whichever clock the
   // processor is running at.
-  if (region == Region::IO || region == Region::MegaII) slowCycles_++;
+  if (region == Region::IO || region == Region::MegaII) {
+    slowCycles_++;
+    slowAccesses_++;
+  }
 
   switch (region) {
   case Region::IO:
@@ -184,7 +189,10 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
   const uint16_t offset = static_cast<uint16_t>(address);
 
   const Region region = regionFor(address, bank, offset);
-  if (region == Region::IO || region == Region::MegaII) slowCycles_++;
+  if (region == Region::IO || region == Region::MegaII) {
+    slowCycles_++;
+    slowAccesses_++;
+  }
 
   switch (region) {
   case Region::IO:
@@ -281,7 +289,9 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
   case REG_CLOCK_DATA:
     return clock_.readData();
   case REG_CLOCK_CONTROL:
-    return clock_.readControl();
+    return clockControlRegister();
+  case REG_TEXT_COLOUR:
+    return textColour_;
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -294,11 +304,14 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     break;
   }
 
-  // $C100-$CFFF is the machine's own firmware. On a //e this is where a card's
-  // ROM would answer; a IIgs has the same seven slots and a Control Panel
-  // setting for each, and until that is modelled every one of them is
-  // internal, which is how a machine with nothing fitted behaves anyway.
+  // $C100-$CFFF is either the machine's own firmware or a card's, and $C02D
+  // is what chooses — which is the Control Panel's "Your Card" setting in a
+  // register. A IIgs comes up with slots 1 to 6 internal and slot 7 expecting
+  // a card, and the firmware writes exactly that.
   if (offset >= 0xC100) {
+    if (ExpansionCard *card = cardForSlotRom(offset)) {
+      return card->readROM(static_cast<uint8_t>(offset & 0xFF));
+    }
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
 
@@ -336,7 +349,14 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
     clock_.writeData(value);
     return;
   case REG_CLOCK_CONTROL:
+    // Two registers share this address. The top nibble is the clock's; the
+    // bottom four bits are the border colour, which is why the firmware can
+    // write $06 here and mean "medium blue" without starting a transaction.
+    border_ = static_cast<uint8_t>(value & BORDER_MASK);
     clock_.writeControl(value);
+    return;
+  case REG_TEXT_COLOUR:
+    setTextColourRegister(value);
     return;
   case REG_NEW_VIDEO:
     newVideo_ = value;
@@ -379,7 +399,9 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
   case REG_CLOCK_DATA:
     return clock_.readData();
   case REG_CLOCK_CONTROL:
-    return clock_.readControl();
+    return clockControlRegister();
+  case REG_TEXT_COLOUR:
+    return textColour_;
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -400,6 +422,25 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
 // ============================================================================
 // ROM
 // ============================================================================
+
+ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
+  // $C100-$C7FF is a slot's own 256 bytes; above that is the expansion ROM
+  // space, which is not modelled here yet.
+  if (offset < 0xC100 || offset >= 0xC800) return nullptr;
+
+  const uint8_t slot = static_cast<uint8_t>((offset >> 8) & 0x07);
+  if (slot < 1 || slot > 7) return nullptr;
+
+  ExpansionCard *card = megaII_->getCard(slot);
+  if (!card || !card->hasROM()) return nullptr;
+
+  // A slot the machine fitted itself answers whatever $C02D says, because it
+  // is not a card in a socket — it is the machine's firmware for that slot,
+  // the way the disk port in slot 6 is. Anything else answers only when the
+  // Control Panel has been set to "Your Card".
+  if (slot == internalCardSlot_) return card;
+  return (slotSelect_ & (1u << slot)) ? card : nullptr;
+}
 
 uint8_t IIgsMemory::readROM(uint32_t address) const {
   if (!rom_ || romSize_ == 0) return 0x00;

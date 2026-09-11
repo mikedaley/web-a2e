@@ -71,6 +71,28 @@ public:
   void setMonochrome(bool mono);
   bool isMonochrome() const { return colorMode_ == VideoColorMode::MONOCHROME; }
 
+  /**
+   * Draw text lines in two fixed colours instead of decoding them.
+   *
+   * A //e has no say in what colour its text comes out: the dots go down a
+   * composite lead and the receiver makes of them what it will. A IIgs does —
+   * its VGC generates the picture digitally and substitutes a foreground and a
+   * background colour of the Control Panel's choosing for lit and unlit text
+   * dots, which is why a IIgs's text is crisp and can be white on blue.
+   *
+   * That is a pair of colours, not a second video generator, so it lives here
+   * as one: a machine that never calls this decodes text exactly as before.
+   * It applies to text lines only — the text rows of a mixed screen included —
+   * because graphics dots carry a colour of their own and the VGC leaves them
+   * alone.
+   */
+  void setTextColours(uint32_t foreground, uint32_t background) {
+    textForeground_ = foreground;
+    textBackground_ = background;
+    textColoursSet_ = true;
+  }
+  void clearTextColours() { textColoursSet_ = false; }
+
   void setGreenPhosphor(bool green) { greenPhosphor_ = green; }
   bool isGreenPhosphor() const { return greenPhosphor_; }
 
@@ -123,6 +145,10 @@ private:
   // Note this is not the same question as whether that scanline is *displayed*
   // in colour — see chromaEnabled_.
   bool burstForScanline(int scanline, const VideoSwitchState& vs) const;
+
+  // Whether this line draws text — a full text screen, or the bottom rows of a
+  // mixed one. Both the colour burst and the VGC's text colours turn on it.
+  bool isTextScanline(int scanline, const VideoSwitchState& vs) const;
 
   // Character rendering — emit one ROM line's dots for a single character
   void emitCharacterDots(int dotX, int charLine, uint8_t ch, bool inverse,
@@ -213,6 +239,15 @@ private:
   VideoColorMode preMonochromeMode_ = VideoColorMode::COMPOSITE;
   bool greenPhosphor_ = false;
   bool ukCharSet_ = false;  // UK character set switch
+
+  // The VGC's text colours, when a machine has a VGC. See setTextColours.
+  bool textColoursSet_ = false;
+  uint32_t textForeground_ = 0xFFFFFFFF;
+  uint32_t textBackground_ = 0xFF000000;
+
+  // Whether the line being finished is a text line, settled at the end of
+  // horizontal blanking alongside the burst.
+  bool textLine_ = false;
 
   // Cycle callback for position calculation
   CycleCallback cycleCallback_;

@@ -16,6 +16,8 @@
 #include "../core/basic/applesoft_vars.hpp"
 #include "../core/basic/basic_tokenizer.hpp"
 #include "../core/debug/debug_log.hpp"
+#include "../core/cards/disk_controller.hpp"
+#include "../core/cards/smartport/smartport_card.hpp"
 #include "../core/input/keyboard.hpp"
 #include <cstdlib>
 #include <cstring>
@@ -47,8 +49,20 @@ static a2e::MachineId g_machineId = a2e::MachineId::AppleIIe;
 #define REQUIRE_EMULATOR_OR(default_val) do { if (!g_emulator) return (default_val); } while(0)
 #define REQUIRE_MOCKINGBOARD() do { if (!g_emulator || !g_emulator->getMockingboardPtr()) return; } while(0)
 #define REQUIRE_MOCKINGBOARD_OR(default_val) do { if (!g_emulator || !g_emulator->getMockingboardPtr()) return (default_val); } while(0)
-#define REQUIRE_DISK() do { if (!g_emulator || !g_emulator->getDiskPtr()) return; } while(0)
-#define REQUIRE_DISK_OR(default_val) do { if (!g_emulator || !g_emulator->getDiskPtr()) return (default_val); } while(0)
+
+// The 5.25" controller of whichever machine is running: the card in a //e's
+// slot 6, the chip on a //c's board, or the one a IIgs has where a slot would
+// be. Everything the host asks about a drive — which track, is the motor on,
+// where is the head — is the same question whichever machine it is, and the
+// class that answers it is the same class, so these do not need to know.
+static a2e::DiskController *diskController() {
+  if (g_emulator) return g_emulator->getDiskPtr();
+  if (g_iigs) return &g_iigs->disk();
+  return nullptr;
+}
+
+#define REQUIRE_DISK() do { if (!diskController()) return; } while(0)
+#define REQUIRE_DISK_OR(default_val) do { if (!diskController()) return (default_val); } while(0)
 
 extern "C" {
 
@@ -139,16 +153,23 @@ int generateStereoAudioSamples(float *buffer, int sampleCount) {
   return g_emulator->generateStereoAudioSamples(buffer, sampleCount);
 }
 
+// The speaker of whichever machine is running. A IIgs has one too — $C030 is
+// a Mega II address — so the volume slider and the mute button mean the same
+// thing to it as to every other machine here.
+static a2e::Audio *speaker() {
+  if (g_emulator) return &g_emulator->getAudio();
+  if (g_iigs) return &g_iigs->audio();
+  return nullptr;
+}
+
 EMSCRIPTEN_KEEPALIVE
 void setAudioVolume(float volume) {
-  REQUIRE_EMULATOR();
-  g_emulator->getAudio().setVolume(volume);
+  if (a2e::Audio *audio = speaker()) audio->setVolume(volume);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void setAudioMuted(bool muted) {
-  REQUIRE_EMULATOR();
-  g_emulator->getAudio().setMuted(muted);
+  if (a2e::Audio *audio = speaker()) audio->setMuted(muted);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1127,7 +1148,7 @@ const char* readScreenText(int startRow, int startCol, int endRow, int endCol) {
 EMSCRIPTEN_KEEPALIVE
 int getDiskTrack(int drive) {
   REQUIRE_DISK_OR(0);
-  auto &disk = g_emulator->getDisk();
+  auto &disk = (*diskController());
   if (disk.hasDisk(drive)) {
     const auto *image = disk.getDiskImage(drive);
     if (image) {
@@ -1141,33 +1162,33 @@ EMSCRIPTEN_KEEPALIVE
 int getDiskPhase(int drive) {
   REQUIRE_DISK_OR(0);
   (void)drive; // Phase states are controller-wide
-  return g_emulator->getDisk().getPhaseStates();
+  return (*diskController()).getPhaseStates();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool getDiskMotorOn(int drive) {
   REQUIRE_DISK_OR(false);
   (void)drive; // Motor state is controller-wide
-  return g_emulator->getDisk().isMotorOn();
+  return (*diskController()).isMotorOn();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void stopDiskMotor() {
   REQUIRE_DISK();
-  g_emulator->getDisk().stopMotor();
+  (*diskController()).stopMotor();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool getDiskWriteMode(int drive) {
   REQUIRE_DISK_OR(false);
   (void)drive; // Write mode (Q7) is controller-wide
-  return g_emulator->getDisk().getQ7();
+  return (*diskController()).getQ7();
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getDiskHeadPosition(int drive) {
   REQUIRE_DISK_OR(0);
-  auto &disk = g_emulator->getDisk();
+  auto &disk = (*diskController());
   if (disk.hasDisk(drive)) {
     const auto *image = disk.getDiskImage(drive);
     if (image) {
@@ -1180,26 +1201,26 @@ int getDiskHeadPosition(int drive) {
 EMSCRIPTEN_KEEPALIVE
 int getSelectedDrive() {
   REQUIRE_DISK_OR(0);
-  return g_emulator->getDisk().getSelectedDrive();
+  return (*diskController()).getSelectedDrive();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isDiskInserted(int drive) {
   REQUIRE_DISK_OR(false);
-  return g_emulator->getDisk().hasDisk(drive);
+  return (*diskController()).hasDisk(drive);
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint8_t getLastDiskByte() {
   REQUIRE_DISK_OR(0);
-  return g_emulator->getDisk().getDataLatch();
+  return (*diskController()).getDataLatch();
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint8_t getTrackNibble(int drive, int track, int position) {
   REQUIRE_DISK_OR(0);
-  if (g_emulator->getDisk().hasDisk(drive)) {
-    const auto *image = g_emulator->getDisk().getDiskImage(drive);
+  if ((*diskController()).hasDisk(drive)) {
+    const auto *image = (*diskController()).getDiskImage(drive);
     if (image) {
       return image->getNibbleAt(track, position);
     }
@@ -1210,8 +1231,8 @@ uint8_t getTrackNibble(int drive, int track, int position) {
 EMSCRIPTEN_KEEPALIVE
 int getTrackNibbleCount(int drive, int track) {
   REQUIRE_DISK_OR(0);
-  if (g_emulator->getDisk().hasDisk(drive)) {
-    const auto *image = g_emulator->getDisk().getDiskImage(drive);
+  if ((*diskController()).hasDisk(drive)) {
+    const auto *image = (*diskController()).getDiskImage(drive);
     if (image) {
       return image->getTrackNibbleCount(track);
     }
@@ -1222,8 +1243,8 @@ int getTrackNibbleCount(int drive, int track) {
 EMSCRIPTEN_KEEPALIVE
 size_t getCurrentNibblePosition(int drive) {
   REQUIRE_DISK_OR(0);
-  if (g_emulator->getDisk().hasDisk(drive)) {
-    const auto *image = g_emulator->getDisk().getDiskImage(drive);
+  if ((*diskController()).hasDisk(drive)) {
+    const auto *image = (*diskController()).getDiskImage(drive);
     if (image) {
       return image->getCurrentNibblePosition();
     }
@@ -1244,6 +1265,7 @@ static a2e::DiskSaveFormat toSaveFormat(int format) {
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t *getDiskDataAs(int drive, int format, size_t *size) {
+  if (g_iigs) return g_iigs->exportDiskDataAs(drive, toSaveFormat(format), size);
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->exportDiskDataAs(drive, toSaveFormat(format), size);
 }
@@ -1253,18 +1275,21 @@ const uint8_t *getDiskDataAs(int drive, int format, size_t *size) {
 // not disturbed by a save conversion.
 EMSCRIPTEN_KEEPALIVE
 const uint8_t *getDiskSectorDataDOSOrder(int drive, size_t *size) {
+  if (g_iigs) return g_iigs->getDiskSectorsDOSOrder(drive, size);
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getDiskSectorsDOSOrder(drive, size);
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool canSaveDiskAs(int drive, int format) {
+  if (g_iigs) return g_iigs->canExportDiskAs(drive, toSaveFormat(format));
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->canExportDiskAs(drive, toSaveFormat(format));
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getDiskNativeFormat(int drive) {
+  if (g_iigs) return static_cast<int>(g_iigs->getDiskNativeFormat(drive));
   REQUIRE_EMULATOR_OR(0);
   return static_cast<int>(g_emulator->getDiskNativeFormat(drive));
 }
@@ -1272,8 +1297,8 @@ int getDiskNativeFormat(int drive) {
 EMSCRIPTEN_KEEPALIVE
 bool isDiskModified(int drive) {
   REQUIRE_DISK_OR(false);
-  if (g_emulator->getDisk().hasDisk(drive)) {
-    const auto *image = g_emulator->getDisk().getDiskImage(drive);
+  if ((*diskController()).hasDisk(drive)) {
+    const auto *image = (*diskController()).getDiskImage(drive);
     if (image) {
       return image->isModified();
     }
@@ -1283,6 +1308,7 @@ bool isDiskModified(int drive) {
 
 EMSCRIPTEN_KEEPALIVE
 const char *getDiskFilename(int drive) {
+  if (g_iigs) return g_iigs->getDiskFilename(drive);
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getDiskFilename(drive);
 }
@@ -1344,17 +1370,29 @@ uint8_t peekAuxMemory(uint16_t address) {
   return g_emulator->getMMU().peekAux(address);
 }
 
+// The video generator of whichever machine is running. A IIgs's //e-mode
+// picture is drawn by the same class from the same memory — it *is* a //e's
+// video — so every display setting the host offers means the same thing to it.
+static a2e::Video *videoGenerator() {
+  if (g_emulator) return &g_emulator->getVideo();
+  if (g_iigs) return &g_iigs->video();
+  return nullptr;
+}
+
+#define REQUIRE_VIDEO() do { if (!videoGenerator()) return; } while(0)
+#define REQUIRE_VIDEO_OR(default_val) do { if (!videoGenerator()) return (default_val); } while(0)
+
 // UK/US character set switch (like the physical switch on UK Apple IIe)
 EMSCRIPTEN_KEEPALIVE
 void setUKCharacterSet(bool uk) {
-  REQUIRE_EMULATOR();
-  g_emulator->getVideo().setUKCharacterSet(uk);
+  REQUIRE_VIDEO();
+  videoGenerator()->setUKCharacterSet(uk);
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isUKCharacterSet() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->getVideo().isUKCharacterSet();
+  REQUIRE_VIDEO_OR(false);
+  return videoGenerator()->isUKCharacterSet();
 }
 
 // Which kind of receiver decodes the machine's dot stream.
@@ -1362,31 +1400,31 @@ bool isUKCharacterSet() {
 // See VideoColorMode in types.hpp.
 EMSCRIPTEN_KEEPALIVE
 void setVideoColorMode(int mode) {
-  REQUIRE_EMULATOR();
+  REQUIRE_VIDEO();
   if (mode < 0 || mode > 3) {
     return;
   }
-  g_emulator->getVideo().setColorMode(static_cast<a2e::VideoColorMode>(mode));
+  videoGenerator()->setColorMode(static_cast<a2e::VideoColorMode>(mode));
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getVideoColorMode() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<int>(g_emulator->getVideo().getColorMode());
+  REQUIRE_VIDEO_OR(0);
+  return static_cast<int>(videoGenerator()->getColorMode());
 }
 
 // Monochrome display mode. Kept as the older two-state API: it switches to
 // monochrome and back to whichever colour mode was selected before.
 EMSCRIPTEN_KEEPALIVE
 void setMonochrome(bool mono) {
-  REQUIRE_EMULATOR();
-  g_emulator->getVideo().setMonochrome(mono);
+  REQUIRE_VIDEO();
+  videoGenerator()->setMonochrome(mono);
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isMonochrome() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->getVideo().isMonochrome();
+  REQUIRE_VIDEO_OR(false);
+  return videoGenerator()->isMonochrome();
 }
 
 // ============================================================================
@@ -1703,75 +1741,88 @@ uint32_t getMouseCardPIARegister(int reg) {
 // SmartPort Hard Drive
 // ============================================================================
 
+// The SmartPort of whichever machine is running. On a //e it is a card the
+// user fits; on a IIgs it is part of the machine, in slot 5 where a IIgs keeps
+// its SmartPort, and there is nothing to fit. Either way the host is asking
+// about block devices, and the class that holds them is the same class.
+static a2e::SmartPortCard* smartPortCard() {
+  if (g_emulator) return g_emulator->getSmartPortCard();
+  if (g_iigs) return &g_iigs->smartPort();
+  return nullptr;
+}
+
 EMSCRIPTEN_KEEPALIVE
 bool insertSmartPortImage(int device, uint8_t* data, int size, const char* filename) {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->insertSmartPortImage(device, data, size, filename);
+  auto* card = smartPortCard();
+  if (!card) return false;
+  return card->insertImage(device, data, static_cast<size_t>(size),
+                           filename ? filename : "");
 }
 
 EMSCRIPTEN_KEEPALIVE
 void ejectSmartPortImage(int device) {
-  REQUIRE_EMULATOR();
-  g_emulator->ejectSmartPortImage(device);
+  if (auto* card = smartPortCard()) card->ejectImage(device);
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isSmartPortImageInserted(int device) {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isSmartPortImageInserted(device);
+  auto* card = smartPortCard();
+  return card && card->isImageInserted(device);
 }
 
 EMSCRIPTEN_KEEPALIVE
 const char* getSmartPortImageFilename(int device) {
-  REQUIRE_EMULATOR_OR(nullptr);
-  return g_emulator->getSmartPortImageFilename(device);
+  auto* card = smartPortCard();
+  if (!card) return nullptr;
+  const auto& name = card->getImageFilename(device);
+  return name.empty() ? nullptr : name.c_str();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isSmartPortImageModified(int device) {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isSmartPortImageModified(device);
+  auto* card = smartPortCard();
+  return card && card->isImageModified(device);
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint8_t* getSmartPortImageData(int device, size_t* size) {
-  if (!g_emulator) { *size = 0; return nullptr; }
-  return const_cast<uint8_t*>(g_emulator->exportSmartPortImageData(device, size));
+  auto* card = smartPortCard();
+  if (!card) { if (size) *size = 0; return nullptr; }
+  return const_cast<uint8_t*>(card->exportImageData(device, size));
 }
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getSmartPortBlockData(int device, size_t* size) {
-  if (!g_emulator) { *size = 0; return nullptr; }
-  return g_emulator->getSmartPortBlockData(device, size);
+  auto* card = smartPortCard();
+  if (!card) { if (size) *size = 0; return nullptr; }
+  return card->getBlockData(device, size);
 }
 
+// Whether this machine can take a SmartPort image at all. A //e answers for
+// the card in its slots; a IIgs always can, because its SmartPort is not
+// something the user fits.
 EMSCRIPTEN_KEEPALIVE
 bool isSmartPortCardInstalled() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isSmartPortCardInstalled();
+  return smartPortCard() != nullptr;
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool getSmartPortActivity(int device) {
-  REQUIRE_EMULATOR_OR(false);
-  auto* card = g_emulator->getSmartPortCard();
-  if (!card) return false;
-  return card->hasActivity();
+  (void)device; // Activity is card-wide
+  auto* card = smartPortCard();
+  return card && card->hasActivity();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool getSmartPortActivityWrite(int device) {
-  REQUIRE_EMULATOR_OR(false);
-  auto* card = g_emulator->getSmartPortCard();
-  if (!card) return false;
-  return card->isActivityWrite();
+  (void)device; // Activity is card-wide
+  auto* card = smartPortCard();
+  return card && card->isActivityWrite();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearSmartPortActivity() {
-  REQUIRE_EMULATOR();
-  auto* card = g_emulator->getSmartPortCard();
-  if (card) card->clearActivity();
+  if (auto* card = smartPortCard()) card->clearActivity();
 }
 
 // ============================================================================

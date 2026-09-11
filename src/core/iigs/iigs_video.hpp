@@ -66,6 +66,20 @@ public:
   static void paletteColour(uint16_t entry, uint8_t &red, uint8_t &green,
                             uint8_t &blue);
 
+  /**
+   * One of the VGC's sixteen fixed colours, as `$0RGB`.
+   *
+   * These are the colours the Control Panel offers for text, background and
+   * border, and they are the machine's own rather than the Apple II palette
+   * the NTSC decoder derives. A IIgs generates them digitally — there is no
+   * subcarrier involved — so medium blue is `$22F` and looks it, where a
+   * composite //e's blue is whatever a television makes of four dots.
+   */
+  static uint16_t vgcColour(uint8_t index);
+
+  /** The same, packed as the 0xAARRGGBB the video pipeline passes around. */
+  static uint32_t vgcColourARGB(uint8_t index);
+
   // Scanline control byte, per line.
   static constexpr uint8_t SCB_MODE_640 = 0x80;
   static constexpr uint8_t SCB_INTERRUPT = 0x40;
@@ -75,6 +89,7 @@ public:
 private:
   void renderSuperHiRes();
   void renderMegaII();
+  void fillFrame(uint32_t colour);
   void drawLine320(int line, const uint8_t *pixels, const uint16_t *palette,
                    bool fillMode);
   void drawLine640(int line, const uint8_t *pixels, const uint16_t *palette);

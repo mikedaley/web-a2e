@@ -420,7 +420,15 @@ void DiskController::clockLSS() {
     // The P6 ROM state bit 3 is the write amplifier LEVEL (magnetic polarity).
     // Disk formats (WOZ/DSK) store flux TRANSITIONS (1 = polarity change).
     // Convert level to transition via XOR with previous level.
-    if (lssClock_ == 4 && q7_) {
+    //
+    // ENABLE, not the motor, is what gates the write head: the drive is still
+    // turning for a second after the CPU switches it off, and nothing is laid
+    // down on the disk during it. A //e never notices the difference, because
+    // its firmware raises Q7 only when it means to write. A IIgs does: its
+    // firmware switches the drive off and immediately writes the IWM's mode
+    // register, which is an access to $C0EF and so raises Q7 as a side effect,
+    // and without this the machine erases the disk it was about to boot.
+    if (lssClock_ == 4 && q7_ && isDriveEnabled()) {
         uint8_t level = (nextState >> 3) & 1;
         disk->writeBit(level ^ writeLevel_);
         writeLevel_ = level;

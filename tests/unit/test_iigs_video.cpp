@@ -14,6 +14,7 @@
 #include "iigs_memory.hpp"
 #include "iigs_video.hpp"
 #include "mmu/mmu.hpp"
+#include "video/video.hpp"
 
 using namespace a2e;
 using namespace a2e::iigs;
@@ -219,4 +220,78 @@ TEST_CASE("A program draws Super Hi-Res by writing to fast RAM",
   REQUIRE(frame[0] == 0xFF); // red, having arrived by way of the other bank
   REQUIRE(frame[1] == 0x00);
   REQUIRE(frame[2] == 0x00);
+}
+
+// ---------------------------------------------------------------------------
+// The VGC's colours, which are neither the //e's picture nor Super Hi-Res
+// ---------------------------------------------------------------------------
+
+TEST_CASE("The border is the bottom nibble of $C034", "[iigs][video][colour]") {
+  // $C034 is two registers at one address: the clock's transaction control on
+  // top, the border colour underneath. The firmware writes $06 there and means
+  // medium blue, without starting a transaction.
+  IIgsMachine machine;
+  machine.memory().write(bankAddress(0x00, 0xC034), 0x06);
+  REQUIRE(machine.memory().borderColour() == 0x06);
+
+  // The Mega II's picture is 560x384 inside a 640x400 screen, so the corner is
+  // border and nothing else.
+  const uint8_t *frame = machine.screen().render();
+  uint8_t red = 0, green = 0, blue = 0;
+  IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), red, green, blue);
+  REQUIRE(frame[0] == red);
+  REQUIRE(frame[1] == green);
+  REQUIRE(frame[2] == blue);
+  REQUIRE(blue > red); // medium blue, and recognisably blue
+
+  // The clock still gets its own nibble, and reading the address gives both.
+  REQUIRE((machine.memory().peek(bankAddress(0x00, 0xC034)) & 0x0F) == 0x06);
+}
+
+TEST_CASE("$C022 colours the text rather than decoding it",
+          "[iigs][video][colour]") {
+  // A IIgs does not send its //e-mode text down a composite lead: the VGC
+  // substitutes two colours for lit and unlit dots. So a text screen is
+  // exactly two colours, whichever receiver the display settings are asking
+  // for — which is the opposite of every other machine here.
+  IIgsMachine machine;
+  machine.memory().write(bankAddress(0x00, 0xC022), 0xF6); // white on blue
+
+  REQUIRE(machine.memory().textForeground() == 0x0F);
+  REQUIRE(machine.memory().textBackground() == 0x06);
+
+  // Text mode, one inverse space on an otherwise blank line, so the line
+  // carries both colours. $E0 is the Mega II's main bank.
+  machine.memory().write(bankAddress(0x00, 0xC051), 0x00); // TEXT on
+  for (uint16_t at = 0x0400; at < 0x0800; at++) {
+    machine.memory().write(bankAddress(SLOW_BANK_MAIN, at), 0xA0); // space
+  }
+  machine.memory().write(bankAddress(SLOW_BANK_MAIN, 0x0400), 0x20); // inverse
+
+  machine.video().forceRenderFrame();
+  const uint8_t *frame = machine.screen().render();
+
+  uint8_t fr = 0, fg = 0, fb = 0, br = 0, bg = 0, bb = 0;
+  IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x0F), fr, fg, fb);
+  IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), br, bg, bb);
+
+  // The //e's 560x384 picture is centred in the 640x400 screen.
+  const int left = (640 - 560) / 2;
+  const int top = (400 - 384) / 2;
+  auto pixel = [&](int x, int y) {
+    const size_t at = (static_cast<size_t>(top + y) * 640 + (left + x)) * 4;
+    return std::array<uint8_t, 3>{frame[at], frame[at + 1], frame[at + 2]};
+  };
+
+  // The inverse cell is solid foreground; the blank cell beside it is solid
+  // background. Neither is anything else.
+  REQUIRE(pixel(2, 2) == std::array<uint8_t, 3>{fr, fg, fb});
+  REQUIRE(pixel(40, 2) == std::array<uint8_t, 3>{br, bg, bb});
+
+  // A monochrome monitor has one phosphor and no opinion about what the
+  // machine sent it, so the display setting still wins over the VGC.
+  machine.video().setColorMode(VideoColorMode::MONOCHROME);
+  machine.video().forceRenderFrame();
+  frame = machine.screen().render();
+  REQUIRE(pixel(40, 2) == std::array<uint8_t, 3>{0x00, 0x00, 0x00});
 }

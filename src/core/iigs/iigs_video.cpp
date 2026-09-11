@@ -32,6 +32,15 @@ constexpr int PALETTE_BYTES = SHR_PALETTE_ENTRIES * 2;
 // byte. Software draws with it by arranging the palette so neighbouring groups
 // dither into each other.
 constexpr int MODE_640_GROUPS[4] = {2, 3, 0, 1};
+
+// The VGC's sixteen fixed colours, as $0RGB. Black, red, dark blue, purple,
+// dark green, dark grey, medium blue, light blue, brown, orange, light grey,
+// pink, light green, yellow, aqua, white — the Control Panel's list, in the
+// order the register numbers them.
+constexpr uint16_t VGC_COLOURS[16] = {
+    0x0000, 0x0D03, 0x0009, 0x0D2D, 0x0072, 0x0555, 0x022F, 0x06AF,
+    0x0852, 0x0F60, 0x0AAA, 0x0F98, 0x01D1, 0x0FF0, 0x04F9, 0x0FFF,
+};
 } // namespace
 
 IIgsVideo::IIgsVideo(Video &megaII, IIgsMemory &memory)
@@ -54,8 +63,31 @@ void IIgsVideo::paletteColour(uint16_t entry, uint8_t &red, uint8_t &green,
   blue = static_cast<uint8_t>((b << 4) | b);
 }
 
+uint16_t IIgsVideo::vgcColour(uint8_t index) {
+  return VGC_COLOURS[index & 0x0F];
+}
+
+uint32_t IIgsVideo::vgcColourARGB(uint8_t index) {
+  uint8_t red = 0, green = 0, blue = 0;
+  paletteColour(vgcColour(index), red, green, blue);
+  return 0xFF000000u | (static_cast<uint32_t>(red) << 16) |
+         (static_cast<uint32_t>(green) << 8) | blue;
+}
+
 bool IIgsVideo::superHiResEnabled() const {
   return (memory_.peek(NEW_VIDEO) & NEW_VIDEO_SUPER_HIRES) != 0;
+}
+
+void IIgsVideo::fillFrame(uint32_t colour) {
+  const uint8_t red = static_cast<uint8_t>(colour >> 16);
+  const uint8_t green = static_cast<uint8_t>(colour >> 8);
+  const uint8_t blue = static_cast<uint8_t>(colour);
+  for (size_t at = 0; at < frame_.size(); at += 4) {
+    frame_[at + 0] = red;
+    frame_[at + 1] = green;
+    frame_[at + 2] = blue;
+    frame_[at + 3] = 0xFF;
+  }
 }
 
 uint8_t *IIgsVideo::scanline(int y) {
@@ -84,8 +116,10 @@ const uint8_t *IIgsVideo::render() {
 void IIgsVideo::renderMegaII() {
   // The //e's picture, centred in a screen that is bigger than it. A real IIgs
   // does much the same: the //e modes do not fill a Super Hi-Res raster, and
-  // what is around them is border.
-  std::fill(frame_.begin(), frame_.end(), 0);
+  // what is around them is border — the border the Control Panel sets, in the
+  // bottom nibble of $C034, and not black unless that is what it says.
+  const uint32_t border = vgcColourARGB(memory_.borderColour());
+  fillFrame(border);
 
   const auto &megaIIDisplay = machineProfile(MachineId::AppleIIe).display;
   const int sourceWidth = megaIIDisplay.pixelWidth;

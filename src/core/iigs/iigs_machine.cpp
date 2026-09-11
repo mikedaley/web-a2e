@@ -8,9 +8,11 @@
 #include "iigs_machine.hpp"
 
 #include "../cpu/65816/cpu65816.hpp"
+#include "../audio/audio.hpp"
 #include "../mmu/mmu.hpp"
 #include "../cards/disk_controller.hpp"
 #include "../cards/iwm/iwm.hpp"
+#include "../cards/smartport/smartport_card.hpp"
 #include "../input/keyboard.hpp"
 #include "../machine/machine_profile.hpp"
 #include "../video/video.hpp"
@@ -29,6 +31,7 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
 
   // The picture is the Mega II's, and the Mega II is a //e: the same class,
   // reading the same memory through the same MMU.
+  audio_ = std::make_unique<Audio>(machineProfile(MachineId::AppleIIgs));
   video_ = std::make_unique<Video>(memory_->megaII());
   screen_ = std::make_unique<IIgsVideo>(*video_, *memory_);
 
@@ -40,6 +43,77 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
       iwm->setCycleCallback([this]() { return memory_->slowCycles(); });
     disk_ = iwm.get();
     memory_->megaII().insertCard(6, std::move(iwm));
+  }
+
+  // $C036's motor detect bits: the one drive this machine has is the IWM's, in
+  // slot 6, and a IIgs with it turning is a 1.023MHz machine whatever the
+  // speed bit says. See IIgsMemory::speedRegister for why that is the
+  // difference between booting a disk and failing every checksum on it.
+  // $C022: the VGC's two text colours. The //e's video decodes a text line
+  // into them rather than through a receiver, which is what a IIgs's picture
+  // does and why its text can be white on blue and still be sharp.
+  memory_->setTextColourCallback([this](uint8_t value) {
+    video_->setTextColours(
+        IIgsVideo::vgcColourARGB(static_cast<uint8_t>((value >> 4) & 0x0F)),
+        IIgsVideo::vgcColourARGB(static_cast<uint8_t>(value & 0x0F)));
+  });
+
+  memory_->setSlotMotorQuery([this](int slot) {
+    return slot == 6 && disk_ && disk_->isMotorOn();
+  });
+
+  // Slot 5 is the SmartPort. On a real IIgs that means the machine's own
+  // firmware driving a Sony 3.5" drive and whatever else is daisy-chained off
+  // the port behind it; here it means the block devices the host hands over.
+  // Either way it is part of the machine rather than a card somebody fitted,
+  // so it is on the internal side of $C02D and needs no Control Panel setting
+  // to answer. With no image loaded it has no ROM, and the machine's own
+  // slot 5 firmware shows through unchanged.
+  {
+    auto smartPort = std::make_unique<SmartPortCard>();
+    smartPort->setSlotNumber(SMARTPORT_SLOT);
+    smartPort->setMemReadCallback(
+        [this](uint16_t address) { return memory_->read(address); });
+    smartPort->setMemWriteCallback([this](uint16_t address, uint8_t value) {
+      memory_->write(address, value);
+    });
+
+    // The card drives the machine's registers directly — that is how a trap
+    // card works: it does the read, puts the result where the caller expects
+    // it, and adjusts the stack so the RTS it returns through lands on the
+    // code it just loaded. So it needs the CPU, and the CPU it is being handed
+    // is sixteen bits wide where it expects eight.
+    //
+    // The translations are the interesting part. The accumulator's high half
+    // is B and must survive, so only the low byte is replaced. The stack
+    // pointer it hands back is a page-one offset, because that is the only
+    // kind a //e has and this card was written for a //e; in emulation mode,
+    // which is where any of this runs, that is exactly what the 65816's is.
+    smartPort->setGetA(
+        [this]() { return static_cast<uint8_t>(cpu_->getA()); });
+    smartPort->setSetA([this](uint8_t value) {
+      cpu_->setA(static_cast<uint16_t>((cpu_->getA() & 0xFF00) | value));
+    });
+    smartPort->setGetP([this]() { return cpu_->getP(); });
+    smartPort->setSetP([this](uint8_t value) { cpu_->setP(value); });
+    smartPort->setGetSP(
+        [this]() { return static_cast<uint8_t>(cpu_->getSP()); });
+    smartPort->setSetSP([this](uint8_t value) {
+      cpu_->setSP(static_cast<uint16_t>((cpu_->getSP() & 0xFF00) | value));
+    });
+    // A 65816 reads the opcode and *then* advances, where a 6502 has already
+    // advanced by the time the read arrives. The card must not guess at that.
+    smartPort->setExecutingAt([this](uint16_t address) {
+      return cpu_->getPBR() == 0x00 && cpu_->getPC() == address;
+    });
+    smartPort->setGetPC([this]() { return cpu_->getPC(); });
+    smartPort->setSetPC([this](uint16_t value) { cpu_->setPC(value); });
+    smartPort->setSetX([this](uint8_t value) {
+      cpu_->setX(static_cast<uint16_t>((cpu_->getX() & 0xFF00) | value));
+    });
+    smartPort_ = smartPort.get();
+    memory_->megaII().insertCard(SMARTPORT_SLOT, std::move(smartPort));
+    memory_->setInternalCardSlot(SMARTPORT_SLOT);
   }
 
   // The keyboard translation is the //e's — a browser key event becomes an
@@ -63,6 +137,12 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
     return 0x00;
   });
   video_->setCycleCallback([this]() { return memory_->slowCycles(); });
+
+  // $C030 is the Mega II's, and so is the speaker behind it: the toggle is
+  // timed on the slow clock, which is the one the profile's cpuClockHz names
+  // and the one Audio turns into samples.
+  memory_->megaII().setSpeakerCallback(
+      [this]() { audio_->toggleSpeaker(memory_->slowCycles()); });
   memory_->megaII().setCycleCallback([this]() { return memory_->slowCycles(); });
   memory_->megaII().setVideoSwitchCallback(
       [this]() { video_->onVideoSwitchChanged(); });
@@ -81,6 +161,7 @@ void IIgsMachine::init(const uint8_t *rom, size_t romSize,
 
 void IIgsMachine::reset() {
   memory_->reset();
+  audio_->reset();
   lastFrameCycle_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
@@ -104,8 +185,14 @@ int IIgsMachine::step() {
 
   // The slow-side accesses have already charged themselves, as they happened;
   // what is left is the rest of the instruction, at whatever speed the machine
-  // is running.
-  memory_->addFastCycles(slowCyclesFor(cycles));
+  // is running. Subtracting them is the whole point: a cycle spent waiting on
+  // the Mega II is not also a cycle spent running.
+  const uint64_t slowAccesses = memory_->takeSlowAccesses();
+  const int fastCycles =
+      cycles > static_cast<int>(slowAccesses)
+          ? cycles - static_cast<int>(slowAccesses)
+          : 0;
+  memory_->addFastCycles(slowCyclesFor(fastCycles));
 
   // Draw the scanlines this instruction's time covered, and close the frame
   // when its time is up. Both halves matter: without the boundary the picture
@@ -139,6 +226,62 @@ void IIgsMachine::runCycles(int slowCyclesToRun) {
     }
     step();
   }
+}
+
+bool IIgsMachine::insertBlockImage(int device, const uint8_t *data, size_t size,
+                                   const std::string &filename) {
+  return smartPort_ && smartPort_->insertImage(device, data, size, filename);
+}
+
+void IIgsMachine::ejectBlockImage(int device) {
+  if (smartPort_) smartPort_->ejectImage(device);
+}
+
+const uint8_t *IIgsMachine::exportDiskDataAs(int drive, DiskSaveFormat format,
+                                            size_t *size) {
+  if (size) *size = 0;
+  if (!disk_) return nullptr;
+
+  DiskImage *image = disk_->getMutableDiskImage(drive);
+  if (!image || !image->isLoaded()) return nullptr;
+  if (!DiskConverter::convert(*image, format, diskExportBuffer_)) return nullptr;
+
+  if (size) *size = diskExportBuffer_.size();
+  return diskExportBuffer_.data();
+}
+
+const uint8_t *IIgsMachine::getDiskSectorsDOSOrder(int drive, size_t *size) {
+  if (size) *size = 0;
+  if (!disk_) return nullptr;
+
+  DiskImage *image = disk_->getMutableDiskImage(drive);
+  if (!image || !image->isLoaded()) return nullptr;
+  if (!DiskConverter::convert(*image, DiskSaveFormat::DOSOrder,
+                              diskSectorBuffer_)) {
+    return nullptr;
+  }
+
+  if (size) *size = diskSectorBuffer_.size();
+  return diskSectorBuffer_.data();
+}
+
+bool IIgsMachine::canExportDiskAs(int drive, DiskSaveFormat format) {
+  if (!disk_) return false;
+  DiskImage *image = disk_->getMutableDiskImage(drive);
+  return image && DiskConverter::canConvert(*image, format);
+}
+
+DiskSaveFormat IIgsMachine::getDiskNativeFormat(int drive) {
+  if (!disk_) return DiskSaveFormat::DOSOrder;
+  const DiskImage *image = disk_->getDiskImage(drive);
+  if (!image) return DiskSaveFormat::DOSOrder;
+  return DiskConverter::nativeFormat(*image);
+}
+
+const char *IIgsMachine::getDiskFilename(int drive) const {
+  if (!disk_) return nullptr;
+  const auto *image = disk_->getDiskImage(drive);
+  return image ? image->getFilename().c_str() : nullptr;
 }
 
 bool IIgsMachine::insertDisk(int drive, const uint8_t *data, size_t size,
@@ -220,9 +363,18 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
 
   samplesGenerated_ += sampleCount;
 
-  // ...and then ask the Ensoniq what it is playing.
+  // ...and then ask both of the machine's sound sources what they are playing.
+  // The speaker writes the buffer and the Ensoniq is added on top, because a
+  // IIgs has one amplifier and everything reaches the same one.
   if (buffer) {
-    memory_->sound().generateSamples(buffer, sampleCount, AUDIO_SAMPLE_RATE);
+    audio_->generateStereoSamples(buffer, sampleCount, memory_->slowCycles());
+
+    ensoniqMix_.resize(static_cast<size_t>(sampleCount) * 2);
+    memory_->sound().generateSamples(ensoniqMix_.data(), sampleCount,
+                                     AUDIO_SAMPLE_RATE);
+    for (size_t at = 0; at < ensoniqMix_.size(); at++) {
+      buffer[at] += ensoniqMix_[at];
+    }
   }
   return sampleCount;
 }

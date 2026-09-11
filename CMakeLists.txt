@@ -558,6 +558,14 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/audio/audio.cpp
+        src/core/disk-image/disk_converter.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/debug/debug_log.cpp
+        src/core/cards/smartport/smartport_card.cpp
+        src/core/cards/smartport/block_device.cpp
         src/core/cards/disk_controller.cpp
         src/core/cards/iwm/iwm.cpp
         src/core/disk-image/dsk_disk_image.cpp
@@ -641,6 +649,14 @@ else()
     add_catch2_test(test_iigs_video
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/audio/audio.cpp
+        src/core/disk-image/disk_converter.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/debug/debug_log.cpp
+        src/core/cards/smartport/smartport_card.cpp
+        src/core/cards/smartport/block_device.cpp
         src/core/cards/disk_controller.cpp
         src/core/cards/iwm/iwm.cpp
         src/core/disk-image/dsk_disk_image.cpp
@@ -673,6 +689,14 @@ else()
     add_catch2_test(test_iigs_boot
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/audio/audio.cpp
+        src/core/disk-image/disk_converter.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/debug/debug_log.cpp
+        src/core/cards/smartport/smartport_card.cpp
+        src/core/cards/smartport/block_device.cpp
         src/core/cards/disk_controller.cpp
         src/core/cards/iwm/iwm.cpp
         src/core/disk-image/dsk_disk_image.cpp

@@ -70,6 +70,23 @@ public:
     void setSetP(RegSetCallback8 cb) { setP_ = cb; }
     void setGetSP(RegGetCallback8 cb) { getSP_ = cb; }
     void setSetSP(RegSetCallback8 cb) { setSP_ = cb; }
+    /**
+     * Whether the CPU is *executing* this ROM address, rather than reading it
+     * as data. The card's entry points are traps: a read of $Cn10 during a
+     * fetch is a driver call to service, and a read of the same byte by a
+     * ProDOS scan is just a byte.
+     *
+     * This is a predicate rather than a comparison the card makes itself
+     * because only the machine knows what its processor has done to the
+     * program counter by the time the read arrives. A 6502 here fetches with
+     * `read(pc_++)`, so the counter has already moved past the opcode; a 65816
+     * reads and then increments, so it has not. The card guessing at that is
+     * how a IIgs came to boot a SmartPort volume and then fail every driver
+     * call after it, on an off-by-one that matched the boot by luck.
+     */
+    using ExecutingAtCallback = std::function<bool(uint16_t)>;
+    void setExecutingAt(ExecutingAtCallback cb) { executingAt_ = std::move(cb); }
+
     void setGetPC(RegGetCallback16 cb) { getPC_ = cb; }
     void setSetPC(RegSetCallback16 cb) { setPC_ = cb; }
     void setSetX(RegSetCallback8 cb) { setX_ = cb; }
@@ -111,6 +128,7 @@ private:
     RegSetCallback8 setP_;
     RegGetCallback8 getSP_;
     RegSetCallback8 setSP_;
+    ExecutingAtCallback executingAt_;
     RegGetCallback16 getPC_;
     RegSetCallback16 setPC_;
     RegSetCallback8 setX_;

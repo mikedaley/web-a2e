@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), a //c's serial ports (where the ACIA answers, both directions of the line, and that its firmware drives them through PR# and IN#), a //c's IOU mouse (each switch, one interrupt per step, and its own firmware tracking a mouse across the screen and back to the clamp), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), a //c's serial ports (where the ACIA answers, both directions of the line, and that its firmware drives them through PR# and IN#), a //c's IOU mouse (each switch, one interrupt per step, and its own firmware tracking a mouse across the screen and back to the clamp), and full emulator integration — including every machine booting DOS 3.3 through the controller it has, the IIgs included (which also checks the image it booted from is byte-for-byte what went in).
 
 ## Architecture
 
@@ -95,7 +95,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `cards/mockingboard/` - AY-3-8910 sound chip + VIA 6522 timer + Mockingboard card
 - `cards/mouse/` - Apple Mouse Interface Card
 - `cards/parallel/` - Centronics parallel card (drives Epson FX-80 and Apple DMP)
-- `cards/smartport/` - SmartPort hard drive controller (2 block devices, self-built ROM)
+- `cards/smartport/` - SmartPort hard drive controller (2 block devices, self-built ROM). A //e fits one in a slot; a IIgs has one in slot 5 as part of the machine
 - `cards/softcard/` - Microsoft Z-80 SoftCard with Z80 CPU emulation
 - `cards/ssc/` - Super Serial Card with ACIA 6551 (drives ImageWriter I and ImageWriter II)
 - `cards/serial/` - A //c's two built-in serial ports: the SSC's ACIA 6551 with no card around it and no ROM
@@ -231,6 +231,55 @@ afterwards at whatever the speed register says. Keeping it there is what lets
 it advance *during* an instruction: a disk read loop is a few cycles with one
 access in it, and a drive whose clock only moved between instructions sees that
 loop in lumps.
+
+**The rest of the instruction is the rest of it.** `takeSlowAccesses()` returns
+how many of an instruction's cycles went to the slow side, and `step()`
+subtracts them before converting what is left — a cycle spent waiting on the
+Mega II is not also a cycle spent running. Charging both halves is easy to do
+and invisible until something is timed against it: the boot ROM's read loop
+runs out of bank `$00`'s I/O space, so *every* cycle of it is a slow access,
+and it came out at thirteen cycles where the disk expects seven.
+
+**`$C036`'s bottom four bits are a veto on the fast clock, not a speed
+setting.** They are slot motor detect, one each for slots 4 to 7, and a drive
+turning in an enabled slot drops the whole machine to 1.023MHz until it stops.
+`IIgsMemory::isFastSpeed()` asks a `SlotMotorQuery` the machine installs, so
+the memory needs to know nothing about drives. This is what makes a Disk II
+readable at all: the controller holds a finished byte for about two bit cells,
+and at 2.8MHz the firmware's poll comes round three times per byte and reads
+half of them twice.
+
+**A IIgs's text is drawn, not transmitted.** `$C022` (TCOLOR) holds the two
+colours the VGC substitutes for lit and unlit text dots and the bottom nibble of
+`$C034` holds the border — the top nibble of that address is the clock's, which
+is why `$06` sets a blue border and starts no transaction. `Video::setTextColours`
+is how that reaches the //e's video: a text line is decoded into those two
+colours instead of through a receiver, and a machine that never calls it behaves
+exactly as before. Monochrome still overrides it, because a monochrome monitor
+has one phosphor whatever the machine sent.
+
+**Slot 5 is the IIgs's SmartPort, and it is part of the machine** — no card to
+fit, no Control Panel setting. `IIgsMemory::setInternalCardSlot` names the slot
+that answers at `$Cn00` whatever `$C02D` says, because a part the machine has is
+on the internal side of that switch. The machine's own slot 5 firmware is real
+but polls the IWM for a Sony 3.5" drive, so it cannot serve a block image; with
+nothing inserted the SmartPort has no ROM and that firmware shows through.
+`SmartPortCard::setExecutingAt` is how a trap card is told the CPU is executing
+its entry point rather than reading it — a 6502 has already advanced the program
+counter by then and a 65816 has not, and the card must not guess.
+
+**A IIgs has a speaker as well as an Ensoniq.** `$C030` is a Mega II address, so
+`IIgsMachine` owns an `Audio` toggled on the slow clock and adds the Ensoniq's
+samples on top. Without it the machine is silent through every beep and click.
+
+**ENABLE is not the motor, and `DiskController::isDriveEnabled()` is the
+difference.** A drive keeps turning for about a second after the CPU switches
+it off; `isMotorOn()` says so, and that is right for reading. But the IWM's
+mode register is writable exactly while the *line* is low, and the sequencer
+must not write flux when it is. The IIgs firmware exercises both in one
+instruction — it switches the drive off and writes the mode register at
+`$C0EF`, which is also Q7 — so a machine that asks about the mechanism instead
+of the wire spins for a second and erases track zero while it does it.
 
 **Two devices had to exist before the machine would draw anything**, which is
 earlier than the plan expected: the firmware's power-on diagnostics sync and

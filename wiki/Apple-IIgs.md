@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: the drive is fitted but does not yet boot a disk. You can type at it, though there is not yet much that listens. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots, and it boots a disk.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -40,18 +40,116 @@ A IIgs runs at 2.8MHz until it reaches across to the Mega II, and then it runs a
 
 The slow clock lives in `IIgsMemory` rather than in the machine, and ticks on each access that reaches the slow side — during an instruction, not between instructions. That matters for one thing in particular: a disk read loop is a handful of cycles with a single I/O access in it, and a drive whose clock only moved when an instruction ended would see that loop in lumps. Everything else — the video, the frame boundary — is counted in the same clock.
 
+Those ticks are then *subtracted* from the instruction before the rest of it is converted, because a cycle spent waiting on the Mega II is not also a cycle spent running. Charging both is easy to do and hard to see: the machine simply runs at about half speed wherever it touches I/O, which is exactly where the timing matters.
+
+The other half of the arrangement is `$C036`, and it is not a speed setting so much as a veto — see [The Drive](#the-drive).
+
 ## The Drive
 
 Slot 6 holds an `IWM`, the same class a //c has, with `DiskController` under it: the drives, the stepper, the motor and the sequencer are shared with the card a //e takes. There is no card ROM, because the boot code that drives it is the machine's own firmware.
 
-**A IIgs does not yet boot from a disk**, and it is worth writing down how far it gets, because most of the way is now known to be right:
+**A IIgs boots a disk**, and every step below had to be right before it would. Each is worth writing down, because each of the last three looks like something else — a broken drive, a broken image, a broken sequencer — and none of them is.
 
 - The registers the firmware polls before it will look for a drive at all — `$C02D` and `$C031` — answer properly. They used to return the floating bus, and the machine never spun a drive.
 - The mode register write reaches the chip. It arrives at `$C0EF` on Q7 alone, without Q6; requiring both hangs the machine in a loop writing the mode and reading it back, 786,905 times in one boot.
 - Slot 6 carries the disk boot signature (`$Cn01=20`, `$Cn03=00`, `$Cn05=03`, `$Cn07=3C`) out of the machine's own firmware, so the slot is recognised as bootable, and `$C600` holds the boot code.
-- The drive reads. With the motor running the sequencer assembles sync bytes — `1F`, `3F`, `7F`, `FF` — off track zero, which is the shape of a real GCR stream.
+- **ENABLE is not the motor.** The firmware switches the drive off and writes the IWM's mode register on the next instruction — and `$C0EF` is both that register and Q7. A drive keeps turning for about a second after the CPU switches it off, so a controller that asks "is the disk spinning" instead of "is the drive enabled" does two wrong things with that one access: it sends the byte to the write data register rather than the mode register, so the firmware's read-back never matches and it spins for a second; and it lets the sequencer write Q7's output to the disk for all of that second, which erases track zero. The machine was wiping the disk it was about to boot, twice over, and then reading a drive that answered `$A0` for ever.
+- **A cycle spent on the slow side is not also spent on the fast side.** Each access that reaches the Mega II charged the slow clock as it happened, and then the whole instruction was charged again at the end — so the boot ROM's read loop, which runs out of bank `$00`'s I/O space and is therefore slow accesses all the way through, came out at thirteen cycles where the disk expects seven. Every second byte went past unread.
+- **`$C036`'s bottom four bits are why a IIgs can read a Disk II at all.** They are slot motor detect, one each for slots 4 to 7: with a slot's bit set, a drive turning in that slot drops the whole machine to 1.023MHz until it stops. That is not a courtesy to slow cards. A Disk II holds a finished byte for about two bit cells before the sequencer takes it apart again, so the boot ROM's thirteen-cycle poll arrives once per byte on the machine it was written for — and three times per byte at 2.8MHz, reading half of them twice and failing every checksum on the disk. The firmware sets bit 2 before it goes looking, and the hardware is expected to do the rest.
 
-What does not happen is the last step: the boot sector never lands at `$0800`. It is **not** the two-clock model — forcing the whole machine to 1MHz changes nothing — and it is not the drive, which reads. The next place to look is what the `$C600` code does with what it reads, and which of the IWM's status answers it does not like.
+`tests/integration/test_iigs_boot.cpp` holds both halves of the claim: that the machine reaches the DOS 3.3 prompt, and that the image it booted from is byte-for-byte what was inserted.
+
+## The Colours the Machine Draws In
+
+Two registers decide what a IIgs's //e-mode screen looks like, and neither
+belongs to the //e:
+
+- **`$C022` TCOLOR** — the foreground and background the text is drawn in, a
+  nibble each out of the VGC's sixteen colours.
+- **the bottom nibble of `$C034`** — the border around the picture. The top
+  nibble of that address is the clock's transaction control, which is why the
+  firmware can write `$06` there and mean "medium blue" without starting one.
+
+The firmware writes `$F6` and `$06` on the way up: white on medium blue, in a
+medium blue border. That is the screen everyone remembers, and it is not
+something a //e could produce. **A IIgs does not send its text down a composite
+lead at all.** The VGC generates the picture digitally and substitutes two
+colours of its own for lit and unlit text dots, which is why IIgs text is crisp
+where a //e's fringes, and why the Control Panel can offer sixteen of each.
+
+So a text line takes no decoder: `Video::setTextColours` is a pair of colours,
+and `endScanline` uses them in place of the receiver for text lines — the text
+rows of a mixed screen included, since graphics dots carry a colour of their own
+and the VGC leaves them alone. A machine that never calls it decodes text
+exactly as it always did, which is how this is a number in the //e's video
+rather than a second video generator.
+
+The one display setting that still wins is **Monochrome**: a monochrome monitor
+has one phosphor and no opinion about what the machine sent it. Every other
+setting in that window — the colour mode, the CRT shader, the character set —
+reaches a IIgs the way it reaches the others, because a IIgs's //e-mode picture
+is drawn by the //e's own `Video` from the //e's own memory.
+
+## Sound
+
+A IIgs has two sound sources and one amplifier, and it needs both. The Ensoniq
+is the famous one; the other is **the speaker at `$C030`**, which is a Mega II
+address and the same one-bit speaker every Apple II has. A machine given only
+the synthesiser is silent through every beep, every click and every game written
+before 1986 — which is most of what it runs. `IIgsMachine` owns an `Audio` for
+it, toggled on the slow clock, and the Ensoniq's samples are added on top.
+
+## What the Host Sees
+
+`wasm_interface.cpp` is where "which machine is running" is answered, and three
+accessors there mean the rest of the host does not have to ask: `diskController()`,
+`videoGenerator()` and `speaker()` each return the part of whichever machine is
+live. The drive panel, the activity lights, the seek and motor sounds, the track
+heat map, the file explorer, the display settings, the volume slider and the mute
+button are all the same code they were; they were only ever asking a `DiskController`,
+a `Video` and an `Audio`, and a IIgs has all three.
+
+## The SmartPort
+
+**Slot 5 is the SmartPort, and it is part of the machine.** There is no card to
+fit, no entry in the Expansion Slots window and no Control Panel setting to
+change: insert a hard drive image and a IIgs boots ProDOS 8 off it. With nothing
+inserted it has no ROM at all, and the machine's own slot 5 firmware shows
+through unchanged.
+
+Two things about how that works are worth knowing, because both were wrong at
+first in ways that looked like something else.
+
+**The machine's own SmartPort firmware is real, and it is not what serves these
+images.** Slot 5 of a ROM 01 carries a genuine SmartPort signature — `$C501=$20`,
+`$C503=$00`, `$C505=$03`, and `$C507=$00`, the `$00` being what distinguishes a
+SmartPort from slot 6's Disk II — and behind it is a stub that `JSL`s into bank
+`$FF`. What that firmware does is **poll the IWM**: 1,270 reads of `$C0EE` in one
+boot, looking for a Sony 3.5" drive and for whatever is daisy-chained off the
+port behind it. It cannot read a block image out of nowhere, and making it work
+means emulating the 3.5" recording scheme, the drive's register file on the
+IWM's SENSE line, and the SmartPort bus — each its own piece of work, and what
+they buy is 800K floppies rather than hard disks. So slot 5 holds the same
+block-device SmartPort the other machines use, answering the same ProDOS and
+SmartPort calls.
+
+**`$C02D` decides whether a slot shows the machine's firmware or a card's, and
+a IIgs comes up with every slot internal.** That is correct — on real hardware
+you would go to the Control Panel and set a slot to "Your Card" before a card in
+it answered. A part the machine *has* is on the internal side of that switch, so
+`IIgsMemory::setInternalCardSlot` names the one slot that answers either way.
+`$C02D` is left reading exactly what the firmware wrote.
+
+**A trap card must be told when the CPU is executing, not guess.** The card's
+entry points are traps: a read of `$C510` during a fetch is a driver call to
+service, and the same read by a ProDOS scan is just a byte. Telling those apart
+means knowing what the processor has done to the program counter by the time the
+read arrives — and a 6502 fetches with `read(pc_++)`, so it has already moved
+past the opcode, where a 65816 reads and then advances. The card used to assume
+the 6502's answer. On a IIgs that matched the boot call by luck and missed every
+driver call after it, so the volume booted and then said **UNABLE TO LOAD
+PRODOS**. `SmartPortCard::setExecutingAt` is now a predicate the machine
+supplies, because only the machine knows which processor it has.
 
 ## Super Hi-Res
 
@@ -126,7 +224,7 @@ Known places where the rest of the emulator assumes an 8-bit Apple II. None is a
 - ~~The shared framebuffer slot is sized for the //e's 560x384~~ — now 640x400, the largest any machine here draws. The other three write a smaller picture into a larger slot, which costs 164KB of address space and saves the one machine that would not fit from falling back to `postMessage`.
 - **Save states** are laid out to the saving machine's shape and carry a machine id. A IIgs state is a different shape again; `STATE_VERSION` will have to move.
 - **The debugger** — disassembler, breakpoints, the trace — speaks 6502 and 16-bit addresses.
-- **The agent tools and the wasm interface** are `g_emulator`-shaped, and `Emulator` is the Apple II family's coordinator.
+- **The agent tools** are `g_emulator`-shaped, and `Emulator` is the Apple II family's coordinator. The wasm interface no longer is everywhere: see [What the Host Sees](#what-the-host-sees) for the three accessors that answer "which machine is running" once, so the drive panel, the display settings and the volume slider need not.
 
 ## ROMs
 

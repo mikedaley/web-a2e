@@ -431,15 +431,17 @@ void Video::beginScanline() {
   idealKind_.fill(ntsc::IdealKind::DOT_GATED);
 }
 
+bool Video::isTextScanline(int scanline, const VideoSwitchState &vs) const {
+  return vs.text ||
+         (vs.mixed && scanline >= machine_->timing.mixedModeTextScanline);
+}
+
 bool Video::burstForScanline(int scanline, const VideoSwitchState &vs) const {
   // A machine that never inhibits burst — a II+ — sends a reference on every
   // line, which is why its text fringes green and violet in every mode.
   if (!machine_->caps.inhibitsBurstInText) return true;
 
-  const bool textLine =
-      vs.text ||
-      (vs.mixed && scanline >= machine_->timing.mixedModeTextScanline);
-  return !textLine;
+  return !isTextScanline(scanline, vs);
 }
 
 void Video::endScanline(int scanline) {
@@ -447,25 +449,36 @@ void Video::endScanline(int scanline) {
 
   uint32_t line[ntsc::VISIBLE_DOTS];
 
-  // Note this passes chromaEnabled_, not burst_. The burst decides whether the
-  // machine sends a reference on this line; the killer decides whether the
-  // receiver is decoding colour at all, and it works a field at a time.
-  switch (colorMode_) {
-  case VideoColorMode::MONOCHROME:
-    ntsc::decodeMonochrome(dots_.data(), getMonochromeColor(true),
-                           getMonochromeColor(false), line);
-    break;
-  case VideoColorMode::PIXEL_EXACT:
-    ntsc::decodeIdeal(dots_.data(), idealKind_.data(), chromaEnabled_, false,
-                      line);
-    break;
-  case VideoColorMode::RGB_MONITOR:
-    ntsc::decodeIdeal(dots_.data(), idealKind_.data(), chromaEnabled_, true,
-                      line);
-    break;
-  case VideoColorMode::COMPOSITE:
-    ntsc::decodeComposite(dots_.data(), chromaEnabled_, line);
-    break;
+  // A machine with a VGC draws its text rather than transmitting it, so a text
+  // line is two colours and no decoder at all. Everything else on the screen,
+  // including the graphics half of a mixed screen, goes the usual way — and so
+  // does all of it on a monochrome monitor, which has one phosphor and no
+  // opinion about what the machine sent it.
+  if (textColoursSet_ && textLine_ &&
+      colorMode_ != VideoColorMode::MONOCHROME) {
+    ntsc::decodeMonochrome(dots_.data(), textForeground_, textBackground_,
+                           line);
+  } else {
+    // Note this passes chromaEnabled_, not burst_. The burst decides whether the
+    // machine sends a reference on this line; the killer decides whether the
+    // receiver is decoding colour at all, and it works a field at a time.
+    switch (colorMode_) {
+    case VideoColorMode::MONOCHROME:
+      ntsc::decodeMonochrome(dots_.data(), getMonochromeColor(true),
+                             getMonochromeColor(false), line);
+      break;
+    case VideoColorMode::PIXEL_EXACT:
+      ntsc::decodeIdeal(dots_.data(), idealKind_.data(), chromaEnabled_, false,
+                        line);
+      break;
+    case VideoColorMode::RGB_MONITOR:
+      ntsc::decodeIdeal(dots_.data(), idealKind_.data(), chromaEnabled_, true,
+                        line);
+      break;
+    case VideoColorMode::COMPOSITE:
+      ntsc::decodeComposite(dots_.data(), chromaEnabled_, line);
+      break;
+    }
   }
 
   // A scanline occupies `lineDoubling` framebuffer rows (192 lines doubled to
@@ -557,6 +570,7 @@ void Video::renderScanlineWithChanges(int scanline) {
   // The colour burst is generated during horizontal blanking, so whether this
   // line carries one is settled by the state at the end of hblank — before any
   // mid-line switch change can take effect.
+  textLine_ = isTextScanline(scanline, currentRenderState_);
   burst_ = burstForScanline(scanline, currentRenderState_);
   if (burst_) {
     burstSeenThisFrame_ = true;
@@ -654,6 +668,7 @@ void Video::forceRenderFrame() {
 
   for (int scanline = 0; scanline < visibleScanlines; scanline++) {
     beginScanline();
+    textLine_ = isTextScanline(scanline, vs);
     burst_ = burstForScanline(scanline, vs);
     renderScanlineSegment(scanline, 0, visibleColumns, vs);
     endScanline(scanline);

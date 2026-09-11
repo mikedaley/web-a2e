@@ -154,13 +154,15 @@ uint8_t SmartPortCard::readROM(uint8_t offset) {
     // When no devices are loaded, hide the ROM so ProDOS doesn't detect this slot
     if (!hasAnyDevice()) return 0;
 
-    // Check if the CPU is executing at this ROM address (not just reading data).
-    // The CPU's fetch() does read(pc_++) so by the time the read callback fires,
-    // PC has already been incremented by 1. We account for this by comparing
-    // against expectedPC + 1.
-    uint16_t expectedPC = (0xC000 | (static_cast<uint16_t>(slotNum_) << 8)) + offset;
+    // The entry points are traps, so what matters is whether the CPU is
+    // *executing* this byte rather than reading it as data — a ProDOS scan
+    // reads the same addresses and must be given the ROM. The machine answers
+    // that, because only it knows what its processor has done to the program
+    // counter by the time this read arrives. See setExecutingAt.
+    const uint16_t here =
+        (0xC000 | (static_cast<uint16_t>(slotNum_) << 8)) + offset;
 
-    if (getPC_ && getPC_() == static_cast<uint16_t>(expectedPC + 1)) {
+    if (executingAt_ && executingAt_(here)) {
         if (offset == PRODOS_ENTRY) {
             if (!booted_) {
                 // First call to entry point = boot (from autostart ROM or PR#n fallthrough)

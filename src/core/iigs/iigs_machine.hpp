@@ -11,6 +11,8 @@
 #include "iigs_spec.hpp"
 #include "iigs_video.hpp"
 
+#include "../disk-image/disk_converter.hpp"
+
 #include <string>
 
 #include <cstdint>
@@ -19,9 +21,11 @@
 #include <string>
 
 namespace a2e {
+class Audio;
 class CPU65816;
 class DiskController;
 class Keyboard;
+class SmartPortCard;
 class Video;
 } // namespace a2e
 
@@ -88,6 +92,17 @@ public:
   /** The Mega II's video generator: a //e's, drawing a //e's picture. */
   Video &video() { return *video_; }
 
+  /**
+   * The speaker, which a IIgs has as well as an Ensoniq.
+   *
+   * $C030 is a Mega II address and toggles the same one-bit speaker every
+   * Apple II has; the synthesiser is a separate chip on a separate pair of
+   * addresses, and the two are mixed. A machine given only the Ensoniq is
+   * silent through every beep, every click and every game written before 1986
+   * — which is most of what it runs.
+   */
+  Audio &audio() { return *audio_; }
+
   /** The machine's screen, which is that picture or Super Hi-Res. */
   IIgsVideo &screen() { return *screen_; }
 
@@ -103,9 +118,44 @@ public:
   // machine's own firmware rather than a ROM on a card.
 
   DiskController &disk() { return *disk_; }
+
+  /**
+   * The SmartPort, which is slot 5 and is part of the machine.
+   *
+   * A real IIgs has SmartPort firmware of its own in that slot, and it is the
+   * genuine article: it polls the IWM looking for a Sony 3.5" drive and for
+   * whatever is daisy-chained off the port behind it. Neither of those is
+   * modelled — the 3.5" recording scheme and the SmartPort bus are each their
+   * own piece of work — so what sits in slot 5 here is the block-device
+   * SmartPort the other machines use, answering the same ProDOS and SmartPort
+   * calls from images the host hands over.
+   *
+   * It is not a card somebody fitted. It has no entry in the Expansion Slots
+   * window and needs no Control Panel setting: with an image loaded it answers
+   * at $C500, and without one it has no ROM at all and the machine's own slot
+   * 5 firmware shows through exactly as it did before.
+   */
+  static constexpr uint8_t SMARTPORT_SLOT = 5;
+
+  SmartPortCard &smartPort() { return *smartPort_; }
+  bool insertBlockImage(int device, const uint8_t *data, size_t size,
+                        const std::string &filename);
+  void ejectBlockImage(int device);
   bool insertDisk(int drive, const uint8_t *data, size_t size,
                   const std::string &filename);
   void ejectDisk(int drive);
+
+  // Reading a drive's image back out: what the host saves to a file, and what
+  // the file explorer parses. Same conversions as the other machines do —
+  // `DiskConverter` is the one implementation — with this machine's own
+  // buffers, because a IIgs and an Emulator are never alive at once but do not
+  // share anything either.
+  const uint8_t *exportDiskDataAs(int drive, DiskSaveFormat format,
+                                  size_t *size);
+  const uint8_t *getDiskSectorsDOSOrder(int drive, size_t *size);
+  bool canExportDiskAs(int drive, DiskSaveFormat format);
+  DiskSaveFormat getDiskNativeFormat(int drive);
+  const char *getDiskFilename(int drive) const;
   bool hasDisk(int drive) const;
 
   // ===== Somebody typing =====
@@ -183,10 +233,19 @@ private:
 
   std::unique_ptr<IIgsMemory> memory_;
   std::unique_ptr<CPU65816> cpu_;
+  std::unique_ptr<Audio> audio_;
   std::unique_ptr<Video> video_;
   std::unique_ptr<IIgsVideo> screen_;
   std::unique_ptr<Keyboard> keyboard_;
-  DiskController *disk_ = nullptr; // Owned by the Mega II's slot
+  DiskController *disk_ = nullptr;   // Owned by the Mega II's slot
+  SmartPortCard *smartPort_ = nullptr; // ...and so is this
+
+  std::vector<uint8_t> diskExportBuffer_;
+  std::vector<uint8_t> diskSectorBuffer_;
+
+  // Scratch for the Ensoniq's half of the mix, kept rather than reallocated
+  // every buffer.
+  std::vector<float> ensoniqMix_;
 
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;
