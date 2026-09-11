@@ -31,6 +31,11 @@ set(CORE_SOURCES
     src/core/cards/mockingboard/via6522.cpp
     src/core/cards/mockingboard/mockingboard_card.cpp
     src/core/iigs/iigs_memory.cpp
+    src/core/iigs/iigs_machine.cpp
+    src/core/iigs/iigs_sound.cpp
+    src/core/iigs/iigs_adb.cpp
+    src/core/cpu/65816/cpu65816.cpp
+    src/core/cpu/65816/cpu65816_dispatch.cpp
     src/core/cards/disk_controller.cpp
     src/core/cards/disk2/disk2_card.cpp
     src/core/cards/iwm/iwm.cpp
@@ -549,6 +554,11 @@ else()
         src/core/cards/mockingboard/via6522.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
         src/core/cards/disk_controller.cpp
         src/core/cards/disk2/disk2_card.cpp
         src/core/cards/iwm/iwm.cpp
@@ -618,11 +628,36 @@ else()
     # Catch2 Unit Tests - Pure (no ROM dependencies)
     # ==========================================================================
 
+    # The two devices a IIgs will not boot without.
+    add_catch2_test(test_iigs_devices
+        tests/unit/test_iigs_devices.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_sound.cpp
+    )
+
+    # A IIgs running its own ROM, which is every part of it at once.
+    add_catch2_test(test_iigs_boot
+        tests/integration/test_iigs_boot.cpp
+        src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+        src/core/mmu/mmu.cpp
+        src/core/video/video.cpp
+        src/core/video/ntsc.cpp
+        src/core/input/mouse_iou.cpp
+        src/core/noslot_clock.cpp
+    )
+
     # A IIgs's address space, which needs no CPU to test: banks, shadowing,
     # and the Mega II underneath it.
     add_catch2_test(test_iigs_memory
         tests/unit/test_iigs_memory.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_adb.cpp
         src/core/mmu/mmu.cpp
         src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp

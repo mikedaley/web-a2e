@@ -1,0 +1,108 @@
+/*
+ * iigs_adb.hpp - The ADB microcontroller, as the 65816 sees it
+ *
+ * Written by
+ *  Mike Daley <michael_daley@icloud.com>
+ */
+
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <deque>
+
+namespace a2e::iigs {
+
+/**
+ * IIgsADB - the keyboard and mouse GLU at $C024-$C027
+ *
+ * A //e's keyboard is wired to the machine. A IIgs's is on a bus with a
+ * microcontroller in the way: the 65816 writes a command byte to $C026, any
+ * arguments after it, and reads whatever the controller sends back through the
+ * same address, with $C027 saying whose turn it is. The //e's own keyboard
+ * registers still work — $C000 and $C010 are still there — because the GLU
+ * fills them in on the Mega II's behalf.
+ *
+ * **What this is for, today, is getting the machine past its own self-test.**
+ * The firmware syncs the controller, asks its version, reads a few bytes of
+ * its memory and sets its modes before it will draw anything, and a IIgs whose
+ * ADB never answers stops with a fatal error before the splash screen. So the
+ * commands are decoded, their arguments consumed, and plausible answers
+ * queued. Real keys and a real mouse arrive later, through `queueKeyboard` and
+ * `queueMouse`, and the queues are here already so that the shape does not
+ * have to change when they do.
+ *
+ * The status register is the interesting half. The firmware polls it before
+ * every exchange, and what it waits for is bit 5: the controller has a byte
+ * for you. Bit 4 is the other direction — a command it has not finished with —
+ * and since this one finishes instantly, that bit is never set for long.
+ */
+class IIgsADB {
+public:
+  IIgsADB() { reset(); }
+
+  void reset();
+
+  // ===== The four registers =====
+
+  /** $C024: the mouse's movement, a byte at a time. */
+  uint8_t readMouseData();
+
+  /** $C025: which modifier keys are down. */
+  uint8_t readModifiers() const { return modifiers_; }
+
+  /** $C026: the controller's answers on the way out, commands on the way in. */
+  uint8_t readData();
+  void writeCommand(uint8_t value);
+
+  /** $C027: whose turn it is. */
+  uint8_t readStatus() const;
+
+  // ===== Input, for when there is somebody typing =====
+
+  void queueKeyboard(uint8_t keycode) { keyboard_.push_back(keycode); }
+  void queueMouse(uint8_t x, uint8_t y);
+  void setModifiers(uint8_t modifiers) { modifiers_ = modifiers; }
+
+  // ===== State, for tests =====
+
+  bool hasResponse() const { return !response_.empty(); }
+  size_t responseCount() const { return response_.size(); }
+  uint8_t lastCommand() const { return lastCommand_; }
+
+  static constexpr uint8_t STATUS_MOUSE_DATA = 0x80;
+  static constexpr uint8_t STATUS_MOUSE_INTERRUPT = 0x40;
+  static constexpr uint8_t STATUS_DATA_AVAILABLE = 0x20;
+  static constexpr uint8_t STATUS_COMMAND_FULL = 0x10;
+  static constexpr uint8_t STATUS_KEYBOARD_INTERRUPT = 0x08;
+  static constexpr uint8_t STATUS_KEYBOARD_DATA = 0x04;
+
+private:
+  // How many argument bytes a command takes, and what it sends back. The
+  // controller is a small computer of its own and this is the part of its
+  // vocabulary the firmware uses on the way up.
+  struct Command {
+    uint8_t code;
+    uint8_t arguments;
+    uint8_t responseLength;
+  };
+
+  void beginCommand(uint8_t code);
+  void completeCommand();
+
+  std::deque<uint8_t> response_;
+  std::deque<uint8_t> keyboard_;
+  std::deque<uint8_t> mouse_;
+
+  std::array<uint8_t, 256> controllerMemory_{};
+  std::array<uint8_t, 8> arguments_{};
+
+  uint8_t lastCommand_ = 0;
+  uint8_t argumentsExpected_ = 0;
+  uint8_t argumentsSeen_ = 0;
+  uint8_t modifiers_ = 0;
+  uint8_t modes_ = 0;
+  std::array<uint8_t, 3> configuration_{};
+};
+
+} // namespace a2e::iigs

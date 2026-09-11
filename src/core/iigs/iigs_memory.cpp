@@ -20,6 +20,14 @@ namespace {
 constexpr uint16_t REG_SHADOW = 0xC035;
 constexpr uint16_t REG_SPEED = 0xC036;
 constexpr uint16_t REG_STATE = 0xC068;
+constexpr uint16_t REG_ADB_MOUSE = 0xC024;
+constexpr uint16_t REG_ADB_MODIFIERS = 0xC025;
+constexpr uint16_t REG_ADB_DATA = 0xC026;
+constexpr uint16_t REG_ADB_STATUS = 0xC027;
+constexpr uint16_t REG_SOUND_CONTROL = 0xC03C;
+constexpr uint16_t REG_SOUND_DATA = 0xC03D;
+constexpr uint16_t REG_SOUND_ADDRESS_LOW = 0xC03E;
+constexpr uint16_t REG_SOUND_ADDRESS_HIGH = 0xC03F;
 
 constexpr uint16_t IO_BASE = 0xC000;
 constexpr uint16_t IO_END = 0xD000;
@@ -41,7 +49,13 @@ constexpr uint16_t SHR_END = 0xA000;
 
 IIgsMemory::IIgsMemory(size_t fastRamSize)
     : fastRam_(std::min(fastRamSize, FAST_RAM_SIZE_MAX), 0),
-      megaII_(std::make_unique<MMU>(machineProfile(MachineId::AppleIIgs))) {
+      // The Mega II is described by the //e's profile, not the IIgs's, and
+      // that is not a shortcut: this object *is* a //e's memory and video
+      // generator, with a //e's 128KB and a //e's 560-dot picture. The IIgs
+      // profile's display section describes the machine's screen — 640 dots of
+      // Super Hi-Res — which belongs to the video system that will composite
+      // this one into it, and would size this one's framebuffer wrongly.
+      megaII_(std::make_unique<MMU>(machineProfile(MachineId::AppleIIe))) {
   reset();
 }
 
@@ -50,6 +64,20 @@ IIgsMemory::~IIgsMemory() = default;
 void IIgsMemory::loadROM(const uint8_t *rom, size_t size) {
   rom_ = rom;
   romSize_ = rom ? size : 0;
+  romHighBankFirst_ = false;
+  if (!rom_ || romSize_ < 2 * BANK_SIZE) return;
+
+  // Find bank $FF by looking for the emulation reset vector, which every IIgs
+  // ROM has at $FF:FFFC and which points into the ROM's own firmware. If the
+  // half that would be $FF under the obvious reading has nothing there and the
+  // other half does, the image is stored high bank first.
+  auto vectorAt = [this](size_t bankStart) {
+    const size_t at = bankStart + 0xFFFC;
+    return static_cast<uint16_t>(rom_[at] | (rom_[at + 1] << 8));
+  };
+  const uint16_t lastBankVector = vectorAt(romSize_ - BANK_SIZE);
+  const uint16_t firstBankVector = vectorAt(0);
+  romHighBankFirst_ = (lastBankVector == 0x0000) && (firstBankVector != 0x0000);
 }
 
 void IIgsMemory::reset() {
@@ -57,6 +85,8 @@ void IIgsMemory::reset() {
   // hard as it can, and the firmware turns things on from there.
   shadow_ = 0;
   speed_ = 0;
+  adb_.reset();
+  sound_.reset();
   megaII_->reset();
 }
 
@@ -210,6 +240,22 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
 
 uint8_t IIgsMemory::readIO(uint16_t offset) {
   switch (offset) {
+  case REG_ADB_MOUSE:
+    return adb_.readMouseData();
+  case REG_ADB_MODIFIERS:
+    return adb_.readModifiers();
+  case REG_ADB_DATA:
+    return adb_.readData();
+  case REG_ADB_STATUS:
+    return adb_.readStatus();
+  case REG_SOUND_CONTROL:
+    return sound_.readControl();
+  case REG_SOUND_DATA:
+    return sound_.readData();
+  case REG_SOUND_ADDRESS_LOW:
+    return sound_.readAddressLow();
+  case REG_SOUND_ADDRESS_HIGH:
+    return sound_.readAddressHigh();
   case REG_SHADOW:
     return shadow_;
   case REG_SPEED:
@@ -233,6 +279,25 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
 
 void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   switch (offset) {
+  case REG_ADB_DATA:
+    adb_.writeCommand(value);
+    return;
+  case REG_ADB_MOUSE:
+  case REG_ADB_MODIFIERS:
+  case REG_ADB_STATUS:
+    return; // Read-only as far as the controller is concerned
+  case REG_SOUND_CONTROL:
+    sound_.writeControl(value);
+    return;
+  case REG_SOUND_DATA:
+    sound_.writeData(value);
+    return;
+  case REG_SOUND_ADDRESS_LOW:
+    sound_.writeAddressLow(value);
+    return;
+  case REG_SOUND_ADDRESS_HIGH:
+    sound_.writeAddressHigh(value);
+    return;
   case REG_SHADOW:
     shadow_ = value;
     return;
@@ -252,6 +317,22 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
 
 uint8_t IIgsMemory::peekIO(uint16_t offset) const {
   switch (offset) {
+  // The controller's queues are consumed by reading them, so a debugger is
+  // shown only what it can look at without taking anything: the modifiers and
+  // the status.
+  case REG_ADB_MOUSE:
+  case REG_ADB_DATA:
+    return 0x00;
+  case REG_ADB_MODIFIERS:
+    return adb_.readModifiers();
+  case REG_ADB_STATUS:
+    return adb_.readStatus();
+  case REG_SOUND_CONTROL:
+    return sound_.readControl();
+  case REG_SOUND_ADDRESS_LOW:
+    return sound_.readAddressLow();
+  case REG_SOUND_ADDRESS_HIGH:
+    return sound_.readAddressHigh();
   case REG_SHADOW:
     return shadow_;
   case REG_SPEED:
@@ -274,13 +355,22 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
 uint8_t IIgsMemory::readROM(uint32_t address) const {
   if (!rom_ || romSize_ == 0) return 0x00;
 
-  // The image sits at the top of the address space: a 128KB ROM 01 fills banks
+  // The ROM sits at the top of the address space: a 128KB ROM 01 fills banks
   // $FE-$FF, a 256KB ROM 3 fills $FC-$FF. So an address is an offset back from
   // $1000000, and a bank below where the image starts has nothing in it.
   const uint32_t top = 0x1000000;
   const uint32_t base = top - static_cast<uint32_t>(romSize_);
   if (address < base) return 0x00;
-  return rom_[address - base];
+
+  uint32_t index = address - base;
+  if (romHighBankFirst_) {
+    // The banks are in the image the other way round, so the bank an address
+    // is in is counted from the other end.
+    const uint32_t bankIndex = index / BANK_SIZE;
+    const uint32_t bankCount = static_cast<uint32_t>(romSize_ / BANK_SIZE);
+    index = (bankCount - 1 - bankIndex) * BANK_SIZE + (index % BANK_SIZE);
+  }
+  return rom_[index];
 }
 
 // ============================================================================

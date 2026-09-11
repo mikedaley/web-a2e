@@ -8,6 +8,8 @@
 #pragma once
 
 #include "../machine/machine_profile.hpp"
+#include "iigs_adb.hpp"
+#include "iigs_sound.hpp"
 #include "iigs_spec.hpp"
 
 #include <cstddef>
@@ -60,7 +62,12 @@ public:
   IIgsMemory(const IIgsMemory &) = delete;
   IIgsMemory &operator=(const IIgsMemory &) = delete;
 
-  /** The system ROM: 128KB of it on a ROM 01, in banks $FE-$FF. */
+  /**
+   * The system ROM: 128KB of it on a ROM 01, in banks $FE-$FF.
+   *
+   * Which half of the image is which bank is worked out here rather than
+   * assumed — see the note on `romHighBankFirst_`.
+   */
   void loadROM(const uint8_t *rom, size_t size);
   bool hasROM() const { return romSize_ > 0; }
 
@@ -75,6 +82,14 @@ public:
   uint8_t peek(uint32_t address) const;
 
   // ===== The two sides =====
+
+  /** The keyboard and mouse controller, at $C024-$C027. */
+  IIgsADB &adb() { return adb_; }
+  const IIgsADB &adb() const { return adb_; }
+
+  /** The Ensoniq's RAM and the window onto it, at $C03C-$C03F. */
+  IIgsSound &sound() { return sound_; }
+  const IIgsSound &sound() const { return sound_; }
 
   /** The Mega II: a //e, and the machine's slow side. */
   MMU &megaII() { return *megaII_; }
@@ -161,11 +176,26 @@ private:
   void shadowWrite(uint8_t bank, uint16_t offset, uint8_t value);
   bool isShadowed(uint8_t bank, uint16_t offset) const;
 
+  IIgsADB adb_;
+  IIgsSound sound_;
   std::vector<uint8_t> fastRam_;
   std::unique_ptr<MMU> megaII_;
 
   const uint8_t *rom_ = nullptr;
   size_t romSize_ = 0;
+
+  // Whether this image holds its banks the other way round.
+  //
+  // The obvious reading of a 128KB ROM 01 image is that it ends at $FF:FFFF,
+  // so its first half is bank $FE. Some dumps — including the one this was
+  // written against — are stored the other way, and the difference is not
+  // subtle: the emulation reset vector lives at $FF:FFFC, and reading it out
+  // of the wrong half gives zero and a machine that resets to $00:0000.
+  //
+  // So the image is asked rather than assumed. The half whose top holds a
+  // usable reset vector is bank $FF, because that is the one thing every IIgs
+  // ROM must have in the same place.
+  bool romHighBankFirst_ = false;
 
   uint8_t shadow_ = 0;
   uint8_t speed_ = 0;

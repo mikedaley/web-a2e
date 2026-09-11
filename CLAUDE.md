@@ -86,7 +86,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
-- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
+- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers; `iigs_adb.*` is the keyboard and mouse controller; `iigs_sound.*` is the Ensoniq's RAM and the window onto it; `iigs_machine.*` is the coordinator, as `Emulator` is for the 8-bit machines. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -215,6 +215,33 @@ Three things in it are worth knowing:
   card's *write* latch, so `setStateRegister` reads that off the machine and
   preserves it: changing the memory map must not quietly write-protect the
   card, or quietly unprotect it.
+
+### A IIgs that boots
+
+`IIgsMachine` (`core/iigs/iigs_machine.*`) is to a IIgs what `Emulator` is to
+the other three: it owns the CPU, the memory and the video, and runs them. The
+video is the //e's `Video` class reading the Mega II's MMU, because that is
+what a IIgs's //e-mode picture is drawn by.
+
+**The machine has two clocks and the video counts in the slower one.** The
+65816 runs at 2.8MHz except where it is talking to the Mega II; the video is on
+the Mega II's side at 1.023MHz. `IIgsMachine::step` converts as it goes and
+hands the video the slow-side count, so a frame takes a frame's worth of time
+whichever speed the machine is running at. What it does not do yet is charge
+the slow clock per *access* — an instruction that touches bank `$E0` really
+does run at the slow rate for those cycles — so the conversion is right on
+average and wrong in the small.
+
+**Two devices had to exist before the machine would draw anything**, which is
+earlier than the plan expected: the firmware's power-on diagnostics sync and
+interrogate the **ADB** controller and test the **Ensoniq's** RAM before the
+splash screen. A IIgs whose `$C027` never answers stops with `Fatal system
+error-> 0911`. Both are real devices in their own files now, with the keyboard,
+the mouse and the synthesiser still to come.
+
+**A ROM image's banks can be either way round**, and `loadROM` asks rather than
+assumes: it looks for the emulation reset vector, which every IIgs ROM has at
+`$FF:FFFC`. Get it wrong and the machine resets to `$00:0000`.
 
 ### Machine Profiles
 

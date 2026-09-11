@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: not yet runnable.** The machine is in the registry, the menu and the window title, and the emulator marks it unavailable. Its processor and its address space are written and tested; nothing is wired together yet. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
+**Status: it boots.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. It is not yet offered in the menu: there is no Super Hi-Res, no sound, no keyboard and no disk, so what a user could do with it is read one line of text. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
 ---
 
@@ -58,10 +58,10 @@ src/core/
     ├── iigs_spec.hpp             # the numbers no other machine has (done)
     ├── iigs_memory.*             # FPI/Mega II map, banks, shadowing (done)
     ├── iigs_video.*              # Super Hi-Res, over the Mega II's picture
-    ├── iigs_sound.*              # Ensoniq 5503 DOC
-    ├── iigs_adb.*                # keyboard and mouse microcontroller
+    ├── iigs_sound.*              # Ensoniq 5503 DOC (RAM and window done)
+    ├── iigs_adb.*                # keyboard and mouse microcontroller (done enough to boot)
     ├── iigs_battery_ram.*        # settings and the clock chip
-    └── iigs_machine.*            # the coordinator, as Emulator is for the rest
+    └── iigs_machine.*            # the coordinator, as Emulator is for the rest (done)
 ```
 
 The rule for this directory: **nothing in `core/iigs/` is included by a machine that is not a IIgs, and nothing outside it grows an `if (machine is a IIgs)`.** Where the two designs genuinely share a part — the Mega II's video generator is the obvious one — the shared code stays where it is and the IIgs's class uses it, the way `IWM` and `Disk2Card` share `DiskController`.
@@ -73,10 +73,10 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 1. **Describe the machine.** Profile, family, spec header, ROMs, and an honest "not runnable". *(Done.)*
 2. **The 65816.** *(Done.)* A standalone core in `src/core/cpu/65816/` with no emulator wiring at all: registers, both modes, every addressing mode, all 256 opcodes, cycle counts. Tested on its own against a flat 16MB of memory, and checked against 5.1 million recorded states from a real chip — see [[CPU-Emulation]] and `tests/conformance/test_65816_vectors.cpp`.
 3. **Memory.** *(Done.)* `IIgsMemory` in `src/core/iigs/`: banks, fast and slow RAM, ROM, the language card, shadowing, and the machine's own registers. The Mega II side is an `MMU` — the same class a //e is built from — rather than a second copy of that map, so the video will later read it exactly as a //e's video does.
-4. **A machine that boots.** `IIgsMachine` wiring the two together with the Mega II's video borrowed from the existing `Video`, far enough to reach the Apple IIgs splash screen and a `]` prompt in 40 columns.
+4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Neither is finished — there is no keyboard, no mouse and no synthesiser — but both are real devices in their own files rather than stubs in somebody else's.
 5. **Super Hi-Res.** The second video system and its palettes.
-6. **Sound.** The Ensoniq, and the existing audio pipeline behind it.
-7. **ADB, battery RAM, the Control Panel, and the slots.**
+6. **Sound.** The 32 oscillators, on top of the RAM and window that already exist, and the audio pipeline behind them.
+7. **Input and settings.** Real keys and a real mouse through the ADB controller, battery RAM, the clock, the Control Panel, and the slots.
 8. **The host.** A bigger framebuffer, the menu, the windows that assume a 6502.
 
 ## Things That Will Have to Give
@@ -89,6 +89,8 @@ Known places where the rest of the emulator assumes an 8-bit Apple II. None is a
 - **The agent tools and the wasm interface** are `g_emulator`-shaped, and `Emulator` is the Apple II family's coordinator.
 
 ## ROMs
+
+**The banks can be either way round.** The obvious reading of a 128KB ROM 01 image is that it ends at `$FF:FFFF`, so its first half is bank `$FE` — and the dump this was written against is stored the other way. It is not a subtle difference: the emulation reset vector lives at `$FF:FFFC`, and reading it out of the wrong half gives zero and a machine that resets to `$00:0000` and sits there. So `IIgsMemory::loadROM` asks the image which way round it is, by looking for a usable reset vector at the top of each candidate bank.
 
 Not distributed. A IIgs ROM 01 is a single 128KB image; a ROM 3 is 256KB across two chips, concatenated in bank order:
 
