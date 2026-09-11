@@ -46,6 +46,8 @@ void IIgsADB::reset() {
   argumentsExpected_ = 0;
   argumentsSeen_ = 0;
   modifiers_ = 0;
+  latch_ = 0;
+  anyKeyDown_ = false;
   modes_ = 0;
   configuration_.fill(0);
 }

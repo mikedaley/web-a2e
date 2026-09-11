@@ -18,6 +18,7 @@
 
 namespace a2e {
 class CPU65816;
+class Keyboard;
 class Video;
 } // namespace a2e
 
@@ -90,6 +91,23 @@ public:
   /** Slow-side cycles since reset: the clock the video is counted in. */
   uint64_t slowCycles() const { return slowCycles_; }
 
+  // ===== Somebody typing =====
+  //
+  // The same calls Emulator takes, because the host should not have to know
+  // which machine it is talking to. What differs is where they land: a //e's
+  // keyboard is wired to the machine, and a IIgs's goes through the ADB
+  // controller, which fills in the //e's own registers on the Mega II's
+  // behalf.
+
+  /** A browser key event, translated and handed to the controller. */
+  int handleRawKeyDown(int browserKeycode, bool shift, bool ctrl, bool alt,
+                       bool meta, bool capsLock, int keyLocation);
+  void handleRawKeyUp(int browserKeycode, bool shift, bool ctrl, bool alt,
+                      bool meta, int keyLocation);
+
+  /** An already-translated Apple II key code. */
+  void keyDown(int keycode);
+
   /**
    * What is on the text screen, for tests and for looking.
    *
@@ -146,6 +164,7 @@ private:
   std::unique_ptr<CPU65816> cpu_;
   std::unique_ptr<Video> video_;
   std::unique_ptr<IIgsVideo> screen_;
+  std::unique_ptr<Keyboard> keyboard_;
 
   uint64_t slowCycles_ = 0;
   double slowCycleRemainder_ = 0.0;

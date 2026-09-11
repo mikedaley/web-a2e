@@ -31,6 +31,7 @@ set(CORE_SOURCES
     src/core/cards/mockingboard/via6522.cpp
     src/core/cards/mockingboard/mockingboard_card.cpp
     src/core/iigs/iigs_memory.cpp
+    src/core/iigs/iigs_clock.cpp
     src/core/iigs/iigs_machine.cpp
     src/core/iigs/iigs_sound.cpp
     src/core/iigs/iigs_video.cpp
@@ -555,6 +556,7 @@ else()
         src/core/cards/mockingboard/via6522.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_machine.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
@@ -635,6 +637,8 @@ else()
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
+        src/core/input/keyboard.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_adb.cpp
@@ -652,6 +656,7 @@ else()
         tests/unit/test_iigs_devices.cpp
         src/core/iigs/iigs_adb.cpp
         src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_clock.cpp
     )
 
     # A IIgs running its own ROM, which is every part of it at once.
@@ -659,6 +664,8 @@ else()
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
+        src/core/input/keyboard.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
@@ -676,6 +683,7 @@ else()
     add_catch2_test(test_iigs_memory
         tests/unit/test_iigs_memory.cpp
         src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_adb.cpp
         src/core/mmu/mmu.cpp

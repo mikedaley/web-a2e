@@ -9,6 +9,7 @@
 
 #include "../machine/machine_profile.hpp"
 #include "iigs_adb.hpp"
+#include "iigs_clock.hpp"
 #include "iigs_sound.hpp"
 #include "iigs_spec.hpp"
 
@@ -82,6 +83,10 @@ public:
   uint8_t peek(uint32_t address) const;
 
   // ===== The two sides =====
+
+  /** The battery-backed clock and its settings, at $C033-$C034. */
+  IIgsClock &clock() { return clock_; }
+  const IIgsClock &clock() const { return clock_; }
 
   /** The keyboard and mouse controller, at $C024-$C027. */
   IIgsADB &adb() { return adb_; }
@@ -190,6 +195,7 @@ private:
   bool isShadowed(uint8_t bank, uint16_t offset) const;
 
   IIgsADB adb_;
+  IIgsClock clock_;
   IIgsSound sound_;
   std::vector<uint8_t> fastRam_;
   std::unique_ptr<MMU> megaII_;

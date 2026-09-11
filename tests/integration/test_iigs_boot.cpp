@@ -17,6 +17,8 @@
 
 #include "cpu65816.hpp"
 #include "iigs_machine.hpp"
+#include "iigs_adb.hpp"
+#include "iigs_clock.hpp"
 #include "iigs_memory.hpp"
 #include "mmu/mmu.hpp"
 #include "roms.cpp"
@@ -81,6 +83,60 @@ TEST_CASE("A IIgs boots its own firmware", "[iigs][boot]") {
     }
     REQUIRE(anyText);
   }
+}
+
+TEST_CASE("A IIgs notices somebody typing", "[iigs][boot][adb]") {
+  // The whole path in one: a browser key event, translated the //e's way,
+  // handed to the ADB controller, put by the controller into the register the
+  // Mega II reads, and taken from there by firmware that has no idea any of
+  // that happened. What proves the last step is the strobe: only the machine
+  // can clear it, by reading $C010.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the keyboard test");
+    return;
+  }
+
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, roms::ROM_CHAR,
+               roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+
+  machine.keyDown('A');
+  REQUIRE(machine.memory().adb().keyboardLatch() == ('A' | 0x80));
+
+  for (int i = 0; i < 50000; i++) machine.step();
+  REQUIRE((machine.memory().adb().keyboardLatch() & 0x80) == 0);
+  REQUIRE((machine.memory().adb().keyboardLatch() & 0x7F) == 'A');
+}
+
+TEST_CASE("A IIgs writes its settings into battery RAM", "[iigs][boot][clock]") {
+  // The first Apple II that remembers anything. A machine whose battery RAM is
+  // nonsense spends its startup putting the defaults back, and that is what
+  // this sees: 256 bytes that were zero before the firmware ran and hold a
+  // configuration afterwards.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the battery RAM test");
+    return;
+  }
+
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, roms::ROM_CHAR,
+               roms::ROM_CHAR_SIZE);
+
+  int before = 0;
+  for (int i = 0; i < 256; i++) {
+    if (machine.memory().clock().batteryRam(static_cast<uint8_t>(i))) before++;
+  }
+  REQUIRE(before == 0);
+
+  runToPrompt(machine);
+
+  int after = 0;
+  for (int i = 0; i < 256; i++) {
+    if (machine.memory().clock().batteryRam(static_cast<uint8_t>(i))) after++;
+  }
+  INFO("non-zero battery RAM bytes after boot: " << after);
+  REQUIRE(after > 32);
 }
 
 TEST_CASE("A IIgs without a ROM says so rather than running", "[iigs][boot]") {

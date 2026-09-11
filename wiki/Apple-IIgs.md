@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: there is no sound, nothing to type on and no disk to boot. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: there is no sound and no disk to boot. You can type at it, though there is not yet much that listens. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -79,7 +79,8 @@ src/core/
     ├── iigs_memory.*             # FPI/Mega II map, banks, shadowing (done)
     ├── iigs_video.*              # Super Hi-Res, over the Mega II's picture (done)
     ├── iigs_sound.*              # Ensoniq 5503 DOC (RAM and window done)
-    ├── iigs_adb.*                # keyboard and mouse microcontroller (done enough to boot)
+    ├── iigs_adb.*                # keyboard and mouse microcontroller (keyboard done)
+    ├── iigs_clock.*              # battery-backed clock and 256 bytes of settings (done)
     ├── iigs_battery_ram.*        # settings and the clock chip
     └── iigs_machine.*            # the coordinator, as Emulator is for the rest (done)
 ```
@@ -96,7 +97,7 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Neither is finished — there is no keyboard, no mouse and no synthesiser — but both are real devices in their own files rather than stubs in somebody else's.
 5. **Super Hi-Res.** *(Done.)* `iigs_video.*`: both widths, per-line control bytes, sixteen palettes of sixteen colours out of 4096, fill mode, and the `$C029` switch that decides which of the machine's two video systems is on screen. Nothing in the firmware turns it on — a IIgs boots in text — so it shows up when a program asks for it.
 6. **Sound.** The 32 oscillators, on top of the RAM and window that already exist, and the audio pipeline behind them.
-7. **Input and settings.** Real keys and a real mouse through the ADB controller, battery RAM, the clock, the Control Panel, and the slots.
+7. **Input and settings.** *(Partly done.)* The keyboard works: a browser key event is translated the //e's way, handed to the ADB controller, and put by it into the register the Mega II reads — so //e software finds the keyboard where it expects it without knowing a microcontroller is involved. The clock and its 256 bytes of battery RAM work, and the firmware writes its settings there at startup. Still to come: the mouse, the Control Panel hotkey (which the controller itself intercepts on real hardware), and the slots.
 8. **The host.** *(Partly done.)* The machine can be chosen from the menu and drives the display: the wasm layer holds either an `Emulator` or an `IIgsMachine` and routes the calls that run and show a machine to whichever it is. The shared framebuffer slot is sized for the largest picture (640x400) so the IIgs does not fall back to `postMessage`. Everything else — disks, printers, cards, the debugger, the agent tools — still asks for an `Emulator` and quietly does nothing while a IIgs is running.
 
 ## Things That Will Have to Give

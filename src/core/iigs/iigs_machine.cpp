@@ -9,6 +9,7 @@
 
 #include "../cpu/65816/cpu65816.hpp"
 #include "../mmu/mmu.hpp"
+#include "../input/keyboard.hpp"
 #include "../machine/machine_profile.hpp"
 #include "../video/video.hpp"
 #include "iigs_video.hpp"
@@ -28,6 +29,27 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   // reading the same memory through the same MMU.
   video_ = std::make_unique<Video>(memory_->megaII());
   screen_ = std::make_unique<IIgsVideo>(*video_, *memory_);
+
+  // The keyboard translation is the //e's — a browser key event becomes an
+  // Apple II code the same way whichever machine is listening — and what it
+  // feeds is the ADB controller, which is what a IIgs has instead of wires.
+  keyboard_ = std::make_unique<Keyboard>();
+  keyboard_->setKeyCallback([this](int key) { keyDown(key); });
+
+  // And the Mega II reads the keyboard through the controller, which is how
+  // //e software works on this machine without knowing the controller exists.
+  memory_->megaII().setKeyboardCallback(
+      [this]() { return memory_->adb().keyboardLatch(); });
+  memory_->megaII().setKeyStrobeCallback(
+      [this]() { memory_->adb().clearKeyboardStrobe(); });
+  memory_->megaII().setAnyKeyDownCallback(
+      [this]() { return memory_->adb().isAnyKeyDown(); });
+  memory_->megaII().setButtonCallback([this](int button) -> uint8_t {
+    // The Apple keys, which are buttons rather than keys on every Apple II.
+    if (button == 0) return keyboard_->isOpenApplePressed() ? 0x80 : 0x00;
+    if (button == 1) return keyboard_->isClosedApplePressed() ? 0x80 : 0x00;
+    return 0x00;
+  });
   video_->setCycleCallback([this]() { return slowCycles_; });
   memory_->megaII().setCycleCallback([this]() { return slowCycles_; });
   memory_->megaII().setVideoSwitchCallback(
@@ -104,6 +126,26 @@ void IIgsMachine::runCycles(int slowCyclesToRun) {
     }
     step();
   }
+}
+
+int IIgsMachine::handleRawKeyDown(int browserKeycode, bool shift, bool ctrl,
+                                  bool alt, bool meta, bool capsLock,
+                                  int keyLocation) {
+  const int key = keyboard_->handleKeyDown(browserKeycode, shift, ctrl, alt,
+                                           meta, capsLock, keyLocation);
+  memory_->adb().setAnyKeyDown(keyboard_->isAnyKeyDown());
+  return key;
+}
+
+void IIgsMachine::handleRawKeyUp(int browserKeycode, bool shift, bool ctrl,
+                                 bool alt, bool meta, int keyLocation) {
+  keyboard_->handleKeyUp(browserKeycode, shift, ctrl, alt, meta, keyLocation);
+  memory_->adb().setAnyKeyDown(keyboard_->isAnyKeyDown());
+}
+
+void IIgsMachine::keyDown(int keycode) {
+  memory_->adb().queueKeyboard(static_cast<uint8_t>(keycode & 0x7F));
+  memory_->adb().setAnyKeyDown(true);
 }
 
 std::string IIgsMachine::screenText() const { return screenText(0, 0, 23, 39); }

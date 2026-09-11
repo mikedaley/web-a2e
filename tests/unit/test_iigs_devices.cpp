@@ -9,6 +9,7 @@
 #include "catch.hpp"
 
 #include "iigs_adb.hpp"
+#include "iigs_clock.hpp"
 #include "iigs_sound.hpp"
 
 using namespace a2e::iigs;
@@ -108,6 +109,38 @@ TEST_CASE("The ADB status register is what the firmware polls", "[iigs][adb]") {
   }
 }
 
+TEST_CASE("The controller fills in the //e's keyboard registers",
+          "[iigs][adb]") {
+  // This is what lets //e software read the keyboard on a IIgs without knowing
+  // there is a microcontroller in the way: the controller puts the key where
+  // $C000 looks for it, strobe and all.
+  IIgsADB adb;
+  REQUIRE(adb.keyboardLatch() == 0x00);
+
+  adb.queueKeyboard('A');
+  REQUIRE(adb.keyboardLatch() == ('A' | 0x80)); // the key, with its strobe
+
+  adb.clearKeyboardStrobe();
+  REQUIRE(adb.keyboardLatch() == 'A'); // still readable, no longer new
+
+  SECTION("and the keys queue up in order") {
+    adb.queueKeyboard('B');
+    adb.queueKeyboard('C');
+    REQUIRE((adb.keyboardLatch() & 0x80) != 0);
+    adb.clearKeyboardStrobe();
+    REQUIRE(adb.keyboardLatch() == 'C');
+  }
+
+  SECTION("any-key-down is a separate line, not the strobe") {
+    // A //e reports whether a key is physically held in bit 7 of $C010, and it
+    // has nothing to do with whether the last key has been read.
+    REQUIRE_FALSE(adb.isAnyKeyDown());
+    adb.setAnyKeyDown(true);
+    adb.clearKeyboardStrobe();
+    REQUIRE(adb.isAnyKeyDown());
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sound
 // ---------------------------------------------------------------------------
@@ -165,4 +198,97 @@ TEST_CASE("The Ensoniq's RAM is reached a byte at a time", "[iigs][sound]") {
     sound.writeControl(0x0B);
     REQUIRE(sound.volume() == 0x0B);
   }
+}
+
+// ---------------------------------------------------------------------------
+// The clock and its battery RAM
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A transaction is a byte in the data register and a nudge to the control one.
+void send(IIgsClock &clock, uint8_t byte) {
+  clock.writeData(byte);
+  clock.writeControl(IIgsClock::CONTROL_TRANSACTION);
+}
+
+// Battery RAM takes three of them: two command bytes carrying the address
+// between them, and then the byte itself.
+void writeBatteryRam(IIgsClock &clock, uint8_t address, uint8_t value) {
+  send(clock, static_cast<uint8_t>(0x38 | (address >> 5)));
+  send(clock, static_cast<uint8_t>((address & 0x1F) << 2));
+  send(clock, value);
+}
+
+uint8_t readBatteryRam(IIgsClock &clock, uint8_t address) {
+  send(clock, static_cast<uint8_t>(0xB8 | (address >> 5)));
+  send(clock, static_cast<uint8_t>((address & 0x1F) << 2));
+  send(clock, 0x00);
+  return clock.readData();
+}
+
+} // namespace
+
+TEST_CASE("Battery RAM is addressed across three transactions",
+          "[iigs][clock]") {
+  // The encoding was read off a trace of the firmware rather than taken from a
+  // description: the documented ones are for the chip before it grew 256 bytes
+  // of RAM, and guessing from them produced a machine that stored every byte
+  // at the address of the byte before.
+  IIgsClock clock;
+
+  writeBatteryRam(clock, 0x00, 0x11);
+  writeBatteryRam(clock, 0x1F, 0x22);
+  writeBatteryRam(clock, 0x20, 0x33); // the first address needing the top bits
+  writeBatteryRam(clock, 0xFB, 0x44);
+
+  REQUIRE(readBatteryRam(clock, 0x00) == 0x11);
+  REQUIRE(readBatteryRam(clock, 0x1F) == 0x22);
+  REQUIRE(readBatteryRam(clock, 0x20) == 0x33);
+  REQUIRE(readBatteryRam(clock, 0xFB) == 0x44);
+
+  SECTION("and the top three bits really are the top three") {
+    // $FB is $1B with the high bits set. A decode that dropped them would put
+    // both bytes in the same place, and both reads would agree — which is why
+    // this checks the one that should *not* have changed.
+    REQUIRE(readBatteryRam(clock, 0x1B) != 0x44);
+  }
+
+  SECTION("the battery outlives a reset, which is what a battery is for") {
+    clock.reset();
+    REQUIRE(readBatteryRam(clock, 0x20) == 0x33);
+  }
+}
+
+TEST_CASE("The clock counts seconds since 1904", "[iigs][clock]") {
+  IIgsClock clock;
+  clock.setSeconds(0x12345678);
+
+  // Four registers, least significant first.
+  send(clock, 0x81);
+  REQUIRE(clock.readData() == 0x78);
+  send(clock, 0x85);
+  REQUIRE(clock.readData() == 0x56);
+  send(clock, 0x89);
+  REQUIRE(clock.readData() == 0x34);
+  send(clock, 0x8D);
+  REQUIRE(clock.readData() == 0x12);
+}
+
+TEST_CASE("The border colour shares the clock's control register",
+          "[iigs][clock]") {
+  // For no better reason than that there was a spare nibble.
+  IIgsClock clock;
+  clock.writeControl(0x07);
+  REQUIRE(clock.borderColour() == 0x07);
+}
+
+TEST_CASE("The transaction bit clears itself when the chip is done",
+          "[iigs][clock]") {
+  // The firmware starts a transaction and waits for the bit to go; a chip that
+  // left it set would hang the machine before it drew anything.
+  IIgsClock clock;
+  clock.writeData(0x38);
+  clock.writeControl(IIgsClock::CONTROL_TRANSACTION);
+  REQUIRE((clock.readControl() & IIgsClock::CONTROL_TRANSACTION) == 0);
 }

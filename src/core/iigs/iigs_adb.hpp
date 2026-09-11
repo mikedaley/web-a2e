@@ -60,7 +60,33 @@ public:
 
   // ===== Input, for when there is somebody typing =====
 
-  void queueKeyboard(uint8_t keycode) { keyboard_.push_back(keycode); }
+  /**
+   * A key, as the machine will read it.
+   *
+   * On a //e the keyboard is wired to the machine and $C000 is the key. On a
+   * IIgs the controller is in the way, and one of the things it does is fill
+   * that same register in on the Mega II's behalf — which is why //e software
+   * reads the keyboard on a IIgs without knowing there is a microcontroller
+   * anywhere. So a key goes two places: into the queue a IIgs-aware program
+   * reads through $C026, and into the latch $C000 reports.
+   */
+  void queueKeyboard(uint8_t keycode) {
+    keyboard_.push_back(keycode);
+    latch_ = static_cast<uint8_t>(keycode | 0x80); // with the strobe set
+  }
+
+  /** $C000: the key and its strobe, as a //e would read them. */
+  uint8_t keyboardLatch() const { return latch_; }
+
+  /** $C010: the strobe is cleared, and the key stays readable without it. */
+  void clearKeyboardStrobe() {
+    latch_ &= 0x7F;
+    if (!keyboard_.empty()) keyboard_.pop_front();
+  }
+
+  /** Whether a key is physically held, which is a different line entirely. */
+  void setAnyKeyDown(bool down) { anyKeyDown_ = down; }
+  bool isAnyKeyDown() const { return anyKeyDown_; }
   void queueMouse(uint8_t x, uint8_t y);
   void setModifiers(uint8_t modifiers) { modifiers_ = modifiers; }
 
@@ -101,6 +127,8 @@ private:
   uint8_t argumentsExpected_ = 0;
   uint8_t argumentsSeen_ = 0;
   uint8_t modifiers_ = 0;
+  uint8_t latch_ = 0;
+  bool anyKeyDown_ = false;
   uint8_t modes_ = 0;
   std::array<uint8_t, 3> configuration_{};
 };

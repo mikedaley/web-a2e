@@ -395,6 +395,10 @@ bool isFrameReady() {
 
 EMSCRIPTEN_KEEPALIVE
 void keyDown(int keycode) {
+  if (g_iigs) {
+    g_iigs->keyDown(keycode);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->keyDown(keycode);
 }
@@ -408,6 +412,10 @@ void keyUp(int keycode) {
 EMSCRIPTEN_KEEPALIVE
 int handleRawKeyDown(int browserKeycode, bool shift, bool ctrl, bool alt,
                      bool meta, bool capsLock, int keyLocation) {
+  if (g_iigs) {
+    return g_iigs->handleRawKeyDown(browserKeycode, shift, ctrl, alt, meta,
+                                    capsLock, keyLocation);
+  }
   REQUIRE_EMULATOR_OR(-1);
   return g_emulator->handleRawKeyDown(browserKeycode, shift, ctrl, alt, meta,
                                       capsLock, keyLocation);
@@ -416,6 +424,10 @@ int handleRawKeyDown(int browserKeycode, bool shift, bool ctrl, bool alt,
 EMSCRIPTEN_KEEPALIVE
 void handleRawKeyUp(int browserKeycode, bool shift, bool ctrl, bool alt,
                     bool meta, int keyLocation) {
+  if (g_iigs) {
+    g_iigs->handleRawKeyUp(browserKeycode, shift, ctrl, alt, meta, keyLocation);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->handleRawKeyUp(browserKeycode, shift, ctrl, alt, meta, keyLocation);
 }

@@ -17,6 +17,8 @@ namespace a2e::iigs {
 namespace {
 // The registers that are the IIgs's own. Everything else in $C0xx is the //e's
 // and belongs to the Mega II.
+constexpr uint16_t REG_CLOCK_DATA = 0xC033;
+constexpr uint16_t REG_CLOCK_CONTROL = 0xC034;
 constexpr uint16_t REG_NEW_VIDEO = 0xC029;
 constexpr uint16_t REG_SHADOW = 0xC035;
 constexpr uint16_t REG_SPEED = 0xC036;
@@ -88,6 +90,7 @@ void IIgsMemory::reset() {
   speed_ = 0;
   newVideo_ = 0;
   adb_.reset();
+  clock_.reset();
   sound_.reset();
   megaII_->reset();
 }
@@ -258,6 +261,10 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_CLOCK_DATA:
+    return clock_.readData();
+  case REG_CLOCK_CONTROL:
+    return clock_.readControl();
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -302,6 +309,12 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   case REG_SOUND_ADDRESS_HIGH:
     sound_.writeAddressHigh(value);
     return;
+  case REG_CLOCK_DATA:
+    clock_.writeData(value);
+    return;
+  case REG_CLOCK_CONTROL:
+    clock_.writeControl(value);
+    return;
   case REG_NEW_VIDEO:
     newVideo_ = value;
     return;
@@ -340,6 +353,10 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_CLOCK_DATA:
+    return clock_.readData();
+  case REG_CLOCK_CONTROL:
+    return clock_.readControl();
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
