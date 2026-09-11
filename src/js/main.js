@@ -486,7 +486,7 @@ class AppleIIeEmulator {
       printerManager.init().catch((e) => console.warn("printer init failed:", e));
       // Sync interface availability from the already-applied slot config, then
       // keep it live as the user changes cards in Expansion Slots.
-      printerManager.updateSlots(slotConfigWindow.slotAssignments);
+      printerManager.updateSlots(slotConfigWindow.installedCards());
       slotConfigWindow.onSlotsApplied = (assignments) => printerManager.updateSlots(assignments);
 
       // Print Browser — manages the pages auto-captured to IndexedDB by the
@@ -680,6 +680,12 @@ class AppleIIeEmulator {
     // machine's own business — a II+ has a slot 0 and no built-in 80-column
     // card, so the window has to be rebuilt rather than merely refreshed.
     if (this.slotConfigWindow) await this.slotConfigWindow.setMachine();
+    // Which buses a printer can be reached over is a property of the machine
+    // as much as of the slots: a //c has a printer port soldered on and a II+
+    // has neither that nor a card until the user fits one.
+    if (this.printerManager && this.slotConfigWindow) {
+      this.printerManager.updateSlots(this.slotConfigWindow.installedCards());
+    }
 
     await this.updateMouseHandlerState();
     if (this.diskManager) this.diskManager.syncWithEmulatorState?.();

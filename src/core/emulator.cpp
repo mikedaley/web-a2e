@@ -11,6 +11,7 @@
 #include "cards/mockingboard/mockingboard_card.hpp"
 #include "cards/thunderclock/thunderclock_card.hpp"
 #include "cards/mouse/mouse_card.hpp"
+#include "cards/serial/serial_port.hpp"
 #include "cards/smartport/smartport_card.hpp"
 #include "cards/softcard/softcard_z80.hpp"
 #include "debug/condition_evaluator.hpp"
@@ -97,6 +98,16 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
       mmu_->insertCard(static_cast<uint8_t>(slot), std::move(disk));
     } else if (strcmp(card, "mockingboard") == 0 && mb) {
       mmu_->insertCard(static_cast<uint8_t>(slot), std::move(mb));
+    } else if (strcmp(card, "serial1") == 0 || strcmp(card, "serial2") == 0) {
+      // A //c's two ports. Built here rather than kept in storage like the
+      // disk and the Mockingboard, because they are soldered to the board:
+      // there is no state in which the machine exists without them.
+      const uint8_t port = card[6] == '2' ? 2 : 1;
+      auto serial = std::make_unique<SerialPort>(port);
+      serial->setIRQCallback([this]() { cpu_->irq(); });
+      if (serialTxCallback_) serial->setSerialTxCallback(serialTxCallback_);
+      serialPorts_[port - 1] = serial.get();
+      mmu_->insertCard(static_cast<uint8_t>(slot), std::move(serial));
     }
   }
 
@@ -1231,6 +1242,12 @@ const char* Emulator::getSlotCardName(uint8_t slot) const {
   if (strcmp(name, "Super Serial Card") == 0) {
     return "ssc";
   }
+  if (strcmp(name, "Serial Port 1") == 0) {
+    return "serial1";
+  }
+  if (strcmp(name, "Serial Port 2") == 0) {
+    return "serial2";
+  }
   if (strcmp(name, "Parallel Card") == 0) {
     return "parallel";
   }
@@ -1471,13 +1488,29 @@ const uint8_t* Emulator::getSmartPortBlockData(int device, size_t* size) const {
 void Emulator::serialReceive(uint8_t byte) {
   if (ssc_) {
     ssc_->serialReceive(byte);
+    return;
+  }
+  // On a //c a byte coming in from outside is arriving at the modem port,
+  // which is port 2 — port 1 is the printer port, and a printer does not talk
+  // back. A machine with only a port 1 would still be given it rather than
+  // dropping it on the floor.
+  if (serialPorts_[1]) {
+    serialPorts_[1]->serialReceive(byte);
+  } else if (serialPorts_[0]) {
+    serialPorts_[0]->serialReceive(byte);
   }
 }
 
 void Emulator::setSerialTxCallback(SSCCard::SerialTxCallback cb) {
   serialTxCallback_ = cb;
   if (ssc_) {
-    ssc_->setSerialTxCallback(std::move(cb));
+    ssc_->setSerialTxCallback(cb);
+  }
+  // Both //c ports transmit to the same host callback, which is what the SSC
+  // does for all three of its uses: what is on the other end — a printer, a
+  // modem, a terminal — is the host's business, not the chip's.
+  for (SerialPort *port : serialPorts_) {
+    if (port) port->setSerialTxCallback(cb);
   }
 }
 

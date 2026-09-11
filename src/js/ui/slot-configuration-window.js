@@ -211,6 +211,26 @@ export class SlotConfigurationWindow extends BaseWindow {
   }
 
   /**
+   * What the machine actually has in it, the parts it fills itself included.
+   *
+   * `slotAssignments` is the editable set and deliberately leaves out the fixed
+   * slots, because those are not the user's to change. But a //c's printer port
+   * is one of those and is still a printer port, so anything asking what this
+   * machine is wired to — the printer, for one — has to be told about them.
+   */
+  installedCards() {
+    const machine = getMachineProfile();
+    const cards = { ...this.slotAssignments };
+    for (const slotInfo of this.slots) {
+      const fixedCard = machine.slots?.find(
+        (s) => s.slot === slotInfo.slot,
+      )?.fixedCard;
+      if (fixedCard) cards[slotInfo.slot] = fixedCard;
+    }
+    return cards;
+  }
+
+  /**
    * Get the list of cards not currently installed in any slot
    */
   /**
@@ -599,7 +619,7 @@ export class SlotConfigurationWindow extends BaseWindow {
     this.hasChanges = false;
     this.updateUI();
 
-    if (this.onSlotsApplied) this.onSlotsApplied({ ...this.slotAssignments });
+    if (this.onSlotsApplied) this.onSlotsApplied(this.installedCards());
 
     if (this.onResetCallback) {
       this.onResetCallback();

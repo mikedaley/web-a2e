@@ -38,6 +38,7 @@ set(CORE_SOURCES
     src/core/cards/smartport/smartport_card.cpp
     src/core/cards/softcard/softcard_z80.cpp
     src/core/cards/ssc/acia6551.cpp
+    src/core/cards/serial/serial_port.cpp
     src/core/cards/ssc/ssc_card.cpp
     src/core/cards/parallel/parallel_card.cpp
     src/core/cards/softcard/z80/z80.cpp
@@ -504,6 +505,8 @@ else()
         ${CMAKE_SOURCE_DIR}/src/core/cards/mockingboard
         ${CMAKE_SOURCE_DIR}/src/core/cards/disk2
         ${CMAKE_SOURCE_DIR}/src/core/cards/iwm
+        ${CMAKE_SOURCE_DIR}/src/core/cards/serial
+        ${CMAKE_SOURCE_DIR}/src/core/cards/ssc
         ${CMAKE_SOURCE_DIR}/src/core/cards/thunderclock
         ${CMAKE_SOURCE_DIR}/src/core/cards/mouse
         ${CMAKE_SOURCE_DIR}/src/core/cards/softcard
@@ -548,6 +551,7 @@ else()
         src/core/cards/smartport/smartport_card.cpp
         src/core/cards/softcard/softcard_z80.cpp
         src/core/cards/ssc/acia6551.cpp
+        src/core/cards/serial/serial_port.cpp
         src/core/cards/ssc/ssc_card.cpp
         src/core/cards/parallel/parallel_card.cpp
         src/core/cards/softcard/z80/z80.cpp
@@ -758,6 +762,13 @@ else()
         src/core/disk-image/dsk_disk_image.cpp
         src/core/disk-image/woz_disk_image.cpp
         src/core/disk-image/gcr_encoding.cpp
+    )
+
+    # A //c's serial ports — the SSC's ACIA with no card around it
+    add_catch2_test(test_serial_port
+        tests/unit/test_serial_port.cpp
+        src/core/cards/serial/serial_port.cpp
+        src/core/cards/ssc/acia6551.cpp
     )
 
     # IWM — a //c's drive controller, sharing DiskController with the card

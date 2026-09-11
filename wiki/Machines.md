@@ -80,7 +80,7 @@ Slot 3 is free, since there is no built-in 80-column card to occupy it.
 
 ## Apple //c
 
-The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots, reads disks and runs software; what is not there yet is the two serial ports.
+The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots, reads disks, prints and runs software.
 
 | | |
 |---|---|
@@ -120,9 +120,15 @@ Because there is no socket, there is nowhere for a card's ROM to live either: th
 
 Slot 6 decodes the sixteen addresses a Disk II card does, and the chip Apple soldered there answers them: the Integrated Woz Machine, the same controller in one package. The drives, the stepper, the motor and the sequencer are the same code the card uses; what the IWM adds is a register file — status, handshake and a mode register — and what it lacks is a `$C600` boot ROM, because a //c's disk firmware is part of its system ROM. A //c boots DOS 3.3 and ProDOS from the drive in its case exactly as a //e does from a card. See [[Disk-System-Internals]].
 
+### The serial ports are the SSC's chip without the card
+
+Slots 1 and 2 each hold a 6551 ACIA — the same chip a Super Serial Card carries, at the same four addresses within the slot (`$C098-$C09B` and `$C0A8-$C0AB`). So `PR#1` sends what the machine prints out of the printer port, and `IN#2` takes what arrives at the modem port, both through the //c's own firmware. An ImageWriter attached to the printer port prints exactly as one on an SSC does; the Printer window offers it without a card being installed, because on this machine there is nothing to install.
+
+What a port does not have is the card's other half: no DIP switches to set its speed (the firmware keeps that), and no ROM, since a //c's serial firmware is part of the system ROM.
+
 ### What is not there yet
 
-The two **6551** serial ports in slots 1 and 2 have no implementation behind them, so a //c cannot yet print or talk to a modem. The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
+The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
 
 ## What Survives a Switch
 

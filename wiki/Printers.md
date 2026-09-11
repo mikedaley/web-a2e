@@ -23,8 +23,8 @@ Open **View > Printer...** for the printer and its paper, and **View > Print Bro
 |---------|-----------|-------|
 | **Epson FX-80** | Parallel Card | The de-facto standard dot-matrix printer; ESC/P command set |
 | **Apple DMP** | Parallel Card | Apple's Dot Matrix Printer |
-| **ImageWriter I** | Super Serial Card | Apple's serial dot-matrix printer |
-| **ImageWriter II** | Super Serial Card | Adds draft, standard and NLQ print qualities |
+| **ImageWriter I** | Serial (SSC, or a //c's printer port) | Apple's serial dot-matrix printer |
+| **ImageWriter II** | Serial (SSC, or a //c's printer port) | Adds draft, standard and NLQ print qualities |
 
 Each printer emulates its own character ROM, so the glyph shapes, character spacing and print quality modes are those of the machine being imitated rather than a generic font. The ImageWriter II, for instance, carries separate ROMs for draft, standard and near-letter-quality output in both fixed and proportional spacing.
 
@@ -33,7 +33,7 @@ Each printer emulates its own character ROM, so the glyph shapes, character spac
 A printer needs the right interface card installed:
 
 - **Epson FX-80** and **Apple DMP** need a **Parallel Card** in slot 1 or 2.
-- **ImageWriter I** and **ImageWriter II** need a **Super Serial Card** in slot 1 or 2.
+- **ImageWriter I** and **ImageWriter II** need a serial port: a **Super Serial Card** in slot 1 or 2, or — on a //c — the printer port, which is already there and cannot be removed.
 
 Install the card from **View > Expansion Slots** (see [[Expansion-Slots]]), then choose the printer model in the Printer window.
 

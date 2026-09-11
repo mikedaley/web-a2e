@@ -380,10 +380,15 @@ export class PrinterManager {
   // Called whenever the slot configuration changes. Scans assigned cards for a
   // Parallel or SSC card (the two buses that can drive a printer). If neither is
   // present the printer gates all incoming bytes and notifies the window.
+  //
+  // A //c reaches the same printer without a card at all: its serial port 1 is
+  // the printer port, soldered where a //e takes an SSC, and the ImageWriter on
+  // the end of it is the same device. Port 2 is the modem port and is not
+  // offered, because a printer is not what that socket is for.
   updateSlots(assignments) {
     const vals        = Object.values(assignments);
     const hasParallel = vals.includes("parallel");
-    const hasSerial   = vals.includes("ssc");
+    const hasSerial   = vals.includes("ssc") || vals.includes("serial1");
     if (hasParallel === this._hasParallel && hasSerial === this._hasSerial) return;
     this._hasParallel  = hasParallel;
     this._hasSerial    = hasSerial;

@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), a //c's serial ports (where the ACIA answers, both directions of the line, and that its firmware drives them through PR# and IN#), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
 
 ## Architecture
 
@@ -95,6 +95,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `cards/smartport/` - SmartPort hard drive controller (2 block devices, self-built ROM)
 - `cards/softcard/` - Microsoft Z-80 SoftCard with Z80 CPU emulation
 - `cards/ssc/` - Super Serial Card with ACIA 6551 (drives ImageWriter I and ImageWriter II)
+- `cards/serial/` - A //c's two built-in serial ports: the SSC's ACIA 6551 with no card around it and no ROM
 - `cards/thunderclock/` - Thunderclock Plus real-time clock card
 - `filesystem/` - DOS 3.3, ProDOS and Pascal filesystem parsers, plus DOS 3.3 and ProDOS *writers* (`DOS33::writeFile`/`writeBinaryFile`, `ProDOS::writeFile`) used by the assembler's Merlin `DSK` directive; results are reported through the shared `FsWriteStatus` in `fs_write_status.hpp`
 - `basic/` - Applesoft and Integer BASIC detokenizer, tokenizer, token tables, and
@@ -338,9 +339,24 @@ profile's `slots[6].fixedCard`, and `Emulator::getDisk()` hands out the base,
 so nothing the host asks about a drive had to change. A //c boots DOS 3.3 from
 the drive in its case.
 
-**What is not implemented is the two 6551s.** A //c cannot print or dial. The
-mouse is the //e's mouse card, which is close but is not how a //c's is
-wired.
+**Its serial ports are the SSC's ACIA with no card around it.** Slots 1 and 2
+each hold a `SerialPort` composing an `ACIA6551` at the slot's offsets 8-B —
+`$C098-$C09B` and `$C0A8-$C0AB`, the same four addresses an SSC answers — so
+`PR#1` and `IN#2` work off the machine's own firmware. There is deliberately no
+base class shared with `SSCCard`: what the two have in common *is* the ACIA and
+they already share it by composing it, the way the hardware does. What is left
+over is a card's DIP switches and 2KB ROM against a port's nothing, and a base
+class holding four forwarding methods would describe a part that does not
+exist. This is the other half of the IWM's rule — share a mechanism, not a
+resemblance.
+
+The host's serial calls (`setSerialTxCallback`, `serialReceive`) serve both
+machines, because the question is about a serial line rather than about what
+provides it: transmit goes to every port there is, and a byte arriving from
+outside goes to port 2, the modem port, since a printer does not talk back.
+
+**What is not implemented is the mouse**, which is the //e's mouse card — close,
+but not how a //c's is wired.
 
 #### Choosing a machine
 
@@ -900,6 +916,7 @@ src/
 │   │   ├── smartport/     # SmartPort hard drive controller
 │   │   ├── softcard/      # Microsoft Z-80 SoftCard
 │   │   │   └── z80/       # Z80 CPU emulation core
+│   │   ├── serial/        # A //c's built-in serial ports (compose ACIA 6551)
 │   │   ├── ssc/           # Super Serial Card + ACIA 6551
 │   │   └── thunderclock/  # Thunderclock Plus real-time clock
 │   ├── filesystem/     # DOS 3.3, ProDOS and Pascal parsers; DOS 3.3/ProDOS file writing
@@ -985,6 +1002,7 @@ class ExpansionCard {
 - `SmartPortCard` (`cards/smartport/`) - SmartPort hard drive controller, 2 block devices, self-built ROM (user-configurable slot)
 - `SoftCardZ80` (`cards/softcard/`) - Microsoft Z-80 SoftCard with Z80 CPU emulation (`cards/softcard/z80/`)
 - `SSCCard` (`cards/ssc/`) - Super Serial Card with ACIA 6551; drives ImageWriter I and ImageWriter II virtual printers (slots 1–2)
+- `SerialPort` (`cards/serial/`) - One of a //c's two built-in ports: the same ACIA 6551, no DIP switches and no ROM (slots 1 and 2, fixed)
 - `ThunderclockCard` (`cards/thunderclock/`) - ProDOS-compatible real-time clock (slots 5, 7)
 - `NoSlotClock` - DS1215 real-time clock piggybacking on $C300 ROM (not a slot card; toggle in Expansion Slots UI)
 

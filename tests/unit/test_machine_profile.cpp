@@ -640,6 +640,76 @@ TEST_CASE("A //c's disk is a chip on the board, not a card in a slot",
     }
 }
 
+TEST_CASE("A //c's serial ports are on the board, and its firmware uses them",
+          "[machine][serial]") {
+    // Slots 1 and 2 on a //c decode what a Super Serial Card would, and a 6551
+    // answers behind each: the printer port at $C098 and the modem port at
+    // $C0A8. The test that matters is the machine's own firmware driving them,
+    // because PR# and IN# are how anything on an Apple II reaches a port, and
+    // that firmware is in the system ROM rather than in a card.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+        WARN("//c ROMs not built in; skipping the serial port test");
+        return;
+    }
+
+    Emulator e(MachineId::AppleIIc);
+    e.init();
+
+    REQUIRE(e.getSerialPort(1) != nullptr);
+    REQUIRE(e.getSerialPort(2) != nullptr);
+    REQUIRE(std::string(e.getSlotCardName(1)) == "serial1");
+    REQUIRE(std::string(e.getSlotCardName(2)) == "serial2");
+    REQUIRE(e.isSerialInstalled());
+    REQUIRE_FALSE(e.isSSCInstalled()); // and not by way of a card
+
+    // Neither port has a ROM, so slot 1 and 2's ROM space is the system ROM's.
+    REQUIRE_FALSE(e.getSerialPort(1)->hasROM());
+    REQUIRE(e.getMMU().read(0xC100) ==
+            e.getMMU().getSystemROM()[0xC100 - 0xC000]);
+
+    std::string sent;
+    e.setSerialTxCallback([&sent](uint8_t byte) {
+        sent += static_cast<char>(byte & 0x7F);
+    });
+
+    // The machine boots looking for a disk; Ctrl+Reset is what drops it into
+    // Applesoft, where PR# and IN# are available.
+    runFrames(e, 120);
+    e.warmReset();
+    runFrames(e, 120);
+    REQUIRE(showsApplesoftPrompt(e));
+
+    SECTION("PR#1 sends what the machine prints out of the printer port") {
+        e.pasteText("PR#1\rPRINT \"HELLO SERIAL\"\rPR#0\r");
+        runFrames(e, 600);
+
+        // Everything the machine echoed while the port was hooked up went down
+        // the line, the typed line included — which is what a real //c does,
+        // because PR# redirects the character output hook rather than just the
+        // program's output.
+        REQUIRE(sent.find("HELLO SERIAL") != std::string::npos);
+    }
+
+    SECTION("IN#2 takes what arrives at the modem port") {
+        e.pasteText("IN#2\r");
+        runFrames(e, 120);
+
+        const std::string typed = "PRINT 2+2\r";
+        for (char c : typed) {
+            e.serialReceive(static_cast<uint8_t>(c | 0x80));
+            runFrames(e, 10);
+        }
+        runFrames(e, 240);
+
+        bool answered = false;
+        for (const auto &line : visibleLines(e)) {
+            if (line.find('4') != std::string::npos) answered = true;
+        }
+        INFO("screen: " << (visibleLines(e).empty() ? "" : visibleLines(e).back()));
+        REQUIRE(answered);
+    }
+}
+
 TEST_CASE("Character ROMs are normalised to one layout", "[machine][video]") {
     // The //e and the II+ hold the same glyphs but store them differently: a
     // //e puts bit 0 at the left of a glyph row and the blank scanline last, a
