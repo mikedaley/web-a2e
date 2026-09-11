@@ -33,6 +33,7 @@ set(CORE_SOURCES
     src/core/iigs/iigs_memory.cpp
     src/core/iigs/iigs_machine.cpp
     src/core/iigs/iigs_sound.cpp
+    src/core/iigs/iigs_video.cpp
     src/core/iigs/iigs_adb.cpp
     src/core/cpu/65816/cpu65816.cpp
     src/core/cpu/65816/cpu65816_dispatch.cpp
@@ -556,6 +557,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_machine.cpp
         src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
         src/core/cpu/65816/cpu65816.cpp
         src/core/cpu/65816/cpu65816_dispatch.cpp
@@ -628,6 +630,23 @@ else()
     # Catch2 Unit Tests - Pure (no ROM dependencies)
     # ==========================================================================
 
+    # Super Hi-Res, drawn and then looked at.
+    add_catch2_test(test_iigs_video
+        tests/unit/test_iigs_video.cpp
+        src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_video.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+        src/core/mmu/mmu.cpp
+        src/core/video/video.cpp
+        src/core/video/ntsc.cpp
+        src/core/input/mouse_iou.cpp
+        src/core/noslot_clock.cpp
+    )
+
     # The two devices a IIgs will not boot without.
     add_catch2_test(test_iigs_devices
         tests/unit/test_iigs_devices.cpp
@@ -641,6 +660,7 @@ else()
         src/core/iigs/iigs_machine.cpp
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
         src/core/cpu/65816/cpu65816.cpp
         src/core/cpu/65816/cpu65816_dispatch.cpp

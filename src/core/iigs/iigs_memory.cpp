@@ -17,6 +17,7 @@ namespace a2e::iigs {
 namespace {
 // The registers that are the IIgs's own. Everything else in $C0xx is the //e's
 // and belongs to the Mega II.
+constexpr uint16_t REG_NEW_VIDEO = 0xC029;
 constexpr uint16_t REG_SHADOW = 0xC035;
 constexpr uint16_t REG_SPEED = 0xC036;
 constexpr uint16_t REG_STATE = 0xC068;
@@ -85,6 +86,7 @@ void IIgsMemory::reset() {
   // hard as it can, and the firmware turns things on from there.
   shadow_ = 0;
   speed_ = 0;
+  newVideo_ = 0;
   adb_.reset();
   sound_.reset();
   megaII_->reset();
@@ -256,6 +258,8 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_NEW_VIDEO:
+    return newVideo_;
   case REG_SHADOW:
     return shadow_;
   case REG_SPEED:
@@ -298,6 +302,9 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   case REG_SOUND_ADDRESS_HIGH:
     sound_.writeAddressHigh(value);
     return;
+  case REG_NEW_VIDEO:
+    newVideo_ = value;
+    return;
   case REG_SHADOW:
     shadow_ = value;
     return;
@@ -333,6 +340,8 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_NEW_VIDEO:
+    return newVideo_;
   case REG_SHADOW:
     return shadow_;
   case REG_SPEED:

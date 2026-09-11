@@ -110,6 +110,18 @@ public:
   uint8_t shadowRegister() const { return shadow_; }
   void setShadowRegister(uint8_t value) { shadow_ = value; }
 
+  /**
+   * $C029 NEWVIDEO: bit 7 puts Super Hi-Res on the screen.
+   *
+   * The other bits linearise Super Hi-Res memory and turn off the Mega II's
+   * bank switching, neither of which is modelled — but they are stored, since
+   * the firmware writes the register with a read-modify-write and would find
+   * its own bits missing afterwards.
+   */
+  uint8_t newVideoRegister() const { return newVideo_; }
+  void setNewVideoRegister(uint8_t value) { newVideo_ = value; }
+  bool superHiResEnabled() const { return (newVideo_ & NEW_VIDEO_SHR) != 0; }
+
   /** $C036 CYAREG: bit 7 chooses the fast clock. */
   uint8_t speedRegister() const { return speed_; }
   void setSpeedRegister(uint8_t value) { speed_ = value; }
@@ -132,6 +144,7 @@ public:
   static constexpr uint8_t SHADOW_IO_LANGUAGE_CARD = 0x40;
 
   static constexpr uint8_t SPEED_FAST = 0x80;
+  static constexpr uint8_t NEW_VIDEO_SHR = 0x80;
 
   // State register bits.
   static constexpr uint8_t STATE_ALTZP = 0x80;
@@ -199,6 +212,7 @@ private:
 
   uint8_t shadow_ = 0;
   uint8_t speed_ = 0;
+  uint8_t newVideo_ = 0;
 };
 
 } // namespace a2e::iigs

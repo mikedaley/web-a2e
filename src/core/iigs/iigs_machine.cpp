@@ -11,6 +11,7 @@
 #include "../mmu/mmu.hpp"
 #include "../machine/machine_profile.hpp"
 #include "../video/video.hpp"
+#include "iigs_video.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -26,6 +27,7 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   // The picture is the Mega II's, and the Mega II is a //e: the same class,
   // reading the same memory through the same MMU.
   video_ = std::make_unique<Video>(memory_->megaII());
+  screen_ = std::make_unique<IIgsVideo>(*video_, *memory_);
   video_->setCycleCallback([this]() { return slowCycles_; });
   memory_->megaII().setCycleCallback([this]() { return slowCycles_; });
   memory_->megaII().setVideoSwitchCallback(
@@ -162,33 +164,9 @@ bool IIgsMachine::isFrameReady() const { return frameReady_; }
 void IIgsMachine::clearFrameReady() { frameReady_ = false; }
 
 size_t IIgsMachine::framebufferSize() const {
-  return machineProfile(MachineId::AppleIIgs).display.framebufferSize();
+  return screen_->framebufferSize();
 }
 
-const uint8_t *IIgsMachine::framebuffer() {
-  const auto &display = machineProfile(MachineId::AppleIIgs).display;
-  const auto &megaIIDisplay = machineProfile(MachineId::AppleIIe).display;
-
-  if (frame_.size() != framebufferSize()) frame_.assign(framebufferSize(), 0);
-
-  // The Mega II's picture, centred in a screen that is bigger than it. A real
-  // IIgs does much the same thing: the //e modes do not fill a Super Hi-Res
-  // raster, and what is around them is border.
-  const int destinationWidth = display.pixelWidth;
-  const int sourceWidth = megaIIDisplay.pixelWidth;
-  const int sourceHeight = megaIIDisplay.pixelHeight;
-  const int left = (destinationWidth - sourceWidth) / 2;
-  const int top = (display.pixelHeight - sourceHeight) / 2;
-
-  const uint8_t *source = video_->getFramebuffer();
-  for (int y = 0; y < sourceHeight; y++) {
-    uint8_t *destination =
-        frame_.data() + (static_cast<size_t>(top + y) * destinationWidth + left) * 4;
-    std::memcpy(destination,
-                source + static_cast<size_t>(y) * sourceWidth * 4,
-                static_cast<size_t>(sourceWidth) * 4);
-  }
-  return frame_.data();
-}
+const uint8_t *IIgsMachine::framebuffer() { return screen_->render(); }
 
 } // namespace a2e::iigs

@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*, because that is all it does: there is no Super Hi-Res, no sound, nothing to type on and no disk to boot.
+**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*: there is no sound, nothing to type on and no disk to boot. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -34,6 +34,24 @@ None of that is a number. The rule the codebase has followed from the start says
 
 `MachineProfile` therefore gained one field — `MachineFamily`, which is `AppleII` or `AppleIIgs` — and it is what selects the parts, once, at construction. It is also what the compile-time validation asks before applying a rule that only holds for one design: a IIgs is not checked against the //e-sized arrays it does not use, or against "a visible column clocks out 14 dots" when its picture is 640 dots wide.
 
+## Super Hi-Res
+
+A IIgs screen is not a mode. Each of its 200 lines has a control byte of its own — in bank `$E1` at `$9D00` — saying whether that line is 320 pixels wide or 640, which of sixteen palettes it draws from, and whether it fills. So one screen can be 320-wide artwork above a 640-wide menu bar with different colours in each, and programs really did that.
+
+| | 320 mode | 640 mode |
+|---|---|---|
+| Pixels per byte | 2 | 4 |
+| Bits per pixel | 4 | 2 |
+| Colours per pixel | any of the line's 16 | 4 of them |
+
+640 mode's trick is worth knowing: a two-bit pixel can only count to four, so **which quarter of the palette it draws from depends on where it sits in the byte** — positions left to right use entries 8-11, 12-15, 0-3 and 4-7. Software draws with it by arranging neighbouring groups to dither into each other.
+
+320 mode has **fill mode**, where colour zero is not a colour but "the same as the pixel to my left". It made horizontal runs cheap to draw. A line's leftmost pixel can never be transparent, because there is nothing to its left to copy.
+
+A palette entry is `$0RGB` — four bits a channel, 4096 colours — and each nibble is expanded by repeating it, so `$F` becomes 255. Shifting instead would make white come out grey next to full red.
+
+Programs draw all of this by writing to bank `$01` at full speed; shadowing copies it to `$E1`, and the video reads `$E1`. That is the arrangement the whole machine is built around, and there is a test that draws a IIgs screen entirely through it.
+
 ## What Is Shared and What Is Not
 
 The reason a IIgs belongs in this emulator at all is that a large part of it is already here.
@@ -59,7 +77,7 @@ src/core/
 └── iigs/
     ├── iigs_spec.hpp             # the numbers no other machine has (done)
     ├── iigs_memory.*             # FPI/Mega II map, banks, shadowing (done)
-    ├── iigs_video.*              # Super Hi-Res, over the Mega II's picture
+    ├── iigs_video.*              # Super Hi-Res, over the Mega II's picture (done)
     ├── iigs_sound.*              # Ensoniq 5503 DOC (RAM and window done)
     ├── iigs_adb.*                # keyboard and mouse microcontroller (done enough to boot)
     ├── iigs_battery_ram.*        # settings and the clock chip
@@ -76,7 +94,7 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 2. **The 65816.** *(Done.)* A standalone core in `src/core/cpu/65816/` with no emulator wiring at all: registers, both modes, every addressing mode, all 256 opcodes, cycle counts. Tested on its own against a flat 16MB of memory, and checked against 5.1 million recorded states from a real chip — see [[CPU-Emulation]] and `tests/conformance/test_65816_vectors.cpp`.
 3. **Memory.** *(Done.)* `IIgsMemory` in `src/core/iigs/`: banks, fast and slow RAM, ROM, the language card, shadowing, and the machine's own registers. The Mega II side is an `MMU` — the same class a //e is built from — rather than a second copy of that map, so the video will later read it exactly as a //e's video does.
 4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Neither is finished — there is no keyboard, no mouse and no synthesiser — but both are real devices in their own files rather than stubs in somebody else's.
-5. **Super Hi-Res.** The second video system and its palettes.
+5. **Super Hi-Res.** *(Done.)* `iigs_video.*`: both widths, per-line control bytes, sixteen palettes of sixteen colours out of 4096, fill mode, and the `$C029` switch that decides which of the machine's two video systems is on screen. Nothing in the firmware turns it on — a IIgs boots in text — so it shows up when a program asks for it.
 6. **Sound.** The 32 oscillators, on top of the RAM and window that already exist, and the audio pipeline behind them.
 7. **Input and settings.** Real keys and a real mouse through the ADB controller, battery RAM, the clock, the Control Panel, and the slots.
 8. **The host.** *(Partly done.)* The machine can be chosen from the menu and drives the display: the wasm layer holds either an `Emulator` or an `IIgsMachine` and routes the calls that run and show a machine to whichever it is. The shared framebuffer slot is sized for the largest picture (640x400) so the IIgs does not fall back to `postMessage`. Everything else — disks, printers, cards, the debugger, the agent tools — still asks for an `Emulator` and quietly does nothing while a IIgs is running.

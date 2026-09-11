@@ -9,6 +9,7 @@
 
 #include "iigs_memory.hpp"
 #include "iigs_spec.hpp"
+#include "iigs_video.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -79,7 +80,12 @@ public:
 
   CPU65816 &cpu() { return *cpu_; }
   IIgsMemory &memory() { return *memory_; }
+
+  /** The Mega II's video generator: a //e's, drawing a //e's picture. */
   Video &video() { return *video_; }
+
+  /** The machine's screen, which is that picture or Super Hi-Res. */
+  IIgsVideo &screen() { return *screen_; }
 
   /** Slow-side cycles since reset: the clock the video is counted in. */
   uint64_t slowCycles() const { return slowCycles_; }
@@ -119,13 +125,10 @@ public:
   void clearFrameReady();
 
   /**
-   * The picture, at the size the machine's profile promises.
+   * The picture, at the size the machine's profile promises: 640 by 400.
    *
-   * A IIgs's screen is Super Hi-Res sized — 640 by 400 — and what it can draw
-   * today is the Mega II's 560 by 384. So the //e's picture is composited into
-   * the middle of a IIgs-sized frame, which is roughly where a real machine
-   * puts it, and the border is the black of a video system that has nothing to
-   * say yet. When Super Hi-Res arrives it draws into this same frame.
+   * Which of the machine's two video systems drew it is $C029's business, and
+   * IIgsVideo's.
    */
   const uint8_t *framebuffer();
   size_t framebufferSize() const;
@@ -142,6 +145,7 @@ private:
   std::unique_ptr<IIgsMemory> memory_;
   std::unique_ptr<CPU65816> cpu_;
   std::unique_ptr<Video> video_;
+  std::unique_ptr<IIgsVideo> screen_;
 
   uint64_t slowCycles_ = 0;
   double slowCycleRemainder_ = 0.0;
