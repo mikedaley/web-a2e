@@ -35,11 +35,6 @@ void CPU6502::reset() {
 }
 
 void CPU6502::executeInstruction() {
-  // Note: VIA IRQs are handled via edge-triggered callback in checkIRQ()
-  // The callback sets irqPending_ when interrupt first becomes active
-  // Level-triggered re-assertion after RTI is handled by the VIA callback
-  // mechanism - no polling needed here
-
   // Handle pending interrupts
   if (nmiPending_) {
     nmiPending_ = false;
@@ -52,6 +47,24 @@ void CPU6502::executeInstruction() {
     pc_ = read_(0xFFFA) | (read_(0xFFFB) << 8);
     totalCycles_ += 7;
     return;
+  }
+
+  // The IRQ input is a level, not an event. A device holding it low is asking
+  // again every instruction until something services it, which is why a handler
+  // that returns without clearing its device is re-entered immediately on real
+  // hardware, and why the interrupt stops the instant the device lets go.
+  //
+  // irqPending_ stays as the latch on top of that, for a device that only
+  // pulses: one that interrupted while I was set — from inside somebody else's
+  // handler — would otherwise be forgotten before the CPU could take it.
+  //
+  // Only sampled when the I flag is clear, which is both cheaper and closer to
+  // the part: a level that cannot be taken now will still be there on the
+  // instruction after the CLI, and a device that asserts and releases entirely
+  // inside somebody else's handler never interrupted anything on real hardware
+  // either.
+  if (!getFlag(FLAG_I) && irqStatusCallback_ && irqStatusCallback_()) {
+    irqPending_ = true;
   }
 
   if (irqPending_ && !getFlag(FLAG_I)) {

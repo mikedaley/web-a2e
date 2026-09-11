@@ -197,32 +197,77 @@ TEST_CASE("NMI behavior", "[cpu][interrupt]") {
 // ============================================================================
 
 TEST_CASE("IRQ status callback for level-triggered IRQs", "[cpu][interrupt]") {
+    // The 6502's IRQ input is a level, sampled once per instruction, and not an
+    // event: a device holding the line low is asking again every instruction
+    // until something services it. That is why a handler which returns without
+    // clearing its device is re-entered immediately on real hardware, and it is
+    // what the status callback is for.
 
-    SECTION("IRQ status callback triggers repeated interrupts while active") {
-        test::CPUTestFixture f;
-        bool irqActive = true;
-
+    // Handler: increment a counter and RTI. Main: CLI, then NOPs forever.
+    auto fixture = [](test::CPUTestFixture &f) {
         f.mem.setIRQVector(0x2000);
-        // Handler: increment counter memory location, RTI
-        // LDA $10; CLC; ADC #$01; STA $10; RTI
-        f.mem.loadProgram(0x2000, {0xA5, 0x10, 0x18, 0x69, 0x01, 0x85, 0x10, 0x40});
+        f.mem.loadProgram(0x2000,
+                          {0xA5, 0x10, 0x18, 0x69, 0x01, 0x85, 0x10, 0x40});
         f.mem[0x10] = 0x00;
+        // CLI, then a NOP spinning on itself. A run of NOPs would fall off the
+        // end into zeroed memory, and a zero is BRK — which vectors to this
+        // same handler and would be counted as an interrupt that never
+        // happened.
+        f.loadAndReset(0x0400, {0x58, 0xEA, 0x4C, 0x01, 0x04});
+    };
 
-        // Main: CLI; NOP loop
-        f.loadAndReset(0x0400, {0x58, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA,
-                                0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA});
-
+    SECTION("a held line is taken again after every RTI") {
+        test::CPUTestFixture f;
+        fixture(f);
+        bool irqActive = true;
         f.cpu->setIRQStatusCallback([&irqActive]() { return irqActive; });
 
-        // Run CLI
-        f.cpu->executeInstruction();
+        f.cpu->executeInstruction(); // CLI
+        test::runInstructions(*f.cpu, 60);
 
-        // Trigger IRQ and run enough instructions for it to be serviced and return
+        // Nothing ever called irq(). The line alone is the whole signal, and a
+        // handler that leaves it asserted is asked again.
+        REQUIRE(f.mem[0x10] >= 3);
+    }
+
+    SECTION("and once the device lets go, the interrupts stop") {
+        test::CPUTestFixture f;
+        fixture(f);
+        bool irqActive = true;
+        f.cpu->setIRQStatusCallback([&irqActive]() { return irqActive; });
+
+        f.cpu->executeInstruction(); // CLI
+        test::runInstructions(*f.cpu, 40);
+        const uint8_t serviced = f.mem[0x10];
+        REQUIRE(serviced >= 1);
+
+        // Letting go stops it. Not instantly — an interrupt the CPU has
+        // already taken has to run, and a latched pulse is still owed a
+        // handler — so what is asserted is that it settles and stays settled,
+        // rather than a count that would only be pinning where in the handler
+        // the release happened to land.
+        irqActive = false;
+        test::runInstructions(*f.cpu, 40);
+        const uint8_t settled = f.mem[0x10];
+
+        test::runInstructions(*f.cpu, 400);
+        REQUIRE(f.mem[0x10] == settled);
+        REQUIRE(settled < serviced + 40); // and it stopped promptly, not eventually
+    }
+
+    SECTION("a device that only pulses the line is still heard") {
+        // Not everything exposes a level. An edge latches until the CPU can
+        // take it, which is what makes a device that interrupts while I is set
+        // — inside somebody else's handler — arrive rather than vanish.
+        test::CPUTestFixture f;
+        fixture(f);
+        f.cpu->setIRQStatusCallback([]() { return false; });
+
+        f.cpu->executeInstruction(); // CLI
         f.cpu->irq();
         test::runInstructions(*f.cpu, 20);
 
-        // Counter should have been incremented at least once
-        REQUIRE(f.mem[0x10] >= 1);
+        REQUIRE(f.mem[0x10] == 1); // once, and only once
     }
 }
 

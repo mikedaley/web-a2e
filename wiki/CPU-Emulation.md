@@ -375,8 +375,9 @@ On the NMOS 6502, the N and Z flags after decimal ADC/SBC are derived from the i
 - Sets the I flag (and clears D on 65C02)
 - Loads PC from the IRQ vector at `$FFFE`/`$FFFF`
 - Takes 7 cycles
-- The `irq()` method sets `irqPending_ = true` (used by VIA timer callbacks)
-- A level-triggered IRQ status callback can be registered for peripherals like the Mockingboard VIA
+- The `irq()` method sets `irqPending_ = true` — an edge, latched until the CPU can take it, which is how a device that interrupts while the I flag is set (from inside somebody else's handler) is not forgotten
+- **The line itself is sampled every instruction, while the I flag is clear.** `setIRQStatusCallback()` registers a predicate answering "is anything pulling IRQ down right now", and the emulator builds it from the devices that can: the Mockingboard's VIAs, the mouse (card or a //c's IOU), and the serial ports. This is what a level means: a handler that returns without clearing its device is re-entered immediately, and the interrupt stops the instant the device lets go — both of which real hardware does and an edge-only model does not.
+- It is sampled only while the I flag is clear, which is cheaper and closer to the part: a level that cannot be taken now will still be there on the instruction after the `CLI`, and a device that asserts and releases entirely inside another handler never interrupted anything on real hardware either.
 
 ### NMI (Non-Maskable Interrupt)
 

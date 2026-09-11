@@ -125,6 +125,26 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `utils/` - Shared utilities (storage, string, BASIC)
 - `windows/` - Base window class and window manager
 
+### Interrupts
+
+**The IRQ input is a level, and the CPU samples it every instruction.**
+`CPU6502::irq()` is an edge, latched until the CPU can take it — that is how a
+device interrupting while the I flag is set is not forgotten — but the line
+itself is polled through `setIRQStatusCallback()`, a predicate the `Emulator`
+builds from the devices that can hold it down: the Mockingboard's VIAs, the
+mouse (a card's, or a //c's IOU), and the serial ports. Without the poll, a
+handler that returns without clearing its device is never re-entered, and a
+device that lets go can still deliver one more interrupt from the latch —
+neither of which is what the hardware does.
+
+The predicate is deliberately a handful of null checks against pointers the
+`Emulator` already holds, not a walk of the slot array asking every card: the
+CPU dispatch loop is the hottest code here and eight virtual calls per
+instruction would be paying for devices that do not exist. It is also only
+sampled while the I flag is clear, which costs under 1% rather than ~4%. A card
+that can hold the line and is not in that list is still heard through its own
+edge; what it cannot do is re-interrupt a handler that ignored it.
+
 ### Machine Profiles
 
 The emulator models one machine at a time, and which machine it is comes from a

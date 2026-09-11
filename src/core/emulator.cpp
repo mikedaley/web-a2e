@@ -75,12 +75,24 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   mockingboard_->setCycleCallback([this]() { return cpu_->getTotalCycles(); });
   mockingboard_->setIRQCallback([this]() { cpu_->irq(); });
 
-  // Set up level-triggered IRQ polling for VIA/mouse interrupts
+  // Whether anything is currently pulling the interrupt line down.
+  //
+  // The CPU samples this once per instruction, so it is deliberately a handful
+  // of null checks against pointers this class already holds rather than a walk
+  // of the slots asking each card: the slot array is eight virtual calls on the
+  // hottest loop in the emulator, to serve devices that can be counted on one
+  // hand. A card that can hold the line and is not named here is still heard
+  // through its own edge — it just cannot re-interrupt a handler that returned
+  // without servicing it.
   cpu_->setIRQStatusCallback([this]() {
-    bool active = mockingboard_ ? mockingboard_->isIRQActive() : false;
-    if (mouse_) active = active || mouse_->isIRQActive();
-    if (mouseIOU_) active = active || mouseIOU_->isIRQActive();
-    return active;
+    if (mockingboard_ && mockingboard_->isIRQActive()) return true;
+    if (mouse_ && mouse_->isIRQActive()) return true;
+    if (mouseIOU_ && mouseIOU_->isIRQActive()) return true;
+    if (ssc_ && ssc_->isIRQActive()) return true;
+    for (const SerialPort *port : serialPorts_) {
+      if (port && port->isIRQActive()) return true;
+    }
+    return false;
   });
 
   // A //c's mouse is not a card in slot 4; it is the IOU, and the profile
