@@ -86,7 +86,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
-- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's: `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM). Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
+- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -189,6 +189,32 @@ not find: the indexed page-cross cycle applies when the index is 16 bits wide
 *or* crosses a page rather than only crossing; writes and read-modify-writes
 never pay it; decimal mode takes V from the value before the top digit's
 correction; and the two bank-wrap rules above.
+
+### A IIgs's memory
+
+`IIgsMemory` (`core/iigs/iigs_memory.*`) is the 24-bit map, and **the Mega II
+side of it is an `MMU`** — the same class a //e is built from, constructed with
+the IIgs profile. Banks `$E0`/`$E1` are its main and auxiliary RAM, `$C000-$CFFF`
+in the four banks that see it are its soft switches, and `$D000-$FFFF` is its
+language card. That is not a convenience: a IIgs really does contain a //e, and
+when the video is written it will read that MMU exactly as `Video` already does.
+
+Three things in it are worth knowing:
+
+- **Shadowing is a copy, not a redirection.** A write to a display region of
+  bank `$00` or `$01` lands in fast RAM *and* is copied to `$E0`/`$E1`, because
+  the video only ever looks at the Mega II's side. Which regions those are is
+  the `$C035` register, and its bits read backwards: a set bit turns a region's
+  shadowing **off**.
+- **`$C035` bit 6 changes what an address is**, rather than where a write also
+  goes: with I/O and language card shadowing inhibited, banks `$00`/`$01` are
+  plain RAM from `$C000` up, which is how a program gets a contiguous 128KB.
+- **`$C068` (STATEREG) is eight of the //e's soft switches in one byte**, and
+  writing it drives those switches through their own addresses so everything
+  watching them sees the change the usual way. It has no bit for the language
+  card's *write* latch, so `setStateRegister` reads that off the machine and
+  preserves it: changing the memory map must not quietly write-protect the
+  card, or quietly unprotect it.
 
 ### Machine Profiles
 

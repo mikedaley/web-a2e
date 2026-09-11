@@ -30,6 +30,7 @@ set(CORE_SOURCES
     src/core/debug/debug_log.cpp
     src/core/cards/mockingboard/via6522.cpp
     src/core/cards/mockingboard/mockingboard_card.cpp
+    src/core/iigs/iigs_memory.cpp
     src/core/cards/disk_controller.cpp
     src/core/cards/disk2/disk2_card.cpp
     src/core/cards/iwm/iwm.cpp
@@ -547,6 +548,7 @@ else()
         src/core/debug/debug_log.cpp
         src/core/cards/mockingboard/via6522.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/iigs/iigs_memory.cpp
         src/core/cards/disk_controller.cpp
         src/core/cards/disk2/disk2_card.cpp
         src/core/cards/iwm/iwm.cpp
@@ -615,6 +617,16 @@ else()
     # ==========================================================================
     # Catch2 Unit Tests - Pure (no ROM dependencies)
     # ==========================================================================
+
+    # A IIgs's address space, which needs no CPU to test: banks, shadowing,
+    # and the Mega II underneath it.
+    add_catch2_test(test_iigs_memory
+        tests/unit/test_iigs_memory.cpp
+        src/core/iigs/iigs_memory.cpp
+        src/core/mmu/mmu.cpp
+        src/core/input/mouse_iou.cpp
+        src/core/noslot_clock.cpp
+    )
 
     # The 65816 against 5.1 million recorded states from a real one. Skips
     # unless A2E_65816_VECTORS points at the vector files, which are 3GB and

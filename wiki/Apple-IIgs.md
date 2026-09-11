@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: not yet runnable.** The machine is in the registry, the menu and the window title, and the emulator marks it unavailable. Its processor is written and verified; nothing is wired to it yet. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
+**Status: not yet runnable.** The machine is in the registry, the menu and the window title, and the emulator marks it unavailable. Its processor and its address space are written and tested; nothing is wired together yet. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
 ---
 
@@ -56,7 +56,7 @@ src/core/
 │   └── 65816/                    # the IIgs's CPU, on its own (done)
 └── iigs/
     ├── iigs_spec.hpp             # the numbers no other machine has (done)
-    ├── iigs_memory.*             # FPI/Mega II map, banks, shadowing
+    ├── iigs_memory.*             # FPI/Mega II map, banks, shadowing (done)
     ├── iigs_video.*              # Super Hi-Res, over the Mega II's picture
     ├── iigs_sound.*              # Ensoniq 5503 DOC
     ├── iigs_adb.*                # keyboard and mouse microcontroller
@@ -72,7 +72,7 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 
 1. **Describe the machine.** Profile, family, spec header, ROMs, and an honest "not runnable". *(Done.)*
 2. **The 65816.** *(Done.)* A standalone core in `src/core/cpu/65816/` with no emulator wiring at all: registers, both modes, every addressing mode, all 256 opcodes, cycle counts. Tested on its own against a flat 16MB of memory, and checked against 5.1 million recorded states from a real chip — see [[CPU-Emulation]] and `tests/conformance/test_65816_vectors.cpp`.
-3. **Memory.** Banks, fast and slow RAM, ROM, the language card, and shadowing. Testable without a CPU.
+3. **Memory.** *(Done.)* `IIgsMemory` in `src/core/iigs/`: banks, fast and slow RAM, ROM, the language card, shadowing, and the machine's own registers. The Mega II side is an `MMU` — the same class a //e is built from — rather than a second copy of that map, so the video will later read it exactly as a //e's video does.
 4. **A machine that boots.** `IIgsMachine` wiring the two together with the Mega II's video borrowed from the existing `Video`, far enough to reach the Apple IIgs splash screen and a `]` prompt in 40 columns.
 5. **Super Hi-Res.** The second video system and its palettes.
 6. **Sound.** The Ensoniq, and the existing audio pipeline behind it.
