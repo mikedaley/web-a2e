@@ -174,6 +174,14 @@ void IIgsMachine::keyDown(int keycode) {
   memory_->adb().setAnyKeyDown(true);
 }
 
+void IIgsMachine::mouseMove(int dx, int dy) {
+  memory_->adb().queueMouse(dx, dy);
+}
+
+void IIgsMachine::mouseButton(bool pressed) {
+  memory_->adb().setMouseButton(pressed);
+}
+
 std::string IIgsMachine::screenText() const { return screenText(0, 0, 23, 39); }
 
 std::string IIgsMachine::screenText(int startRow, int startColumn, int endRow,

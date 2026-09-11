@@ -47,6 +47,7 @@ void IIgsADB::reset() {
   argumentsSeen_ = 0;
   modifiers_ = 0;
   latch_ = 0;
+  mouseButton_ = false;
   anyKeyDown_ = false;
   modes_ = 0;
   configuration_.fill(0);
@@ -87,10 +88,20 @@ uint8_t IIgsADB::readMouseData() {
   return value;
 }
 
-void IIgsADB::queueMouse(uint8_t x, uint8_t y) {
-  // Two bytes, X then Y, which is the order the firmware reads them in.
-  mouse_.push_back(x);
-  mouse_.push_back(y);
+void IIgsADB::queueMouse(int deltaX, int deltaY) {
+  // Seven bits of signed movement with the button in the top bit, X first.
+  // The button travels with the movement rather than separately, which is why
+  // it is in both bytes: the firmware takes whichever it reads.
+  auto pack = [this](int delta) {
+    const int clamped = delta < -63 ? -63 : (delta > 63 ? 63 : delta);
+    uint8_t byte = static_cast<uint8_t>(clamped & 0x7F);
+    // A pressed button reads as zero in the top bit, as it does everywhere
+    // else on this machine.
+    if (!mouseButton_) byte |= 0x80;
+    return byte;
+  };
+  mouse_.push_back(pack(deltaX));
+  mouse_.push_back(pack(deltaY));
 }
 
 void IIgsADB::writeCommand(uint8_t value) {

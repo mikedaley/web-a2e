@@ -125,6 +125,10 @@ public:
   /** An already-translated Apple II key code. */
   void keyDown(int keycode);
 
+  /** Mouse movement and its button, which reach the machine through the ADB. */
+  void mouseMove(int dx, int dy);
+  void mouseButton(bool pressed);
+
   /**
    * What is on the text screen, for tests and for looking.
    *

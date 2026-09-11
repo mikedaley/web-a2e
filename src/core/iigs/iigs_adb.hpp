@@ -87,7 +87,16 @@ public:
   /** Whether a key is physically held, which is a different line entirely. */
   void setAnyKeyDown(bool down) { anyKeyDown_ = down; }
   bool isAnyKeyDown() const { return anyKeyDown_; }
-  void queueMouse(uint8_t x, uint8_t y);
+  /**
+   * Mouse movement, as the controller reports it.
+   *
+   * Two bytes: X then Y, each a seven-bit signed delta with the button's state
+   * in the top bit — which is why a IIgs mouse cannot move more than 63 units
+   * between reports, and why the button is read twice for every movement.
+   */
+  void queueMouse(int deltaX, int deltaY);
+  void setMouseButton(bool pressed) { mouseButton_ = pressed; }
+  bool isMouseButtonPressed() const { return mouseButton_; }
   void setModifiers(uint8_t modifiers) { modifiers_ = modifiers; }
 
   // ===== State, for tests =====
@@ -128,6 +137,7 @@ private:
   uint8_t argumentsSeen_ = 0;
   uint8_t modifiers_ = 0;
   uint8_t latch_ = 0;
+  bool mouseButton_ = false;
   bool anyKeyDown_ = false;
   uint8_t modes_ = 0;
   std::array<uint8_t, 3> configuration_{};

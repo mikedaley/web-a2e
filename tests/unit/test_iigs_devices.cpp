@@ -22,6 +22,33 @@ using namespace a2e::iigs;
 // ADB
 // ---------------------------------------------------------------------------
 
+TEST_CASE("The mouse reports movement and its button together", "[iigs][adb]") {
+  // Seven bits of signed movement with the button in the top bit — which is
+  // why a IIgs mouse cannot move more than 63 units between reports, and why
+  // the button comes back twice for every movement.
+  IIgsADB adb;
+
+  adb.queueMouse(-5, 10);
+  const uint8_t x = adb.readMouseData();
+  const uint8_t y = adb.readMouseData();
+  REQUIRE((x & 0x80) != 0); // not pressed reads high, as everywhere else here
+  REQUIRE(static_cast<int8_t>(x << 1) / 2 == -5);
+  REQUIRE((y & 0x7F) == 10);
+
+  SECTION("a pressed button reads low, in both bytes") {
+    adb.setMouseButton(true);
+    adb.queueMouse(1, 1);
+    REQUIRE((adb.readMouseData() & 0x80) == 0);
+    REQUIRE((adb.readMouseData() & 0x80) == 0);
+  }
+
+  SECTION("and a shove further than the report can carry is clamped") {
+    adb.queueMouse(500, -500);
+    REQUIRE((adb.readMouseData() & 0x7F) == 63);
+    REQUIRE(static_cast<int8_t>(adb.readMouseData() << 1) / 2 == -63);
+  }
+}
+
 TEST_CASE("The ADB controller answers the commands the firmware asks",
           "[iigs][adb]") {
   IIgsADB adb;
@@ -97,10 +124,10 @@ TEST_CASE("The ADB status register is what the firmware polls", "[iigs][adb]") {
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_KEYBOARD_DATA) != 0);
 
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
-    adb.queueMouse(0x10, 0x20);
+    adb.queueMouse(16, 32);
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0);
-    REQUIRE(adb.readMouseData() == 0x10); // X first, then Y
-    REQUIRE(adb.readMouseData() == 0x20);
+    REQUIRE((adb.readMouseData() & 0x7F) == 16); // X first, then Y
+    REQUIRE((adb.readMouseData() & 0x7F) == 32);
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
   }
 

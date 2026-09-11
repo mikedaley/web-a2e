@@ -527,6 +527,10 @@ int getSpeedMultiplier() {
 
 EMSCRIPTEN_KEEPALIVE
 bool insertDisk(int drive, uint8_t *data, int size, const char *filename) {
+  if (g_iigs) {
+    return g_iigs->insertDisk(drive, data, static_cast<size_t>(size),
+                              filename ? filename : "");
+  }
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->insertDisk(drive, data, size, filename);
 }
@@ -539,6 +543,10 @@ bool insertBlankDisk(int drive) {
 
 EMSCRIPTEN_KEEPALIVE
 void ejectDisk(int drive) {
+  if (g_iigs) {
+    g_iigs->ejectDisk(drive);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->ejectDisk(drive);
 }
@@ -1609,12 +1617,20 @@ int getMockingboardWaveform(int psg, int channel, float* buffer, int count) {
 
 EMSCRIPTEN_KEEPALIVE
 void mouseMove(int dx, int dy) {
+  if (g_iigs) {
+    g_iigs->mouseMove(dx, dy);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->mouseMove(dx, dy);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void mouseButton(bool pressed) {
+  if (g_iigs) {
+    g_iigs->mouseButton(pressed);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->mouseButton(pressed);
 }
