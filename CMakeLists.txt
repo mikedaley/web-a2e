@@ -124,6 +124,7 @@ if(EMSCRIPTEN)
     target_include_directories(a2e PRIVATE
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/core/cpu/6502
+        ${CMAKE_SOURCE_DIR}/src/core/cpu/65816
         ${CMAKE_SOURCE_DIR}/src/core/cards
         ${CMAKE_SOURCE_DIR}/src/core/disk-image
         ${CMAKE_BINARY_DIR}/generated
@@ -497,6 +498,7 @@ else()
     set(ALL_CORE_INCLUDES
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/core/cpu/6502
+        ${CMAKE_SOURCE_DIR}/src/core/cpu/65816
         ${CMAKE_SOURCE_DIR}/src/core/machine
         ${CMAKE_SOURCE_DIR}/src/core/iigs
         ${CMAKE_SOURCE_DIR}/src/core/mmu
@@ -613,6 +615,22 @@ else()
     # ==========================================================================
     # Catch2 Unit Tests - Pure (no ROM dependencies)
     # ==========================================================================
+
+    # The 65816 against 5.1 million recorded states from a real one. Skips
+    # unless A2E_65816_VECTORS points at the vector files, which are 3GB and
+    # are not in the repository.
+    add_catch2_test(test_65816_vectors
+        tests/conformance/test_65816_vectors.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+    )
+
+    # The 65816, which needs nothing but itself: no machine, no MMU, no IIgs.
+    add_catch2_test(test_cpu65816
+        tests/unit/test_cpu65816.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+    )
 
     # CPU tests (only need cpu6502.cpp)
     add_catch2_test(test_cpu6502

@@ -365,6 +365,14 @@ On the NMOS 6502, the N and Z flags after decimal ADC/SBC are derived from the i
 
 ---
 
+## The 65816
+
+The Apple IIgs's processor is a separate core, `CPU65816` in `src/core/cpu/65816/`, and shares nothing with the 6502 one. It has a 24-bit address bus, 16-bit registers whose width changes at runtime, a direct page and stack that can sit anywhere in bank zero, separate banks for code and data, and two operating modes — emulation, which behaves as a 65C02 and is what every IIgs boots into, and native.
+
+It counts cycles but does not model the cycle *pattern*: which cycle of an instruction touches which address. A //e's video reads the bus during those cycles, which is why the 6502 core models them; a IIgs's video reads the Mega II's bus on the other side of the machine, so the count is what matters.
+
+The core is checked against [SingleStepTests/65816](https://github.com/SingleStepTests/65816) — 10,000 recorded before-and-after states for every opcode in both modes, 5.1 million in all, comparing registers, memory and cycle count. See `tests/conformance/test_65816_vectors.cpp`; the vectors are 3GB and are fetched rather than committed.
+
 ## Interrupts
 
 ### IRQ (Maskable Interrupt)

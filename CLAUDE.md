@@ -75,6 +75,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 **C++ Core (src/core/)** - Pure emulation logic compiled to WebAssembly:
 
 - `cpu/6502/cpu6502.cpp` - Cycle-accurate 65C02 processor (1.023 MHz)
+- `cpu/65816/` - The IIgs's 65C816: 24-bit bus, 16-bit registers, native and emulation modes. `cpu65816.cpp` is bus, stack, addressing and operations; `cpu65816_dispatch.cpp` is the 256-opcode table
 - `mmu/mmu.cpp` - 128KB memory management, soft switches ($C000-$CFFF), expansion slots, and the video scanner address generator behind floating-bus reads (Sather's counter equations, so blanking cycles read real video data rather than zero)
 - `video/video.cpp` - TEXT/LORES/HIRES/DHIRES per-scanline rendering, split into a **signal stage** and a **decode stage** (see Composite Video below)
 - `video/ntsc.cpp` - NTSC composite demodulation, the ideal/RGB digital decoders, and the calibrated 16-colour palette they all share
@@ -145,6 +146,49 @@ instruction would be paying for devices that do not exist. It is also only
 sampled while the I flag is clear, which costs under 1% rather than ~4%. A card
 that can hold the line and is not in that list is still heard through its own
 edge; what it cannot do is re-interrupt a handler that ignored it.
+
+### The 65816
+
+`CPU65816` (`cpu/65816/`) is a separate class from `CPU6502`, and deliberately:
+a 65816 has a 24-bit bus, 16-bit registers whose width changes at runtime, a
+direct page and a stack that can sit anywhere in bank zero, separate banks for
+code and data, and a second operating mode. Folding that into `CPU6502` would
+put a width test on every load, store and arithmetic operation in the hottest
+loop of a //e to serve a machine a //e is not. A machine is built from one or
+the other.
+
+**Cycle counts, not the cycle pattern.** `CPU6502` models which cycle of an
+instruction touches which address, because a //e's video reads the bus during
+those cycles. A IIgs's video does not read the 65816's bus at all — it reads the
+Mega II's, on the other side of the machine — so this core counts cycles and
+does not pretend to place them.
+
+**Three rules in it are worth knowing before changing anything:**
+
+- **Widths belong to the processor, not to the addressing mode.** Every
+  operation takes an effective address and reads its own operand at whatever
+  width the flags currently say, which is why `opADC` takes a `uint32_t` and
+  not a value.
+- **Two kinds of address behave differently at the top of a bank.** An
+  immediate operand comes from the program bank and a direct page or stack
+  operand from bank zero, and neither bank ever increments; an operand reached
+  through the data bank does cross into the next one. They are the same number,
+  so the addressing mode says which it produced (`operandWrapsInBank_`) and the
+  next access consumes the answer.
+- **The instructions a 6502 never had ignore emulation mode's stack wrap.**
+  PHD, PLD, PEA, PEI, PER, PLB, JSL and RTL walk the stack pointer through all
+  sixteen bits and it is forced back into page one at the end, which is why PLD
+  with the pointer at `$01FE` really does read its high byte from `$0200`.
+
+**It is verified against 5.1 million recorded states from a real 65816**
+(SingleStepTests/65816): every opcode, both modes, 10,000 vectors each,
+registers, memory and cycle count. `tests/conformance/test_65816_vectors.cpp`
+runs them and skips unless `A2E_65816_VECTORS` points at the files, which are
+3GB and not in the repository. Four bugs came out of it that the unit tests did
+not find: the indexed page-cross cycle applies when the index is 16 bits wide
+*or* crosses a page rather than only crossing; writes and read-modify-writes
+never pay it; decimal mode takes V from the value before the top digit's
+correction; and the two bank-wrap rules above.
 
 ### Machine Profiles
 
