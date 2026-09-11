@@ -212,8 +212,10 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
 
   samplesGenerated_ += sampleCount;
 
-  // Silence, until there is an Ensoniq to ask.
-  if (buffer) std::fill_n(buffer, sampleCount * 2, 0.0f);
+  // ...and then ask the Ensoniq what it is playing.
+  if (buffer) {
+    memory_->sound().generateSamples(buffer, sampleCount, AUDIO_SAMPLE_RATE);
+  }
   return sampleCount;
 }
 
