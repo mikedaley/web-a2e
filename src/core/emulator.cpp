@@ -7,6 +7,7 @@
 
 #include "emulator.hpp"
 #include "cards/disk2/disk2_card.hpp"
+#include "cards/iwm/iwm.hpp"
 #include "cards/mockingboard/mockingboard_card.hpp"
 #include "cards/thunderclock/thunderclock_card.hpp"
 #include "cards/mouse/mouse_card.hpp"
@@ -29,8 +30,16 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   audio_ = std::make_unique<Audio>(*machine_);
   keyboard_ = std::make_unique<Keyboard>();
 
-  // Create cards, keep raw pointers, then insert into slots
-  auto disk = std::make_unique<Disk2Card>();
+  // Create cards, keep raw pointers, then insert into slots. Which drive
+  // controller gets built is the machine's: a //e and a II+ take a Disk II
+  // card in a slot, a //c has an IWM on the board with no ROM of its own.
+  std::unique_ptr<DiskController> disk;
+  if (const char *slot6 = machine_->slots[6].fixedCard;
+      slot6 && strcmp(slot6, "iwm") == 0) {
+    disk = std::make_unique<IWM>();
+  } else {
+    disk = std::make_unique<Disk2Card>();
+  }
   auto mb = std::make_unique<MockingboardCard>();
   disk_ = disk.get();
   mockingboard_ = mb.get();
@@ -84,7 +93,7 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   for (int slot = machine_->firstSlot; slot <= machine_->lastSlot; slot++) {
     const char *card = machine_->slots[slot].defaultCard;
     if (!card) continue;
-    if (strcmp(card, "disk2") == 0 && disk) {
+    if ((strcmp(card, "disk2") == 0 || strcmp(card, "iwm") == 0) && disk) {
       mmu_->insertCard(static_cast<uint8_t>(slot), std::move(disk));
     } else if (strcmp(card, "mockingboard") == 0 && mb) {
       mmu_->insertCard(static_cast<uint8_t>(slot), std::move(mb));
@@ -157,8 +166,12 @@ void Emulator::init() {
     mmu_->loadROM(rom.system, rom.systemSize, rom.chars, rom.charSize);
   }
 
-  // Load Disk II ROM into the card
-  disk_->loadROM(roms::ROM_DISK2, roms::ROM_DISK2_SIZE);
+  // The P5A boot ROM belongs to the Disk II card. A //c's IWM has no ROM
+  // space of its own — its disk firmware is part of the system ROM — so there
+  // is nothing to load into one.
+  if (auto *card = dynamic_cast<Disk2Card *>(disk_)) {
+    card->loadROM(roms::ROM_DISK2, roms::ROM_DISK2_SIZE);
+  }
 
   reset();
 }
@@ -1197,6 +1210,9 @@ const char* Emulator::getSlotCardName(uint8_t slot) const {
   if (strcmp(name, "Disk II") == 0) {
     return "disk2";
   }
+  if (strcmp(name, "IWM") == 0) {
+    return "iwm";
+  }
   if (strcmp(name, "Mockingboard") == 0) {
     return "mockingboard";
   }
@@ -1227,8 +1243,12 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
     return false;
   }
 
-  // Slot 3 is built-in 80-column and cannot be changed
-  if (slot == 3) {
+  // A slot the machine fills itself is not the user's to change: a //e's
+  // 80-column card in slot 3, and on a //c every slot there is, because none
+  // of them is a socket. This used to be a bare `slot == 3`, which was the //e
+  // spelling of the same rule and would have let a caller pull the IWM out of
+  // a machine that has no way to put one back.
+  if (machine_->slots[slot].fixedCard) {
     return false;
   }
 
@@ -1244,7 +1264,9 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
         mockingboard_ = nullptr;
         audio_->setMockingboard(nullptr);
       }
-    } else if (strcmp(existingName, "Disk II") == 0 && slot == 6) {
+    } else if ((strcmp(existingName, "Disk II") == 0 ||
+                strcmp(existingName, "IWM") == 0) &&
+               slot == 6) {
       if (!diskStorage_) {
         diskStorage_ = mmu_->removeCard(6);
         disk_ = nullptr;
@@ -1281,7 +1303,7 @@ bool Emulator::setSlotCard(uint8_t slot, const char* cardId) {
     }
     // Re-insert from storage
     if (diskStorage_) {
-      disk_ = static_cast<Disk2Card*>(diskStorage_.get());
+      disk_ = static_cast<DiskController*>(diskStorage_.get());
       mmu_->insertCard(6, std::move(diskStorage_));
     }
     return true;

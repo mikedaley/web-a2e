@@ -80,7 +80,7 @@ Slot 3 is free, since there is no built-in 80-column card to occupy it.
 
 ## Apple //c
 
-The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots to its own banner and, with Ctrl+Reset, to Applesoft; it cannot yet read a disk — see the note below on what is still missing.
+The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots, reads disks and runs software; what is not there yet is the two serial ports.
 
 | | |
 |---|---|
@@ -109,18 +109,20 @@ A //c has no expansion sockets at all. The firmware and every program written fo
 | 3 | 80-column firmware, where a //e has its card |
 | 4 | The mouse, built in |
 | 5 | Nothing |
-| 6 | The disk port: the internal drive and the external connector |
+| 6 | The disk port: an IWM driving the internal drive and the external connector |
 | 7 | Nothing |
 
 The slot window shows them all, and none of them can be changed. Slots 5 and 7 are listed as having no socket rather than being offered a card, which is the difference between a machine whose slots are empty and one that has no slots.
 
 Because there is no socket, there is nowhere for a card's ROM to live either: the firmware for the serial ports, the mouse and the drive is part of the 16KB system ROM. `$C100-$CFFF` therefore reads the internal ROM on a //c whatever INTCXROM and SLOTC3ROM say — those switches choose between the internal ROM and a slot that does not exist. A //e with an empty slot reads the floating bus at the same addresses.
 
+### The disk is an IWM, not a card
+
+Slot 6 decodes the sixteen addresses a Disk II card does, and the chip Apple soldered there answers them: the Integrated Woz Machine, the same controller in one package. The drives, the stepper, the motor and the sequencer are the same code the card uses; what the IWM adds is a register file — status, handshake and a mode register — and what it lacks is a `$C600` boot ROM, because a //c's disk firmware is part of its system ROM. A //c boots DOS 3.3 and ProDOS from the drive in its case exactly as a //e does from a card. See [[Disk-System-Internals]].
+
 ### What is not there yet
 
-The profile describes the machine, and the //e subsystems underneath it are the right ones, but three of the built-in peripherals have no implementation behind them: the **IWM** that drives the disk, and the two **6551** serial ports. The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
-
-So a //c starts, draws its banner and drops into Applesoft on Ctrl+Reset, but its boot looks for a drive that nothing answers for. The IWM is the next piece of work.
+The two **6551** serial ports in slots 1 and 2 have no implementation behind them, so a //c cannot yet print or talk to a modem. The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
 
 ## What Survives a Switch
 

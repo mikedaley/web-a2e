@@ -10,6 +10,7 @@
 #include "audio/audio.hpp"
 #include "cpu/6502/cpu6502.hpp"
 #include "cards/disk2/disk2_card.hpp"
+#include "cards/iwm/iwm.hpp"
 #include "cards/expansion_card.hpp"
 #include "input/joyport.hpp"
 #include "input/keyboard.hpp"
@@ -364,8 +365,12 @@ public:
   MMU &getMMU() { return *mmu_; }
   Video &getVideo() { return *video_; }
   Audio &getAudio() { return *audio_; }
-  Disk2Card &getDisk() { return *disk_; }
-  Disk2Card *getDiskPtr() { return disk_; }
+  // The drive controller, whichever part this machine carries: a Disk II card
+  // in a slot, or a //c's IWM soldered to the board. Everything the host asks
+  // it — insert, eject, which track, is the motor running — is the same
+  // question of both, so callers take the base rather than the part.
+  DiskController &getDisk() { return *disk_; }
+  DiskController *getDiskPtr() { return disk_; }
   MockingboardCard &getMockingboard() { return *mockingboard_; }
   MockingboardCard *getMockingboardPtr() { return mockingboard_; }
   MouseCard* getMouseCard() { return mouse_; }
@@ -441,7 +446,7 @@ private:
   std::unique_ptr<Keyboard> keyboard_;
 
   // Non-owning pointers to cards (owned by MMU slot system)
-  Disk2Card* disk_ = nullptr;
+  DiskController* disk_ = nullptr;
   MockingboardCard* mockingboard_ = nullptr;
   MouseCard* mouse_ = nullptr;
   SmartPortCard* smartport_ = nullptr;

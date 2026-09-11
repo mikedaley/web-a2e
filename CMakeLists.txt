@@ -29,7 +29,9 @@ set(CORE_SOURCES
     src/core/debug/debug_log.cpp
     src/core/cards/mockingboard/via6522.cpp
     src/core/cards/mockingboard/mockingboard_card.cpp
+    src/core/cards/disk_controller.cpp
     src/core/cards/disk2/disk2_card.cpp
+    src/core/cards/iwm/iwm.cpp
     src/core/cards/thunderclock/thunderclock_card.cpp
     src/core/cards/mouse/mouse_card.cpp
     src/core/cards/smartport/block_device.cpp
@@ -501,6 +503,7 @@ else()
         ${CMAKE_SOURCE_DIR}/src/core/cards
         ${CMAKE_SOURCE_DIR}/src/core/cards/mockingboard
         ${CMAKE_SOURCE_DIR}/src/core/cards/disk2
+        ${CMAKE_SOURCE_DIR}/src/core/cards/iwm
         ${CMAKE_SOURCE_DIR}/src/core/cards/thunderclock
         ${CMAKE_SOURCE_DIR}/src/core/cards/mouse
         ${CMAKE_SOURCE_DIR}/src/core/cards/softcard
@@ -536,7 +539,9 @@ else()
         src/core/debug/debug_log.cpp
         src/core/cards/mockingboard/via6522.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/disk_controller.cpp
         src/core/cards/disk2/disk2_card.cpp
+        src/core/cards/iwm/iwm.cpp
         src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/cards/mouse/mouse_card.cpp
         src/core/cards/smartport/block_device.cpp
@@ -747,7 +752,20 @@ else()
     # Disk2 Card (disk2_card.cpp + disk images + gcr)
     add_catch2_test(test_disk2_card
         tests/unit/test_disk2_card.cpp
+        src/core/cards/disk_controller.cpp
         src/core/cards/disk2/disk2_card.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
+    )
+
+    # IWM — a //c's drive controller, sharing DiskController with the card
+    add_catch2_test(test_iwm
+        tests/unit/test_iwm.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/disk2/disk2_card.cpp
+        src/core/cards/iwm/iwm.cpp
         src/core/disk-image/dsk_disk_image.cpp
         src/core/disk-image/woz_disk_image.cpp
         src/core/disk-image/gcr_encoding.cpp
@@ -838,7 +856,9 @@ else()
 
     add_catch2_test(test_expansion_card
         tests/unit/test_expansion_card.cpp
+        src/core/cards/disk_controller.cpp
         src/core/cards/disk2/disk2_card.cpp
+        src/core/cards/iwm/iwm.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
         src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/cards/mouse/mouse_card.cpp

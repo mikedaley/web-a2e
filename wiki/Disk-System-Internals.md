@@ -1,6 +1,8 @@
 # Disk System Internals
 
-This page covers the low-level implementation of the Disk II controller card and disk image format support. For user-facing disk drive operations, see [[Disk Drives]].
+This page covers the low-level implementation of the 5.25" drive controller and disk image format support. For user-facing disk drive operations, see [[Disk Drives]].
+
+Two machines drive a 5.25" disk with different parts: a //e or a II Plus has a **Disk II controller card** in slot 6, and a //c has an **IWM** soldered to the board. Everything below the chip is the same in both and lives in `DiskController` — the drives, the stepper, the motor and the sequencer — so read "the controller" here as either.
 
 ---
 
@@ -8,6 +10,7 @@ This page covers the low-level implementation of the Disk II controller card and
 
 - [Architecture Overview](#architecture-overview)
 - [Disk II Controller Card](#disk-ii-controller-card)
+  - [The IWM](#the-iwm)
   - [Slot Assignment and Memory Map](#slot-assignment-and-memory-map)
   - [Soft Switches](#soft-switches)
   - [Logic State Sequencer](#logic-state-sequencer)
@@ -94,9 +97,29 @@ The Q6/Q7 combination determines the controller mode:
 | 1 | 0 | Write | Writes data register to disk |
 | 1 | 1 | Load | Loads CPU bus data into data register |
 
+### The IWM
+
+A //c has no slot to put the card in. It has the Integrated Woz Machine (344-0041), the same controller in one package, decoding the same sixteen addresses at `$C0E0-$C0EF` with the same meanings — which is why a //c runs recognisably the same disk code as a //e and why the drives and the sequencer here are shared with the card.
+
+Two things differ:
+
+- **There is no `$C600` ROM.** A card's boot ROM sits in its slot's 256 bytes; a //c's disk firmware is part of the 16KB system ROM, which is what `$C600` reads on that machine. `IWM::hasROM()` is false and the MMU never asks it for a byte.
+- **A read returns one of four registers**, chosen by the Q7/Q6 pair rather than always being the data latch:
+
+| Q7 | Q6 | Register | Contents |
+|----|----|----------|----------|
+| 0 | 0 | Data | The sequencer's shift register, as the card's |
+| 0 | 1 | Status | SENSE in bit 7, the motor in bit 5, the mode register in bits 4-0 |
+| 1 | 0 | Handshake | Write-data ready in bit 7, underrun in bit 6 |
+| 1 | 1 | Write | A write loads the data register, or the mode register with the motor off |
+
+The mode register is where firmware asks for the clock and bit-cell timings it wants. Nothing here runs off it — the sequencer is clocked at the one rate a 5.25" drive uses, which is the mode a //c selects — but it is stored and read back, because the firmware writes it and then checks the status register for it.
+
+The handshake always reports ready and no underrun: the emulated sequencer consumes a written byte inside the bit cell it was loaded in. Firmware polls bit 7 before loading the next byte, and a chip that never said yes would spin there.
+
 ### Logic State Sequencer
 
-The heart of the Disk II controller is the Logic State Sequencer (LSS), implemented by the P6 ROM (341-0028). The LSS is a state machine that converts between the serial bit stream on the disk and bytes accessible by the CPU.
+The heart of the controller is the Logic State Sequencer (LSS), implemented by the P6 ROM (341-0028). The LSS is a state machine that converts between the serial bit stream on the disk and bytes accessible by the CPU.
 
 **Timing:** The LSS runs at 2x the CPU clock rate (approximately 2.046 MHz). An 8-phase clock divides each 4-cycle bit cell into 8 ticks. Disk read/write occurs only at phase 4 of this clock.
 
@@ -532,8 +555,12 @@ Disk image data (sector data and modifications) is saved separately as part of t
 
 | File | Description |
 |------|-------------|
-| `src/core/cards/disk2/disk2_card.hpp` | Disk II controller card interface |
-| `src/core/cards/disk2/disk2_card.cpp` | Controller implementation, LSS, P6 ROM |
+| `src/core/cards/disk_controller.hpp` | The drives, stepper, motor and sequencer both machines share |
+| `src/core/cards/disk_controller.cpp` | Implementation, LSS, P6 ROM |
+| `src/core/cards/disk2/disk2_card.hpp` | Disk II card: the shared controller plus its P5A boot ROM |
+| `src/core/cards/disk2/disk2_card.cpp` | P5A ROM loading and reads |
+| `src/core/cards/iwm/iwm.hpp` | IWM: the shared controller plus the //c's register file |
+| `src/core/cards/iwm/iwm.cpp` | Status, handshake and mode register |
 | `src/core/disk-image/disk_image.hpp` | Abstract disk image base class |
 | `src/core/disk-image/dsk_disk_image.hpp` | DSK format class declaration |
 | `src/core/disk-image/dsk_disk_image.cpp` | DSK nibblization, denibblization, stepper |

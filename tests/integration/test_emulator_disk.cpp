@@ -14,6 +14,7 @@
 #include "filesystem/prodos.hpp"
 #include "disk_image_builder.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -108,11 +109,14 @@ TEST_CASE("Emulator supports two drives simultaneously", "[emulator][disk]") {
 // getDisk reference
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Emulator getDisk returns a valid Disk2Card reference", "[emulator][disk]") {
+TEST_CASE("Emulator getDisk returns the machine's drive controller",
+          "[emulator][disk]") {
     Emulator emu;
     emu.init();
 
-    Disk2Card& disk = emu.getDisk();
+    // A //e's is a Disk II card, and the base is what callers hold: the host
+    // asks the same questions of a //c's IWM.
+    DiskController& disk = emu.getDisk();
     REQUIRE(std::string(disk.getName()) == "Disk II");
 }
 
@@ -273,5 +277,63 @@ TEST_CASE("Emulator writeBinaryFileToDisk reports drive and format problems",
         REQUIRE(emu.insertDisk(0, img.data(), img.size(), "dos.dsk"));
         CHECK(emu.writeBinaryFileToDisk(0, "", 0x0300, payload, sizeof(payload))
               == FsWriteStatus::InvalidName);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Booting, which is the only test that exercises the whole path at once
+// ---------------------------------------------------------------------------
+
+// The DOS 3.3 System Master that ships in public/disks, or an empty vector if
+// it is not where the test expects it. Tests run from the source directory.
+static std::vector<uint8_t> loadSystemMaster() {
+    FILE *file = fopen("public/disks/Apple DOS 3.3 January 1983.dsk", "rb");
+    if (!file) return {};
+    std::vector<uint8_t> image(DSK_SIZE);
+    const size_t read = fread(image.data(), 1, image.size(), file);
+    fclose(file);
+    if (read != image.size()) return {};
+    return image;
+}
+
+TEST_CASE("Each machine boots DOS 3.3 from the controller it has",
+          "[emulator][disk][boot]") {
+    // A //e reads the disk through a Disk II card in slot 6 and a //c through
+    // the IWM on its board, and this is where that is one claim rather than
+    // two: same image, same firmware, same sequencer, and both arrive at the
+    // DOS prompt. It is also the only test that runs the //c's disk firmware,
+    // which is the part of the machine that has nothing to do with a slot.
+    const std::vector<uint8_t> image = loadSystemMaster();
+    if (image.empty()) {
+        WARN("DOS 3.3 System Master not found; skipping the boot test");
+        return;
+    }
+
+    auto bootsToDos = [&image](MachineId machine) {
+        Emulator emu(machine);
+        emu.init();
+        REQUIRE(emu.insertDisk(0, image.data(), image.size(), "dos33.dsk"));
+
+        // Long enough for the drive to seek, DOS to load and Applesoft to come
+        // up behind it.
+        const int cyclesPerFrame = emu.getMachine().timing.cyclesPerFrame();
+        for (int frame = 0; frame < 1500; frame++) emu.runCycles(cyclesPerFrame);
+
+        const char *screen = emu.readScreenText(0, 0, 23, 39);
+        REQUIRE(screen != nullptr);
+        const std::string text(screen);
+        INFO("screen:\n" << text);
+        REQUIRE(text.find("DOS VERSION 3.3") != std::string::npos);
+        REQUIRE(text.find(']') != std::string::npos);
+    };
+
+    SECTION("the //e, through a Disk II card") { bootsToDos(MachineId::AppleIIe); }
+
+    SECTION("the //c, through its IWM") {
+        if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+            WARN("//c ROMs not built in; skipping its boot");
+            return;
+        }
+        bootsToDos(MachineId::AppleIIc);
     }
 }

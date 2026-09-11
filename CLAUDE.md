@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, the IWM behind a //c's drive, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), the IWM (that it reads the same nibbles off the same image as the card, and that its register file answers to the Q7/Q6 pair), and full emulator integration — including every machine booting DOS 3.3 through the controller it has.
 
 ## Architecture
 
@@ -86,7 +86,9 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
-- `cards/disk2/` - Disk II controller card
+- `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
+- `cards/disk2/` - Disk II controller card: the shared controller plus its P5A boot ROM
+- `cards/iwm/` - Integrated Woz Machine, a //c's controller: the shared controller plus the status/handshake/mode registers, and no ROM
 - `cards/mockingboard/` - AY-3-8910 sound chip + VIA 6522 timer + Mockingboard card
 - `cards/mouse/` - Apple Mouse Interface Card
 - `cards/parallel/` - Centronics parallel card (drives Epson FX-80 and Apple DMP)
@@ -325,10 +327,20 @@ than 8KB, so there is no second set to ask for; and a disk that is not a Disk
 II — the drive hangs off an IWM at `$C0E0`, so slot 6 names `"iwm"` rather than
 the card a //e fits there.
 
-**What is not implemented is the IWM and the two 6551s.** A //c boots, draws
-its banner, and reaches Applesoft on Ctrl+Reset; its boot then looks for a
-drive nothing answers for. The mouse is the //e's mouse card, which is close
-but is not how a //c's is wired.
+**Its disk is an IWM, and the sequencer under it is the card's.** The chip
+decodes the same sixteen addresses at `$C0E0-$C0EF` and means the same things
+by them, so what is below it — the drives, the stepper, the motor, the LSS — is
+`DiskController`, shared with `Disk2Card`; `IWM` adds the register file a read
+sees in front of it (data, status, handshake, and a mode register writable only
+with the motor off) and has no ROM, because a //c's disk firmware is in the
+system ROM rather than in slot 6's 256 bytes. Which class gets built is the
+profile's `slots[6].fixedCard`, and `Emulator::getDisk()` hands out the base,
+so nothing the host asks about a drive had to change. A //c boots DOS 3.3 from
+the drive in its case.
+
+**What is not implemented is the two 6551s.** A //c cannot print or dial. The
+mouse is the //e's mouse card, which is close but is not how a //c's is
+wired.
 
 #### Choosing a machine
 

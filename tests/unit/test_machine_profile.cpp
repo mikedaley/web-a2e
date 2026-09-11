@@ -593,6 +593,53 @@ TEST_CASE("A machine with no sockets answers slot addresses from its own ROM",
     }
 }
 
+TEST_CASE("A //c's disk is a chip on the board, not a card in a slot",
+          "[machine][disk]") {
+    // Slot 6 on a //c decodes the same sixteen addresses a Disk II card does,
+    // and an IWM answers them. What it does not have is the card's other half:
+    // a boot ROM in the slot's 256 bytes. A //c boots from $C600 all the same,
+    // because those bytes are part of its system ROM.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+        WARN("//c ROMs not built in; skipping the disk controller test");
+        return;
+    }
+
+    Emulator iic(MachineId::AppleIIc);
+    iic.init();
+    REQUIRE(std::string(iic.getDisk().getName()) == "IWM");
+    REQUIRE(std::string(iic.getSlotCardName(6)) == "iwm");
+    REQUIRE_FALSE(iic.getDisk().hasROM());
+    REQUIRE(iic.getMMU().read(0xC600) ==
+            iic.getMMU().getSystemROM()[0xC600 - 0xC000]);
+
+    SECTION("and the chip is reached at slot 6's addresses") {
+        // $C0E9 is the motor, wherever the controller came from.
+        iic.getMMU().read(0xC0E9);
+        REQUIRE(iic.getDisk().isMotorOn());
+        iic.getMMU().read(0xC0EB);
+        REQUIRE(iic.getDisk().getSelectedDrive() == 1);
+    }
+
+    SECTION("and it cannot be taken out, because there is no socket") {
+        // Every slot on a //c is fixed, so none of them is the user's to
+        // change. The rule used to be spelled `slot == 3`, which is the //e's
+        // version of it and would have let a caller pull the IWM out of a
+        // machine with no way to put one back.
+        REQUIRE_FALSE(iic.setSlotCard(6, "empty"));
+        REQUIRE_FALSE(iic.setSlotCard(6, "smartport"));
+        REQUIRE(std::string(iic.getDisk().getName()) == "IWM");
+        REQUIRE(iic.getMMU().getCard(6) != nullptr);
+    }
+
+    SECTION("while a //e's slot 6 is a card, with its own ROM in it") {
+        Emulator iie(MachineId::AppleIIe);
+        iie.init();
+        REQUIRE(std::string(iie.getDisk().getName()) == "Disk II");
+        REQUIRE(iie.getDisk().hasROM());
+        REQUIRE(iie.getMMU().read(0xC600) == roms::ROM_DISK2[0]);
+    }
+}
+
 TEST_CASE("Character ROMs are normalised to one layout", "[machine][video]") {
     // The //e and the II+ hold the same glyphs but store them differently: a
     // //e puts bit 0 at the left of a glyph row and the blank scanline last, a
