@@ -44,7 +44,14 @@ The slow clock lives in `IIgsMemory` rather than in the machine, and ticks on ea
 
 Slot 6 holds an `IWM`, the same class a //c has, with `DiskController` under it: the drives, the stepper, the motor and the sequencer are shared with the card a //e takes. There is no card ROM, because the boot code that drives it is the machine's own firmware.
 
-**A IIgs does not yet boot from a disk.** The firmware finds the chip, sets its mode register, starts the motor, steps the head to track zero and reads — and the bytes the sequencer assembles are not yet the ones on the disk. What is known to be right: the registers it polls first (`$C02D` and `$C031`, which returned floating-bus garbage before and stopped the firmware from looking at all), the mode write (which reaches the chip on Q7 alone — requiring Q6 as well hangs the machine in a loop writing the mode and reading it back), and the timing of the polls. What is not yet right is somewhere between the sequencer's clock and the bit stream.
+**A IIgs does not yet boot from a disk**, and it is worth writing down how far it gets, because most of the way is now known to be right:
+
+- The registers the firmware polls before it will look for a drive at all — `$C02D` and `$C031` — answer properly. They used to return the floating bus, and the machine never spun a drive.
+- The mode register write reaches the chip. It arrives at `$C0EF` on Q7 alone, without Q6; requiring both hangs the machine in a loop writing the mode and reading it back, 786,905 times in one boot.
+- Slot 6 carries the disk boot signature (`$Cn01=20`, `$Cn03=00`, `$Cn05=03`, `$Cn07=3C`) out of the machine's own firmware, so the slot is recognised as bootable, and `$C600` holds the boot code.
+- The drive reads. With the motor running the sequencer assembles sync bytes — `1F`, `3F`, `7F`, `FF` — off track zero, which is the shape of a real GCR stream.
+
+What does not happen is the last step: the boot sector never lands at `$0800`. It is **not** the two-clock model — forcing the whole machine to 1MHz changes nothing — and it is not the drive, which reads. The next place to look is what the `$C600` code does with what it reads, and which of the IWM's status answers it does not like.
 
 ## Super Hi-Res
 
