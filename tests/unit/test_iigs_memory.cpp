@@ -401,3 +401,39 @@ TEST_CASE("A bigger machine answers in the banks a smaller one does not",
   REQUIRE(small.fastRamSize() == FAST_RAM_SIZE_ROM01);
   REQUIRE(large.fastRamSize() == 1024 * 1024);
 }
+
+TEST_CASE("Banks $E0 and $E1 are two different 64K, language card included",
+          "[iigs][memory]") {
+  // The Mega II's two banks are main and auxiliary, and a IIgs reaches them by
+  // bank number rather than through the //e's soft switches. Below $D000 that
+  // was always so. Above it the map has the language card in it, and a //e
+  // picks its half with ALTZP because that is the only way a //e can ask —
+  // which makes $E0 and $E1 the same 48K if the IIgs asks the same way.
+  //
+  // They are not the same 48K. The toolbox's vectors, the Memory Manager's
+  // tables and GS/OS all live in $E1's, and a machine where $E0 overwrites
+  // them gets as far as the Memory Manager refusing to allocate anything.
+  IIgsMemory memory;
+
+  // Language card RAM readable and writable, so $D000 upward is RAM not ROM.
+  memory.read(0x00C083);
+  memory.read(0x00C083);
+
+  for (uint16_t offset : {uint16_t(0xD000), uint16_t(0xE000), uint16_t(0xFFF0)}) {
+    memory.write(0x00E00000u | offset, 0x11);
+    memory.write(0x00E10000u | offset, 0x22);
+    INFO("at $" << std::hex << offset);
+    REQUIRE(memory.read(0x00E00000u | offset) == 0x11);
+    REQUIRE(memory.read(0x00E10000u | offset) == 0x22);
+    // A debugger must see the same two banks the processor does.
+    REQUIRE(memory.peek(0x00E00000u | offset) == 0x11);
+    REQUIRE(memory.peek(0x00E10000u | offset) == 0x22);
+  }
+
+  // The half the bank names is not the half ALTZP names: switching ALTZP must
+  // not move what bank $E1 reads.
+  memory.write(0x00C009, 0x00); // ALTZP on
+  REQUIRE(memory.read(0x00E10000u | 0xE000) == 0x22);
+  memory.write(0x00C008, 0x00); // ALTZP off
+  REQUIRE(memory.read(0x00E10000u | 0xE000) == 0x22);
+}

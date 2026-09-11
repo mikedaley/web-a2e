@@ -157,7 +157,11 @@ uint8_t IIgsMemory::read(uint32_t address) {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->read(offset);
+      // The bank names the half of the language card, exactly as it names the
+      // half of the RAM below it. Going through the //e's map here would ask
+      // ALTZP instead, and then $E0 and $E1 would be the same 48K — with the
+      // toolbox and GS/OS living in $E1's.
+      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
 
@@ -201,7 +205,9 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
 
   case Region::MegaII:
     if (offset >= LANGUAGE_CARD_BASE) {
-      megaII_->write(offset, value); // The language card decides read or write
+      // The card's write enable still decides whether this lands; which of its
+      // two halves it lands in is the bank's business, not ALTZP's.
+      megaII_->writeLanguageCardRAM(offset, value, bank == SLOW_BANK_AUX);
       return;
     }
     megaII_->writeRAM(offset, value, bank == SLOW_BANK_AUX);
@@ -237,7 +243,9 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->peek(offset);
+      // As in read(): the bank names the half, so a debugger looking at $E1
+      // sees $E1 rather than whichever half ALTZP happens to point at.
+      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
   case Region::FastRAM:

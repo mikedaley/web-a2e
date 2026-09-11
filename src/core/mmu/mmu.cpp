@@ -1518,62 +1518,52 @@ void MMU::handleLanguageCardSwitchWrite(uint8_t reg) {
   switches_.lcram2 = bank2;
 }
 
-uint8_t MMU::readLanguageCard(uint16_t address) {
-  if (switches_.lcram) {
-    // Read from RAM
-    bool useAux = switches_.altzp;
-
-    if (address < 0xE000) {
-      // $D000-$DFFF
-      uint16_t offset = address - 0xD000;
-      if (switches_.lcram2) {
-        return useAux ? auxLcBank2_[offset] : lcBank2_[offset];
-      } else {
-        return useAux ? auxLcBank1_[offset] : lcBank1_[offset];
-      }
-    } else {
-      // $E000-$FFFF
-      uint16_t offset = address - 0xE000;
-      return useAux ? auxLcHighRAM_[offset] : lcHighRAM_[offset];
+uint8_t MMU::readLanguageCardRAM(uint16_t address, bool aux) const {
+  if (address < 0xE000) {
+    // $D000-$DFFF, whichever of the two banks is switched in
+    const uint16_t offset = address - 0xD000;
+    if (switches_.lcram2) {
+      return aux ? auxLcBank2_[offset] : lcBank2_[offset];
     }
-  } else {
-    // Read from ROM
-    return systemROM_[address - 0xC000];
+    return aux ? auxLcBank1_[offset] : lcBank1_[offset];
   }
+  // $E000-$FFFF, which is not bank switched
+  const uint16_t offset = address - 0xE000;
+  return aux ? auxLcHighRAM_[offset] : lcHighRAM_[offset];
 }
 
-void MMU::writeLanguageCard(uint16_t address, uint8_t value) {
+uint8_t MMU::readLanguageCard(uint16_t address) {
+  if (switches_.lcram) {
+    // ALTZP is how a program in the map names the half it wants.
+    return readLanguageCardRAM(address, switches_.altzp);
+  }
+  return systemROM_[address - 0xC000];
+}
+
+void MMU::writeLanguageCardRAM(uint16_t address, uint8_t value, bool aux) {
   if (!switches_.lcwrite) {
     return; // Write not enabled
   }
 
-  bool useAux = switches_.altzp;
-
   if (address < 0xE000) {
-    // $D000-$DFFF
-    uint16_t offset = address - 0xD000;
+    // $D000-$DFFF, whichever of the two banks is switched in
+    const uint16_t offset = address - 0xD000;
     if (switches_.lcram2) {
-      if (useAux) {
-        auxLcBank2_[offset] = value;
-      } else {
-        lcBank2_[offset] = value;
-      }
+      (aux ? auxLcBank2_ : lcBank2_)[offset] = value;
     } else {
-      if (useAux) {
-        auxLcBank1_[offset] = value;
-      } else {
-        lcBank1_[offset] = value;
-      }
+      (aux ? auxLcBank1_ : lcBank1_)[offset] = value;
     }
-  } else {
-    // $E000-$FFFF
-    uint16_t offset = address - 0xE000;
-    if (useAux) {
-      auxLcHighRAM_[offset] = value;
-    } else {
-      lcHighRAM_[offset] = value;
-    }
+    return;
   }
+
+  // $E000-$FFFF, which is not bank switched
+  const uint16_t offset = address - 0xE000;
+  (aux ? auxLcHighRAM_ : lcHighRAM_)[offset] = value;
+}
+
+void MMU::writeLanguageCard(uint16_t address, uint8_t value) {
+  // ALTZP is how a program in the map names the half it wants.
+  writeLanguageCardRAM(address, value, switches_.altzp);
 }
 
 } // namespace a2e

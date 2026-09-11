@@ -61,6 +61,25 @@ public:
   uint8_t readRAM(uint16_t address, bool aux = false) const;
   void writeRAM(uint16_t address, uint8_t value, bool aux = false);
 
+  /**
+   * The language card's RAM at $D000-$FFFF, with main or auxiliary named by
+   * the caller instead of taken from ALTZP.
+   *
+   * A //e has one language card and ALTZP decides which half of it is in the
+   * map — there is no other way to reach it, so `readLanguageCard` asks the
+   * switch and that is the whole story. A IIgs reaches the same hardware two
+   * ways: through the map, as a //e does, and by addressing bank $E0 or $E1
+   * directly, where the *bank number* names the half. Those are two different
+   * 48K, and the toolbox and GS/OS live in $E1's.
+   *
+   * The read is RAM, not ROM: whether the space reads the card or the machine's
+   * ROM is the caller's to decide, because a IIgs asks a different register
+   * about it. The write still honours the card's write enable, which is the
+   * same switch either way in.
+   */
+  uint8_t readLanguageCardRAM(uint16_t address, bool aux) const;
+  void writeLanguageCardRAM(uint16_t address, uint8_t value, bool aux);
+
   // Language card RAM access (for state serialization)
   const uint8_t *getLCBank1(bool aux = false) const {
     return aux ? auxLcBank1_.data() : lcBank1_.data();
