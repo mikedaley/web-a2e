@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 #include <string>
 
 namespace a2e {
@@ -54,8 +55,15 @@ public:
    *
    * Without a ROM there is nothing to run: the reset vector reads as zero and
    * the CPU goes to $0000. `hasROM()` is how a caller finds out before trying.
+   *
+   * The character generator is separate and is not optional in practice. A
+   * IIgs keeps its font inside the video chip rather than anywhere the CPU can
+   * read, so there is nothing in the system ROM to find: the machine is given
+   * the //e's set, which is the same font. Without one, every glyph is blank
+   * and text comes out as solid bars.
    */
-  void init(const uint8_t *rom, size_t romSize);
+  void init(const uint8_t *rom, size_t romSize,
+            const uint8_t *characterRom = nullptr, size_t characterSize = 0);
   bool hasROM() const { return memory_->hasROM(); }
 
   /** Power-on reset: the CPU comes up in emulation mode, as every 65816 does. */
@@ -76,8 +84,51 @@ public:
   /** Slow-side cycles since reset: the clock the video is counted in. */
   uint64_t slowCycles() const { return slowCycles_; }
 
-  /** What is on the text screen, for tests and for looking. */
+  /**
+   * What is on the text screen, for tests and for looking.
+   *
+   * The whole 40-column screen, or the rectangle asked for. It comes out of
+   * the Mega II's main RAM, in the interleaved layout every Apple II has used,
+   * because it is the same chip generating it.
+   */
   std::string screenText() const;
+  std::string screenText(int startRow, int startColumn, int endRow,
+                         int endColumn) const;
+
+  // ===== What the host drives it through =====
+  //
+  // The emulation is paced by audio: the worker asks for a buffer of samples,
+  // and producing them is what runs the machine forward. So these are the
+  // calls that matter, and they are deliberately the same shape as Emulator's
+  // — the host should not have to know which machine it has.
+
+  /**
+   * Run long enough to produce this many samples, and fill them in.
+   *
+   * The samples are silence: a IIgs's sound is the Ensoniq, and the
+   * synthesiser behind that chip's RAM is not written yet. Returning the
+   * buffer full of zeroes rather than nothing is what keeps the worker's
+   * pacing loop turning at the right rate.
+   */
+  int generateStereoAudioSamples(float *buffer, int sampleCount);
+
+  /** How many whole frames' worth of samples have been produced since asked. */
+  int consumeFrameSamples();
+
+  bool isFrameReady() const;
+  void clearFrameReady();
+
+  /**
+   * The picture, at the size the machine's profile promises.
+   *
+   * A IIgs's screen is Super Hi-Res sized — 640 by 400 — and what it can draw
+   * today is the Mega II's 560 by 384. So the //e's picture is composited into
+   * the middle of a IIgs-sized frame, which is roughly where a real machine
+   * puts it, and the border is the black of a video system that has nothing to
+   * say yet. When Super Hi-Res arrives it draws into this same frame.
+   */
+  const uint8_t *framebuffer();
+  size_t framebufferSize() const;
 
 private:
   // How many slow cycles an instruction costs. A 65816 access to the Mega II
@@ -94,6 +145,11 @@ private:
 
   uint64_t slowCycles_ = 0;
   double slowCycleRemainder_ = 0.0;
+
+  int samplesGenerated_ = 0;
+  uint64_t lastFrameCycle_ = 0;
+  bool frameReady_ = false;
+  std::vector<uint8_t> frame_;
 };
 
 } // namespace a2e::iigs

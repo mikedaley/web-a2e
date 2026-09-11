@@ -23,8 +23,20 @@
 #include <vector>
 #include <emscripten.h>
 
+#include "iigs/iigs_machine.hpp"
+
 // Global emulator instance
 static a2e::Emulator *g_emulator = nullptr;
+
+// ...and the other kind of machine.
+//
+// Emulator coordinates the Apple II family. A IIgs is not built from those
+// parts, so it has its own coordinator, and exactly one of these two is alive
+// at a time. Everything the host needs in order to *run and show* a machine is
+// routed to whichever it is; everything else — disks, printers, cards, the
+// debugger — still asks for g_emulator and answers nothing while a IIgs is
+// running, because none of it has been taught about that machine yet.
+static a2e::iigs::IIgsMachine *g_iigs = nullptr;
 
 // Which machine init() will build. Changing it takes effect on the next
 // construction, which is what setMachine() forces.
@@ -42,14 +54,33 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
 void init() {
-  if (!g_emulator) {
-    // Route core debug tracing to the browser console. The core itself has no
-    // idea a console exists — it formats into a2e::debugLog() and this binding,
-    // as the platform layer, decides where the text goes.
-    a2e::setDebugLogSink([](const char *message) {
-      EM_ASM({ console.log(UTF8ToString($0)); }, message);
-    });
+  // Route core debug tracing to the browser console. The core itself has no
+  // idea a console exists — it formats into a2e::debugLog() and this binding,
+  // as the platform layer, decides where the text goes.
+  a2e::setDebugLogSink([](const char *message) {
+    EM_ASM({ console.log(UTF8ToString($0)); }, message);
+  });
 
+  // A IIgs is a different machine built from different parts, so it is a
+  // different object. Which one exists is decided here and nowhere else.
+  if (a2e::machineProfile(g_machineId).family == a2e::MachineFamily::AppleIIgs) {
+    if (g_iigs) return;
+    delete g_emulator;
+    g_emulator = nullptr;
+    size_t romSize = 0;
+    size_t characterSize = 0;
+    const uint8_t *rom = a2e::Emulator::systemROMFor(g_machineId, romSize);
+    const uint8_t *characters =
+        a2e::Emulator::characterROMFor(g_machineId, characterSize);
+    g_iigs = new a2e::iigs::IIgsMachine();
+    g_iigs->init(rom, romSize, characters, characterSize);
+    return;
+  }
+
+  delete g_iigs;
+  g_iigs = nullptr;
+
+  if (!g_emulator) {
     g_emulator = new a2e::Emulator(g_machineId);
     g_emulator->init();
     // Install the parallel (Centronics) printer tx callback at construction so
@@ -71,24 +102,39 @@ void init() {
 
 EMSCRIPTEN_KEEPALIVE
 void reset() {
+  if (g_iigs) {
+    g_iigs->reset();
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->reset();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void warmReset() {
+  if (g_iigs) {
+    g_iigs->reset(); // A IIgs has no separate warm reset here yet
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->warmReset();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void runCycles(int cycles) {
+  if (g_iigs) {
+    g_iigs->runCycles(cycles);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->runCycles(cycles);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int generateStereoAudioSamples(float *buffer, int sampleCount) {
+  // This is what paces the emulation: the worker asks for samples and the time
+  // they represent is the time the machine gets to run.
+  if (g_iigs) return g_iigs->generateStereoAudioSamples(buffer, sampleCount);
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->generateStereoAudioSamples(buffer, sampleCount);
 }
@@ -107,18 +153,21 @@ void setAudioMuted(bool muted) {
 
 EMSCRIPTEN_KEEPALIVE
 int consumeFrameSamples() {
+  if (g_iigs) return g_iigs->consumeFrameSamples();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->consumeFrameSamples();
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint8_t *getFramebuffer() {
+  if (g_iigs) return const_cast<uint8_t *>(g_iigs->framebuffer());
   REQUIRE_EMULATOR_OR(nullptr);
   return const_cast<uint8_t *>(g_emulator->getFramebuffer());
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getFramebufferSize() {
+  if (g_iigs) return static_cast<int>(g_iigs->framebufferSize());
   REQUIRE_EMULATOR_OR(static_cast<int>(a2e::defaultMachineProfile()
                                            .display.framebufferSize()));
   return static_cast<int>(g_emulator->getFramebufferSize());
@@ -241,14 +290,16 @@ const char *getMachineKeyAt(int index) {
 
 EMSCRIPTEN_KEEPALIVE
 const char *getMachineKey() {
-  REQUIRE_EMULATOR_OR(a2e::defaultMachineProfile().key);
-  return g_emulator->getMachine().key;
+  // g_machineId, not the emulator: it is the one answer that is right whichever
+  // kind of machine is running, and a IIgs has no Emulator to ask. Answering
+  // with the //e's key while a IIgs ran would have the host size its renderer
+  // for the wrong picture.
+  return a2e::machineProfile(g_machineId).key;
 }
 
 EMSCRIPTEN_KEEPALIVE
 const char *getMachineName() {
-  REQUIRE_EMULATOR_OR(a2e::defaultMachineProfile().name);
-  return g_emulator->getMachine().name;
+  return a2e::machineProfile(g_machineId).name;
 }
 
 // Whole profile in one round trip: the host needs most of it at once, and the
@@ -257,7 +308,7 @@ EMSCRIPTEN_KEEPALIVE
 const char *getMachineProfileJSON() {
   static std::string buffer;
   const auto &m =
-      g_emulator ? g_emulator->getMachine() : a2e::defaultMachineProfile();
+      a2e::machineProfile(g_machineId);
   buffer = machineProfileToJSON(m);
   return buffer.c_str();
 }
@@ -304,22 +355,36 @@ bool setMachine(const char *key) {
   if (g_emulator && profile->id == g_emulator->getMachine().id) {
     return true; // Already this machine
   }
+  if (g_iigs && profile->id == a2e::MachineId::AppleIIgs) {
+    return true;
+  }
 
   g_machineId = profile->id;
   delete g_emulator;
   g_emulator = nullptr;
+  delete g_iigs;
+  g_iigs = nullptr;
   init();
-  return g_emulator != nullptr;
+  return g_emulator != nullptr || g_iigs != nullptr;
 }
 
 EMSCRIPTEN_KEEPALIVE
 void forceRenderFrame() {
+  if (g_iigs) {
+    g_iigs->video().forceRenderFrame();
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->getVideo().forceRenderFrame();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isFrameReady() {
+  if (g_iigs) {
+    const bool ready = g_iigs->isFrameReady();
+    if (ready) g_iigs->clearFrameReady();
+    return ready;
+  }
   REQUIRE_EMULATOR_OR(false);
   bool ready = g_emulator->isFrameReady();
   if (ready) {
@@ -1029,6 +1094,11 @@ int screenCodeToAscii(uint8_t code) {
 
 EMSCRIPTEN_KEEPALIVE
 const char* readScreenText(int startRow, int startCol, int endRow, int endCol) {
+  if (g_iigs) {
+    static std::string buffer;
+    buffer = g_iigs->screenText(startRow, startCol, endRow, endCol);
+    return buffer.c_str();
+  }
   REQUIRE_EMULATOR_OR("");
   return g_emulator->readScreenText(startRow, startCol, endRow, endCol);
 }

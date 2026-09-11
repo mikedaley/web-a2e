@@ -10,13 +10,17 @@
 // This is the *allocation* size, not a description of the machine. A
 // SharedArrayBuffer cannot be resized after it is handed to the Worker and the
 // AudioWorklet, so the slot is sized once, up front, and has to be at least as
-// large as the framebuffer of any machine the core can run. Today that is the
-// //e's 560x384 and the two numbers coincide; a machine with a bigger picture
-// means raising these, and main.js checks the fit at startup rather than
-// letting a frame write past the end of the slot.
-export const FB_WIDTH = 560;
-export const FB_HEIGHT = 384;
-export const FB_BYTES = FB_WIDTH * FB_HEIGHT * 4; // 860,160 bytes RGBA
+// large as the framebuffer of any machine the core can run.
+//
+// The biggest is the IIgs's: 640x400, which is a Super Hi-Res screen. The //e,
+// the II Plus and the //c all draw 560x384 into a slot that is larger than
+// they need, which costs 164KB of address space each and saves the transport
+// falling back to postMessage on the one machine that would not fit. main.js
+// still checks the fit at startup rather than letting a frame write past the
+// end of the slot.
+export const FB_WIDTH = 640;
+export const FB_HEIGHT = 400;
+export const FB_BYTES = FB_WIDTH * FB_HEIGHT * 4; // 1,024,000 bytes RGBA
 // Two frames are allocated and written alternately: the Worker fills the half
 // the renderer is not reading, so a frame can never be torn by a write landing
 // mid-upload. Which half holds the newest complete frame is published in the

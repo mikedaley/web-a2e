@@ -309,14 +309,23 @@ TEST_CASE("The IIgs profile describes a machine of a different family",
         REQUIRE(iigs::ROM_SIZE_ROM3 == 2 * iigs::ROM_SIZE_ROM01);
     }
 
-    SECTION("and it is not runnable, whatever ROMs are in the build") {
-        // The honest answer while the parts are being written. A machine the
-        // Emulator cannot build is listed and marked unavailable rather than
-        // started as something it is not — and this is deliberately not a test
-        // of whether the ROM is present, because the ROM is not what is
-        // missing.
-        REQUIRE_FALSE(Emulator::isMachineRunnable(MachineId::AppleIIgs));
-        REQUIRE(Emulator::isMachineRunnable(MachineId::AppleIIe));
+    SECTION("and it is runnable when its ROM is in the build") {
+        // It is not built from Emulator's parts — the host constructs an
+        // IIgsMachine instead — but what decides whether it can be started is
+        // the same thing that decides for every other machine: whether its ROM
+        // is here. This was false for the whole family while there was nothing
+        // that could run one.
+        REQUIRE(Emulator::isMachineRunnable(MachineId::AppleIIgs) ==
+                (roms::ROM_SYSTEM_IIGS_SIZE >= iigs::ROM_SIZE_ROM01));
+    }
+
+    SECTION("and its ROM can be asked for without building the machine") {
+        size_t size = 0;
+        const uint8_t *rom = Emulator::systemROMFor(MachineId::AppleIIgs, size);
+        if (Emulator::isMachineRunnable(MachineId::AppleIIgs)) {
+            REQUIRE(rom != nullptr);
+            REQUIRE(size >= iigs::ROM_SIZE_ROM01);
+        }
     }
 }
 

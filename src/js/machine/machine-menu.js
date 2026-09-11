@@ -199,6 +199,11 @@ export class MachineMenu {
   itemHTML(m, currentKey) {
     const isCurrent = m.key === currentKey;
     const unavailable = m.runnable === false;
+    // A machine that runs but is not finished says so, because the difference
+    // between "will not start" and "starts but has no keyboard yet" matters to
+    // somebody choosing one. The IIgs boots its firmware and draws; what it
+    // has not got yet is its own video, its sound, and anything to type on.
+    const partial = m.family === "apple2gs" && !unavailable;
 
     const classes = ["header-menu-item", "machine-menu-item"];
     if (isCurrent) classes.push("current");
@@ -212,12 +217,20 @@ export class MachineMenu {
          </svg>`
       : unavailable
         ? `<span class="machine-menu-flag">No ROM</span>`
-        : "";
+        : partial
+          ? `<span class="machine-menu-flag">In progress</span>`
+          : "";
 
     return `
       <button class="${classes.join(" ")}" data-key="${m.key}" type="button"
               ${unavailable ? "disabled" : ""}
-              ${unavailable ? 'title="Its ROM images are not built in"' : ""}>
+              ${
+                unavailable
+                  ? 'title="Its ROM images are not built in"'
+                  : partial
+                    ? 'title="Boots its firmware; no keyboard, disk, sound or Super Hi-Res yet"'
+                    : ""
+              }>
         <span class="machine-menu-art">${MACHINE_ART[m.key] || ""}</span>
         <span class="machine-menu-text">
           <span class="machine-menu-name">${m.name}</span>

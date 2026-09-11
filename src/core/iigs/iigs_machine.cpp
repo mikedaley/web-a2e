@@ -9,7 +9,11 @@
 
 #include "../cpu/65816/cpu65816.hpp"
 #include "../mmu/mmu.hpp"
+#include "../machine/machine_profile.hpp"
 #include "../video/video.hpp"
+
+#include <algorithm>
+#include <cstring>
 
 namespace a2e::iigs {
 
@@ -30,8 +34,12 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
 
 IIgsMachine::~IIgsMachine() = default;
 
-void IIgsMachine::init(const uint8_t *rom, size_t romSize) {
+void IIgsMachine::init(const uint8_t *rom, size_t romSize,
+                       const uint8_t *characterRom, size_t characterSize) {
   memory_->loadROM(rom, romSize);
+  // The Mega II draws text from a character generator, and this machine's is
+  // not in its ROM. See the note on init() in the header.
+  memory_->megaII().loadROM(nullptr, 0, characterRom, characterSize);
   reset();
 }
 
@@ -39,6 +47,9 @@ void IIgsMachine::reset() {
   memory_->reset();
   slowCycles_ = 0;
   slowCycleRemainder_ = 0.0;
+  lastFrameCycle_ = 0;
+  frameReady_ = false;
+  samplesGenerated_ = 0;
 
   // The reset vector is read from bank zero, where $D000 upward is the
   // language card — and a machine that has just been powered on is reading ROM
@@ -62,7 +73,22 @@ int IIgsMachine::step() {
   slowCycleRemainder_ -= static_cast<double>(whole);
   slowCycles_ += whole;
 
+  // Draw the scanlines this instruction's time covered, and close the frame
+  // when its time is up. Both halves matter: without the boundary the picture
+  // is never finished and the screen stays black however much is drawn into
+  // it. The boundary advances by exactly one frame rather than to the current
+  // cycle, so it cannot drift away from where $C019 thinks vertical blanking
+  // is — a program timing itself against the beam would see it wander.
   video_->renderUpToCycle(slowCycles_);
+
+  const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
+  if (slowCycles_ - lastFrameCycle_ >=
+      static_cast<uint64_t>(timing.cyclesPerFrame())) {
+    lastFrameCycle_ += timing.cyclesPerFrame();
+    video_->renderFrame();
+    video_->beginNewFrame(lastFrameCycle_);
+    frameReady_ = true;
+  }
   return cycles;
 }
 
@@ -78,23 +104,91 @@ void IIgsMachine::runCycles(int slowCyclesToRun) {
   }
 }
 
-std::string IIgsMachine::screenText() const {
-  // The 40-column text screen, read out of the Mega II's main RAM: the same
-  // interleaved layout every Apple II has had, because it is the same chip
-  // generating it.
+std::string IIgsMachine::screenText() const { return screenText(0, 0, 23, 39); }
+
+std::string IIgsMachine::screenText(int startRow, int startColumn, int endRow,
+                                    int endColumn) const {
   std::string text;
-  for (int row = 0; row < 24; row++) {
+  startRow = std::max(0, startRow);
+  startColumn = std::max(0, startColumn);
+  endRow = std::min(23, endRow);
+  endColumn = std::min(39, endColumn);
+
+  for (int row = startRow; row <= endRow; row++) {
     const uint16_t base = static_cast<uint16_t>(0x400 + (row % 8) * 0x80 +
                                                 (row / 8) * 0x28);
-    for (int column = 0; column < 40; column++) {
+    for (int column = startColumn; column <= endColumn; column++) {
       uint8_t byte = memory_->megaII().readRAM(
           static_cast<uint16_t>(base + column), false);
       byte &= 0x7F;
       text += (byte < 0x20) ? ' ' : static_cast<char>(byte);
     }
-    text += '\n';
+    if (row < endRow) text += '\n';
   }
   return text;
+}
+
+// ============================================================================
+// What the host drives it through
+// ============================================================================
+
+int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
+  // Producing the samples is what runs the machine: the worker asks for a
+  // buffer, and the time that buffer represents is the time the machine gets.
+  const auto &profile = machineProfile(MachineId::AppleIIgs);
+  const int cyclesToRun = static_cast<int>(
+      sampleCount * profile.timing.cyclesPerSample(AUDIO_SAMPLE_RATE));
+  runCycles(cyclesToRun);
+
+  samplesGenerated_ += sampleCount;
+
+  // Silence, until there is an Ensoniq to ask.
+  if (buffer) std::fill_n(buffer, sampleCount * 2, 0.0f);
+  return sampleCount;
+}
+
+int IIgsMachine::consumeFrameSamples() {
+  // A frame's worth of samples at the rate the host mixes at: the same
+  // arithmetic Emulator does, and the same answer, because both machines put
+  // sixty frames a second on the same screen.
+  constexpr int SAMPLES_PER_FRAME = AUDIO_SAMPLE_RATE / 60;
+  const int frames = samplesGenerated_ / SAMPLES_PER_FRAME;
+  samplesGenerated_ %= SAMPLES_PER_FRAME;
+  return frames;
+}
+
+bool IIgsMachine::isFrameReady() const { return frameReady_; }
+
+void IIgsMachine::clearFrameReady() { frameReady_ = false; }
+
+size_t IIgsMachine::framebufferSize() const {
+  return machineProfile(MachineId::AppleIIgs).display.framebufferSize();
+}
+
+const uint8_t *IIgsMachine::framebuffer() {
+  const auto &display = machineProfile(MachineId::AppleIIgs).display;
+  const auto &megaIIDisplay = machineProfile(MachineId::AppleIIe).display;
+
+  if (frame_.size() != framebufferSize()) frame_.assign(framebufferSize(), 0);
+
+  // The Mega II's picture, centred in a screen that is bigger than it. A real
+  // IIgs does much the same thing: the //e modes do not fill a Super Hi-Res
+  // raster, and what is around them is border.
+  const int destinationWidth = display.pixelWidth;
+  const int sourceWidth = megaIIDisplay.pixelWidth;
+  const int sourceHeight = megaIIDisplay.pixelHeight;
+  const int left = (destinationWidth - sourceWidth) / 2;
+  const int top = (display.pixelHeight - sourceHeight) / 2;
+
+  const uint8_t *source = video_->getFramebuffer();
+  for (int y = 0; y < sourceHeight; y++) {
+    uint8_t *destination =
+        frame_.data() + (static_cast<size_t>(top + y) * destinationWidth + left) * 4;
+    std::memcpy(destination,
+                source + static_cast<size_t>(y) * sourceWidth * 4,
+                static_cast<size_t>(sourceWidth) * 4);
+  }
+  return frame_.data();
 }
 
 } // namespace a2e::iigs

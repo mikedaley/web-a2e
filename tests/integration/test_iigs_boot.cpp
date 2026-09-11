@@ -47,7 +47,8 @@ TEST_CASE("A IIgs boots its own firmware", "[iigs][boot]") {
   }
 
   IIgsMachine machine;
-  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE);
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, roms::ROM_CHAR,
+               roms::ROM_CHAR_SIZE);
 
   SECTION("the reset vector comes out of the ROM, not out of nothing") {
     // $00:FFFC is the language card's space, and a machine that has just been

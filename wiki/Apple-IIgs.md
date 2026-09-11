@@ -1,6 +1,8 @@
 # Apple IIgs
 
-**Status: it boots.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. It is not yet offered in the menu: there is no Super Hi-Res, no sound, no keyboard and no disk, so what a user could do with it is read one line of text. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
+**Status: it boots, and you can select it.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and stops at **Check startup device!** — which is what a real IIgs with no disk in it says. The menu marks it *In progress*, because that is all it does: there is no Super Hi-Res, no sound, nothing to type on and no disk to boot.
+
+It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
 ---
 
@@ -77,18 +79,20 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 5. **Super Hi-Res.** The second video system and its palettes.
 6. **Sound.** The 32 oscillators, on top of the RAM and window that already exist, and the audio pipeline behind them.
 7. **Input and settings.** Real keys and a real mouse through the ADB controller, battery RAM, the clock, the Control Panel, and the slots.
-8. **The host.** A bigger framebuffer, the menu, the windows that assume a 6502.
+8. **The host.** *(Partly done.)* The machine can be chosen from the menu and drives the display: the wasm layer holds either an `Emulator` or an `IIgsMachine` and routes the calls that run and show a machine to whichever it is. The shared framebuffer slot is sized for the largest picture (640x400) so the IIgs does not fall back to `postMessage`. Everything else — disks, printers, cards, the debugger, the agent tools — still asks for an `Emulator` and quietly does nothing while a IIgs is running.
 
 ## Things That Will Have to Give
 
 Known places where the rest of the emulator assumes an 8-bit Apple II. None is a blocker; all are listed so they are not a surprise.
 
-- **The shared framebuffer slot** (`FB_WIDTH`/`FB_HEIGHT` in `worker/shared-buffers.js`) is sized for the //e's 560x384 and cannot be resized once handed to the Worker. A IIgs's 640x400 does not fit, so the transport falls back to `postMessage` until the slot is sized for the largest machine.
+- ~~The shared framebuffer slot is sized for the //e's 560x384~~ — now 640x400, the largest any machine here draws. The other three write a smaller picture into a larger slot, which costs 164KB of address space and saves the one machine that would not fit from falling back to `postMessage`.
 - **Save states** are laid out to the saving machine's shape and carry a machine id. A IIgs state is a different shape again; `STATE_VERSION` will have to move.
 - **The debugger** — disassembler, breakpoints, the trace — speaks 6502 and 16-bit addresses.
 - **The agent tools and the wasm interface** are `g_emulator`-shaped, and `Emulator` is the Apple II family's coordinator.
 
 ## ROMs
+
+**The character generator is not in the ROM.** A //e keeps its font in a part of its own and a //c keeps its inside the system ROM; a IIgs keeps its inside the video chip, where the CPU cannot read it — searching a ROM 01 image for so much as one glyph finds nothing. So the machine is given the //e's set, which is the same font. Without one every glyph is blank, and since an inverse blank is solid, the screen shows white bars where the text should be.
 
 **The banks can be either way round.** The obvious reading of a 128KB ROM 01 image is that it ends at `$FF:FFFF`, so its first half is bank `$FE` — and the dump this was written against is stored the other way. It is not a subtle difference: the emulation reset vector lives at `$FF:FFFC`, and reading it out of the wrong half gives zero and a machine that resets to `$00:0000` and sits there. So `IIgsMemory::loadROM` asks the image which way round it is, by looking for a usable reset vector at the top of each candidate bank.
 

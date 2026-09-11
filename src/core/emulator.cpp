@@ -12,6 +12,7 @@
 #include "cards/thunderclock/thunderclock_card.hpp"
 #include "cards/mouse/mouse_card.hpp"
 #include "cards/serial/serial_port.hpp"
+#include "iigs/iigs_spec.hpp"
 #include "cards/smartport/smartport_card.hpp"
 #include "cards/softcard/softcard_z80.hpp"
 #include "debug/condition_evaluator.hpp"
@@ -170,9 +171,17 @@ SystemRoms romsFor(MachineId machine) {
     return {roms::ROM_SYSTEM_IIC, roms::ROM_SYSTEM_IIC_SIZE,
             roms::ROM_CHAR_IIC, roms::ROM_CHAR_IIC_SIZE};
   case MachineId::AppleIIgs:
-    // Its character generator is inside the system ROM rather than in a part
-    // of its own, so there is no second image to hand over.
-    return {roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, nullptr, 0};
+    // A IIgs's character generator is in neither of the places the other
+    // machines keep theirs: not a part of its own, and not in the system ROM
+    // either — searching a ROM 01 image for so much as one glyph finds
+    // nothing. It is inside the video chip, which the CPU cannot read.
+    //
+    // So the machine is given the //e's set, which is the same font: the
+    // enhanced //e, the //c and the IIgs draw the same characters, MouseText
+    // included. Without it every glyph is blank and the screen shows solid
+    // bars where the text should be.
+    return {roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, roms::ROM_CHAR,
+            roms::ROM_CHAR_SIZE};
   case MachineId::AppleIIe:
     break;
   }
@@ -182,15 +191,28 @@ SystemRoms romsFor(MachineId machine) {
 
 } // namespace
 
+const uint8_t *Emulator::systemROMFor(MachineId machine, size_t &size) {
+  const SystemRoms rom = romsFor(machine);
+  size = rom.systemSize;
+  return rom.system;
+}
+
+const uint8_t *Emulator::characterROMFor(MachineId machine, size_t &size) {
+  const SystemRoms rom = romsFor(machine);
+  size = rom.charSize;
+  return rom.chars;
+}
+
 bool Emulator::isMachineRunnable(MachineId machine) {
-  // A machine this class cannot build is not runnable however complete its
-  // description is. Emulator is the Apple II family's coordinator — an MMU, a
-  // Video, an Audio and a CPU6502 — and a IIgs is a 65816 on a 24-bit bus with
-  // its own memory controller, its own second display system and its own
-  // sound. Those parts are being written (see core/iigs/); until they are here
-  // the machine is described, listed, and honestly marked unavailable rather
-  // than started as something it is not.
-  if (machineProfile(machine).family != MachineFamily::AppleII) return false;
+  // A IIgs is not built from this class's parts — it has its own coordinator,
+  // IIgsMachine, and the host builds that instead when the machine is a IIgs.
+  // What decides whether it can be started is the same thing that decides for
+  // every other machine: whether its ROM is in the build. The IIgs's ROM is
+  // banked and its profile describes a 64KB window rather than the whole
+  // image, so the size to expect is the image's own.
+  if (machineProfile(machine).family == MachineFamily::AppleIIgs) {
+    return romsFor(machine).systemSize >= iigs::ROM_SIZE_ROM01;
+  }
 
   // A machine's ROM has to actually fill the space its profile claims. A short
   // image would leave the reset vector reading whatever the array was

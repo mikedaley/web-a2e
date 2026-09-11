@@ -63,6 +63,19 @@ public:
   // here keeps them out of every other translation unit.
   static bool isMachineRunnable(MachineId machine);
 
+  /**
+   * The system ROM built into this build for a machine, or nullptr.
+   *
+   * It lives on this class because emulator.cpp is the translation unit that
+   * owns the generated ROM arrays — including them anywhere else would define
+   * them twice. A machine that is not built from Emulator's parts still needs
+   * its ROM from somewhere, and this is where somewhere is.
+   */
+  static const uint8_t *systemROMFor(MachineId machine, size_t &size);
+
+  /** The character generator for a machine, on the same terms. */
+  static const uint8_t *characterROMFor(MachineId machine, size_t &size);
+
   // Initialization
   void init();
   void reset();     // Cold reset - clears memory
