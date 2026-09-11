@@ -437,3 +437,35 @@ TEST_CASE("Banks $E0 and $E1 are two different 64K, language card included",
   memory.write(0x00C008, 0x00); // ALTZP off
   REQUIRE(memory.read(0x00E10000u | 0xE000) == 0x22);
 }
+
+TEST_CASE("Banks $00 and $01 carry a half of the language card each",
+          "[iigs][memory]") {
+  // The shadowed banks have the Mega II's language card at $D000-$FFFF, and
+  // they have a half of it each — $00 the main card, $01 the auxiliary one,
+  // exactly as $E0 and $E1 do. GS/OS runs code out of $01:D000 upward, and a
+  // machine that handed it bank $00's card instead executed whatever was
+  // there: four CMP (dp,S),Y in a row, and then a fall to $00:0000.
+  IIgsMemory memory;
+  memory.read(0x00C083);
+  memory.read(0x00C083); // language card RAM, write enabled
+
+  memory.write(0x00D06F, 0x11);
+  memory.write(0x01D06F, 0x22);
+  REQUIRE(memory.read(0x00D06F) == 0x11);
+  REQUIRE(memory.read(0x01D06F) == 0x22);
+
+  // ...and they are the same two halves the Mega II's own banks reach.
+  REQUIRE(memory.read(0x00E0D06F) == 0x11);
+  REQUIRE(memory.read(0x00E1D06F) == 0x22);
+
+  // ALTZP is how a //e asks for the auxiliary card, having no bank to name it
+  // with, so it still moves bank $00 across — that is a //e behaving like a
+  // //e on the fast side. What it must not do is move bank $01, which is
+  // already there.
+  memory.write(0x00C009, 0x00); // ALTZP on
+  REQUIRE(memory.read(0x00D06F) == 0x22);
+  REQUIRE(memory.read(0x01D06F) == 0x22);
+  memory.write(0x00C008, 0x00); // ALTZP off
+  REQUIRE(memory.read(0x00D06F) == 0x11);
+  REQUIRE(memory.read(0x01D06F) == 0x22);
+}

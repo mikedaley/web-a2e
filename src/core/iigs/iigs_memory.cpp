@@ -161,7 +161,7 @@ uint8_t IIgsMemory::read(uint32_t address) {
       // half of the RAM below it. Going through the //e's map here would ask
       // ALTZP instead, and then $E0 and $E1 would be the same 48K — with the
       // toolbox and GS/OS living in $E1's.
-      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
+      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
 
@@ -169,11 +169,14 @@ uint8_t IIgsMemory::read(uint32_t address) {
     if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
         ioAndLanguageCardVisible()) {
       // Banks $00 and $01 share the Mega II's language card, which is what
-      // makes //e software work unchanged on the fast side.
+      // makes //e software work unchanged on the fast side — and they share it
+      // a half each, $00 the main card and $01 the auxiliary one. GS/OS runs
+      // code out of $01:D000 upward, and a machine that gave it bank $00's
+      // card instead executed whatever was there.
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->read(offset);
+      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
     }
     return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
 
@@ -207,7 +210,7 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
     if (offset >= LANGUAGE_CARD_BASE) {
       // The card's write enable still decides whether this lands; which of its
       // two halves it lands in is the bank's business, not ALTZP's.
-      megaII_->writeLanguageCardRAM(offset, value, bank == SLOW_BANK_AUX);
+      megaII_->writeLanguageCardRAM(offset, value, languageCardAux(bank));
       return;
     }
     megaII_->writeRAM(offset, value, bank == SLOW_BANK_AUX);
@@ -216,7 +219,7 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
   case Region::FastRAM:
     if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
         ioAndLanguageCardVisible()) {
-      megaII_->write(offset, value);
+      megaII_->writeLanguageCardRAM(offset, value, languageCardAux(bank));
       return;
     }
     fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset] = value;
@@ -245,7 +248,7 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       }
       // As in read(): the bank names the half, so a debugger looking at $E1
       // sees $E1 rather than whichever half ALTZP happens to point at.
-      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
+      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
   case Region::FastRAM:
@@ -254,7 +257,7 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->peek(offset);
+      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
     }
     return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
   case Region::ROM:
@@ -448,6 +451,11 @@ ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
   // Control Panel has been set to "Your Card".
   if (slot == internalCardSlot_) return card;
   return (slotSelect_ & (1u << slot)) ? card : nullptr;
+}
+
+bool IIgsMemory::languageCardAux(uint8_t bank) const {
+  if (bank == 0x01 || bank == SLOW_BANK_AUX) return true;
+  return megaII_->getSoftSwitches().altzp;
 }
 
 uint8_t IIgsMemory::readROM(uint32_t address) const {

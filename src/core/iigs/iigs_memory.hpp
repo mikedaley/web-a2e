@@ -344,6 +344,22 @@ private:
 
   uint8_t readROM(uint32_t address) const;
 
+  /**
+   * Which half of the language card a shadowed bank reaches.
+   *
+   * Banks $00 and $01 carry the Mega II's language card at $D000-$FFFF, and
+   * they carry a different half of it each: $00 the main card, $01 the
+   * auxiliary one, exactly as $E0 and $E1 do. Addressing bank $01 is the
+   * 65816's way of saying "auxiliary", and it means that whatever the //e's
+   * switches say.
+   *
+   * ALTZP is how a //e asks for the same thing, having no bank to name it
+   * with, so it still moves bank $00 across: a //e program running on the fast
+   * side has to behave as it would on a //e. What it cannot do is move bank
+   * $01, which is already there.
+   */
+  bool languageCardAux(uint8_t bank) const;
+
   /** $C034 as one byte: the clock's nibble over the border's. */
   uint8_t clockControlRegister() const {
     return static_cast<uint8_t>((clock_.readControl() & ~BORDER_MASK) | border_);
