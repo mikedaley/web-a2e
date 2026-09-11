@@ -280,6 +280,16 @@ uint8_t MMU::peek(uint16_t address) const {
 
   // Slot ROM space: $C100-$CFFF
   if (address < 0xD000) {
+    // A machine with no expansion sockets has nothing else that could answer
+    // here. Every peripheral it decodes is soldered to the board and its
+    // firmware is part of the system ROM, so INTCXROM and SLOTC3ROM select
+    // between the internal ROM and a slot that does not exist: the internal
+    // ROM answers whatever they say. Without this a //c reads zeroes across
+    // $C100-$CFFF, and its reset lands on a BRK that vectors to another one.
+    if (!machine_->caps.hasExpansionSlots) {
+      return systemROM_[address - 0xC000];
+    }
+
     if (switches_.intcxrom) {
       return systemROM_[address - 0xC000];
     }
@@ -538,6 +548,16 @@ uint8_t MMU::read(uint16_t address) {
 
   // Slot ROM space: $C100-$CFFF
   if (address < 0xD000) {
+    // A machine with no expansion sockets has nothing else that could answer
+    // here. Every peripheral it decodes is soldered to the board and its
+    // firmware is part of the system ROM, so INTCXROM and SLOTC3ROM select
+    // between the internal ROM and a slot that does not exist: the internal
+    // ROM answers whatever they say. Without this a //c reads zeroes across
+    // $C100-$CFFF, and its reset lands on a BRK that vectors to another one.
+    if (!machine_->caps.hasExpansionSlots) {
+      return systemROM_[address - 0xC000];
+    }
+
     // When INTCXROM is ON, all of $C100-$CFFF uses internal ROM
     if (switches_.intcxrom) {
       return systemROM_[address - 0xC000];

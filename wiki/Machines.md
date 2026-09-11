@@ -54,7 +54,7 @@ The 1979 machine most of the software you remember was written on. Its differenc
 | Graphics | Lo-Res and Hi-Res only |
 | Character sets | One |
 | Slots | 0–7, with the language card fixed in slot 0 and slot 3 free |
-| ROMs | **You supply them** — see [ROMs](#roms) |
+| ROMs | 16KB firmware at `$C000-$FFFF`, plus a 4KB character generator |
 
 ### No auxiliary bank
 
@@ -80,7 +80,7 @@ Slot 3 is free, since there is no built-in 80-column card to occupy it.
 
 ## Apple //c
 
-The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. **Not yet startable** — see [ROMs](#roms), and the note below on what is still missing.
+The 1984 portable: a //e folded into a slab, with the drive in the case and nothing to plug a card into. It boots to its own banner and, with Ctrl+Reset, to Applesoft; it cannot yet read a disk — see the note below on what is still missing.
 
 | | |
 |---|---|
@@ -90,7 +90,7 @@ The 1984 portable: a //e folded into a slab, with the drive in the case and noth
 | Graphics | Lo-Res, Double Lo-Res, Hi-Res, Double Hi-Res |
 | Character sets | One |
 | Slots | None. The slot addresses are decoded, but every one is soldered |
-| ROMs | **You supply them** — see [ROMs](#roms) |
+| ROMs | 16KB firmware at `$C000-$FFFF`, plus a 4KB character generator |
 
 The machine modelled is the original //c, ROM 255: one internal 5.25" drive and an external port, no UniDisk 3.5 and no memory expansion — both arrived on later ROMs and put different things in slots 4 and 5.
 
@@ -114,11 +114,13 @@ A //c has no expansion sockets at all. The firmware and every program written fo
 
 The slot window shows them all, and none of them can be changed. Slots 5 and 7 are listed as having no socket rather than being offered a card, which is the difference between a machine whose slots are empty and one that has no slots.
 
+Because there is no socket, there is nowhere for a card's ROM to live either: the firmware for the serial ports, the mouse and the drive is part of the 16KB system ROM. `$C100-$CFFF` therefore reads the internal ROM on a //c whatever INTCXROM and SLOTC3ROM say — those switches choose between the internal ROM and a slot that does not exist. A //e with an empty slot reads the floating bus at the same addresses.
+
 ### What is not there yet
 
 The profile describes the machine, and the //e subsystems underneath it are the right ones, but three of the built-in peripherals have no implementation behind them: the **IWM** that drives the disk, and the two **6551** serial ports. The mouse is the //e's mouse card, which is close but is not how a //c's is wired.
 
-So a //c with its ROM in place would reach its firmware and not a disk. The IWM is the next piece of work.
+So a //c starts, draws its banner and drops into Applesoft on Ctrl+Reset, but its boot looks for a drive that nothing answers for. The IWM is the next piece of work.
 
 ## What Survives a Switch
 
@@ -147,10 +149,12 @@ A II Plus motherboard carries six 2KB ROMs in sockets D0 to F8 covering `$D000-$
 - **or** `apple2plus.rom` (12KB, `$D000-$FFFF`)
 - `341-0036.bin` (2KB character generator)
 
-The //c's are not distributed either. It carries one 16KB ROM covering `$C000-$FFFF` and a 4KB character generator:
+The //c carries one 16KB ROM covering `$C000-$FFFF` and a 4KB character generator:
 
-- `342-0033-A.bin` (16KB, `$C000-$FFFF`) **or** `apple2c.rom`
-- `342-0265-A.bin` (4KB character generator)
+- `342-0272-A.bin` (16KB, `$C000-$FFFF`) **or** `apple2c.rom`
+- `342-0265-A.bin` (4KB character generator; some dumps label the same part `341-0265-A.bin`, which is also accepted)
+
+`342-0272-A` is ROM 255, the original //c, which is the machine the profile describes. The later 32KB ROMs — `342-0033-A` (ROM 0), `341-0445-A` and `341-0445-B` (ROMs 3 and 4) — are bank-switched and carry different peripherals in slots 4 and 5, so they are a different machine and are not taken.
 
 Put them in `roms/` and rebuild. Without them the machine is still fully described and still listed in the menu, but is marked **unavailable** — a machine that could never reach a prompt is not offered rather than failing silently.
 

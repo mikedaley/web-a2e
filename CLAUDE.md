@@ -66,7 +66,7 @@ make -j$(sysctl -n hw.ncpu)
 ctest --verbose
 ```
 
-Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed), and full emulator integration.
+Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk images (DSK/WOZ/GCR), expansion cards (Disk II, Mockingboard, Thunderclock, Mouse, SmartPort, SSC), filesystems (DOS 3.3, ProDOS, Pascal), BASIC tokenizer/detokenizer, assembler, disassembler, keyboard, the Sirius Joyport, condition evaluator, machine profiles (each machine's numbers, the registry, that the subsystems take their timing from the profile they were handed, that the II+'s differences are real — an NMOS CPU, the //e's soft switches ignored, and colour burst left on in text mode — and that the //c is a //e in its numbers but has no expansion sockets, so every slot it decodes is fixed and every slot address reads its own ROM — each machine also booted to its prompt), and full emulator integration.
 
 ## Architecture
 
@@ -125,8 +125,8 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 
 The emulator models one machine at a time, and which machine it is comes from a
 **profile**: `src/core/machine/machine_profile.hpp` holds a `MachineProfile`
-per machine and a registry of them. There are two, `APPLE_IIE_PROFILE` and
-`APPLE_II_PLUS_PROFILE`.
+per machine and a registry of them. There are three, `APPLE_IIE_PROFILE`,
+`APPLE_II_PLUS_PROFILE` and `APPLE_IIC_PROFILE`.
 
 **The profile is data, not polymorphism.** The parts of a machine that differ
 between a //e, a II+ and a IIgs are overwhelmingly numbers — a clock rate, a
@@ -296,6 +296,39 @@ stays empty — "never configured" and "deliberately stripped" are different
 states. The single pre-machine key is read once as the //e's starting point,
 copied under the //e's own key, and then left alone; an orphan costs nothing,
 and losing somebody's layout to a mistake in that copy would cost more.
+
+#### The Apple //c
+
+A //e folded into a slab: the same 65C02, the same 128K, the same IOU and MMU,
+so every number in timing, memory and display is the //e's and almost every
+capability is too. What differs is the back of the machine.
+
+**It has no expansion sockets, but it decodes all seven slot addresses.** The
+firmware and everything written for a //e depend on those addresses, so each
+one answers to a part soldered to the board: two 6551 serial ports in slots 1
+and 2, the 80-column firmware in slot 3, the mouse in slot 4, and the disk port
+in slot 6. Every slot is therefore a *fixed* slot — the part of `MachineSlot` a
+//e exercises only in slot 3 — and `caps.hasExpansionSlots` is false, which is
+what stops the slot window offering a card to a machine that has nowhere to
+take one.
+
+**That capability is also a memory rule.** With no socket there is nowhere for
+a card's ROM to live, so the firmware for all of it is inside the 16KB system
+ROM and `$C100-$CFFF` reads the internal ROM whatever INTCXROM and SLOTC3ROM
+say: those switches choose between the internal ROM and a slot that does not
+exist. `MMU::read` and `MMU::peek` take that branch first, before the switches.
+Without it the region reads zeroes, the reset lands on a `BRK`, and the vector
+sends it to another one — a //c wedged at `$C803` before drawing anything.
+
+**Two smaller differences are modelled.** 4KB of character generator rather
+than 8KB, so there is no second set to ask for; and a disk that is not a Disk
+II — the drive hangs off an IWM at `$C0E0`, so slot 6 names `"iwm"` rather than
+the card a //e fits there.
+
+**What is not implemented is the IWM and the two 6551s.** A //c boots, draws
+its banner, and reaches Applesoft on Ctrl+Reset; its boot then looks for a
+drive nothing answers for. The mouse is the //e's mouse card, which is close
+but is not how a //c's is wired.
 
 #### Choosing a machine
 

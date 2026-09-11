@@ -529,6 +529,68 @@ TEST_CASE("Each machine boots to its own prompt", "[machine][boot]") {
         REQUIRE_FALSE(sw.ramrd);
         REQUIRE_FALSE(sw.altzp);
     }
+
+    SECTION("the //c reaches Applesoft through firmware in its own ROM") {
+        // Optional in the same way, and the machine that most needs the test:
+        // every byte between $C100 and $CFFF a //c executes comes from its
+        // system ROM rather than from a card, and its firmware runs there
+        // before it ever reaches the monitor.
+        if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+            WARN("//c ROMs not built in; skipping the boot test");
+            return;
+        }
+
+        Emulator e(MachineId::AppleIIc);
+        e.init();
+        REQUIRE(e.hasSystemROM());
+
+        // Before the reset it has drawn its own banner and is asking the drive
+        // it has no implementation for, which is as far as a //c can get.
+        runFrames(e, 120);
+        bool banner = false;
+        for (const auto &line : visibleLines(e)) {
+            if (line.find("Apple //c") != std::string::npos) banner = true;
+        }
+        REQUIRE(banner);
+
+        e.warmReset();
+        runFrames(e, 120);
+        REQUIRE(showsApplesoftPrompt(e));
+    }
+}
+
+TEST_CASE("A machine with no sockets answers slot addresses from its own ROM",
+          "[machine][mmu]") {
+    // $C100-$CFFF is where a //e chooses between its internal ROM and the card
+    // in a slot, and INTCXROM starts off, so a //e with an empty slot reads the
+    // floating bus there. A //c has the same address decoding and no sockets
+    // behind it: the firmware for its serial ports, its mouse and its drive is
+    // part of the system ROM, so the internal ROM answers whatever the switch
+    // says. Without this the machine reads zeroes across the whole region and
+    // its reset lands on a BRK that vectors to another one.
+    if (!Emulator::isMachineRunnable(MachineId::AppleIIc)) {
+        WARN("//c ROMs not built in; skipping the internal ROM test");
+        return;
+    }
+
+    Emulator iic(MachineId::AppleIIc);
+    iic.init();
+    auto &mmu = iic.getMMU();
+    REQUIRE_FALSE(mmu.getSoftSwitches().intcxrom);
+
+    const uint8_t *rom = mmu.getSystemROM();
+    for (uint16_t address : {0xC100, 0xC300, 0xC600, 0xC800, 0xCF00}) {
+        INFO("address " << std::hex << address);
+        REQUIRE(mmu.read(address) == rom[address - 0xC000]);
+        REQUIRE(mmu.peek(address) == rom[address - 0xC000]);
+    }
+
+    SECTION("and turning INTCXROM on changes nothing, because it cannot") {
+        mmu.read(0xC100);
+        const uint8_t withSwitchOff = mmu.read(0xC600);
+        mmu.write(0xC007, 0); // INTCXROM on
+        REQUIRE(mmu.read(0xC600) == withSwitchOff);
+    }
 }
 
 TEST_CASE("Character ROMs are normalised to one layout", "[machine][video]") {
