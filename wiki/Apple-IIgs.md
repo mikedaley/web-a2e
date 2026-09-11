@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, reads both its drives, and you can say how much memory it has.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots, reads both its drives, and gets as far as the GS/OS startup screen.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -129,17 +129,49 @@ rather than an error. The empty banks above what is fitted must *not* answer —
 the firmware sizes memory by writing to a bank and reading it back, so a machine
 whose unpopulated banks answered would report memory it has not got.
 
-**GS/OS still does not run, and it is not the RAM.** System 6.0.4 stops with
-*Error allocating memory for GS/OS. Error =$0201* — Memory Manager error 1,
-"unable to allocate" — and it stops in exactly the same place with 256K, 1M, 2M
-and 4M fitted. The firmware's own sizing is right: the byte at `$E1:1624` that
-counts the machine's banks goes from `$04` to `$10` when 1M is fitted, and
-`$E1:03CA`, `$E1:177A` and their neighbours follow it. What fails is the tool
-call — `NewHandle` ($0902), after the loader has asked `FreeMem` and `MaxBlock`
-about a dozen times. So the Memory Manager knows how many banks exist and still
-refuses; somewhere the memory model is not giving that firmware what it expects.
-That is the next thing to chase, and it is a separate piece of work from
-fitting the RAM.
+**GS/OS gets to its startup screen.** System 6.0.4 turns Super Hi-Res on and
+draws *Welcome to the IIgs — System 6.0.4* in the box with the progress bar. It
+does not finish booting; where it stops is written down below.
+
+Two memory-map bugs stood in the way, and both were the same mistake a bank
+apart: **a bank names which half of the language card it reaches, and this asked
+ALTZP instead.**
+
+The Mega II's 128K is banks `$E0` (main) and `$E1` (auxiliary), and banks `$00`
+and `$01` carry the same language card at `$D000-$FFFF`, a half each. A //e has
+only ALTZP to ask with, because a //e has no bank to name — so the //e's own
+read path takes ALTZP, and using it for a IIgs makes each pair one 48K instead
+of two. `IIgsMemory::languageCardAux` is the rule in one place: bank `$01` and
+bank `$E1` are the auxiliary half whatever the switches say, and ALTZP still
+moves bank `$00` across, because //e software on the fast side has to behave as
+it would on a //e.
+
+What each looked like is worth knowing, because neither looked like a memory map:
+
+- **`$E0`/`$E1`** presented as a *memory* fault. System 6 stopped at *Error
+  allocating memory for GS/OS. Error =$0201* — Memory Manager error 1 — with the
+  same message at 256K, 1M, 2M and 4M, and with the firmware's own bank count
+  correctly following the RAM (`$E1:1624` goes `$04` → `$10` at 1M). The Memory
+  Manager was not miscounting memory. Its tables live in `$E1`'s language card,
+  and bank `$E0` had been writing over them.
+- **`$00`/`$01`** presented as a *video* fault: a screen of repeating green and
+  lavender, which is the Mega II's hi-res page showing what was never written to
+  it. GS/OS runs code out of `$01:D000` upward; it got bank `$00`'s card, which
+  held data — four `CMP (dp,S),Y` in a row at `$01:D06F` — and walked up through
+  bank `$00` executing whatever it found until it ran off `$00:FFFF` and fell to
+  `$00:0000`, where every vector was zero and it sat in a BRK storm.
+
+**Where it stops now**, so that whoever picks this up does not re-derive it. At
+about 2.54 million instructions, `$00:AE15` executes an `RTS` to `$0000`. The
+address it returns through was pushed at `$00:AE02` from direct page `$28` — the
+machine is running on GS/OS's direct page at `$00:9900` — and that word is zero.
+It is zero legitimately: `$01:B9A5` calls `$01:D06F`, which allocates the direct
+page through the Tool Locator (490 instructions, returning `A=$9900`, carry
+clear — a success), and the caller then clears all 256 bytes of it at `$01:B9AF`.
+Nothing writes `$28` between that clear and the `RTS` twenty thousand
+instructions later. So the question to answer next is what was supposed to fill
+it, and it is **not** a question about how much RAM is fitted: the run is
+identical at 1M, 4M and 8M.
 
 ## The SmartPort
 

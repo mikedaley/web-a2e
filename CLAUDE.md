@@ -258,13 +258,22 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
+**A bank names which half of the language card it reaches**, and asking ALTZP
+instead is how `$E0`/`$E1` and `$00`/`$01` each became one 48K rather than two.
+`IIgsMemory::languageCardAux` is that rule; `MMU::readLanguageCardRAM`/
+`writeLanguageCardRAM` take the half as an argument, and the //e's own
+`readLanguageCard`/`writeLanguageCard` are those with ALTZP passed in, so
+nothing about a //e changes. Both bugs presented as something else entirely —
+see `wiki/Apple-IIgs.md`.
+
 **How much fast RAM a IIgs has is a user choice**, from 256K to 8M, in the
 Machine menu and remembered in localStorage. `_setIIgsMemoryKB` rebuilds the
 machine, as switching machines does, and `main.js` applies the remembered size
 *before* the machine is built rather than after. `clampFastRamSize` rounds to
 whole 64K banks; banks above what is fitted must not answer, because the
-firmware sizes memory by writing to one and reading it back. GS/OS does not yet
-run whatever the size — see `wiki/Apple-IIgs.md` for how far that is understood.
+firmware sizes memory by writing to one and reading it back. GS/OS reaches its startup screen but
+does not finish booting, and the run is identical at 1M, 4M and 8M — see
+`wiki/Apple-IIgs.md` for exactly where it stops.
 
 **Slot 5 is the IIgs's SmartPort, and it is part of the machine** — no card to
 fit, no Control Panel setting. `IIgsMemory::setInternalCardSlot` names the slot
