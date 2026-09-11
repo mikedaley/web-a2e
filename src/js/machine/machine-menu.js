@@ -68,6 +68,36 @@ function machineArt({ appleKeys, keyRows, deckTop, driveSlot = false }) {
     </svg>`;
 }
 
+/*
+ * A IIgs is not the same shape as the others and cannot be drawn by adding
+ * details to their silhouette: the case is a flat slab with the monitor
+ * standing on it and the keyboard a separate thing in front, which is the
+ * outline of a machine you would recognise across a room as not being a //e.
+ */
+function iigsArt() {
+  return `
+    <svg viewBox="0 0 160 116" fill="none" aria-hidden="true">
+      <rect x="36" y="2" width="88" height="62" rx="5"
+            stroke="currentColor" stroke-width="2"/>
+      <rect x="44" y="9" width="72" height="44" rx="3"
+            class="machine-art-screen" stroke="currentColor" stroke-width="1"/>
+      <text x="50" y="30" class="machine-art-prompt"
+            font-family="ui-monospace, monospace" font-size="13">]</text>
+      <path d="M22 70 H138 L142 88 H18 Z" stroke="currentColor" stroke-width="2"
+            stroke-linejoin="round"/>
+      <path d="M120 76 h12" stroke="currentColor" stroke-width="1.5"
+            opacity="0.7"/>
+      <path d="M120 82 h12" stroke="currentColor" stroke-width="1.5"
+            opacity="0.7"/>
+      <rect x="30" y="94" width="100" height="18" rx="2"
+            stroke="currentColor" stroke-width="2"/>
+      <g stroke="currentColor" stroke-width="1" opacity="0.7">
+        <path d="M36 100 H124"/>
+        <path d="M36 105 H124"/>
+      </g>
+    </svg>`;
+}
+
 const MACHINE_ART = {
   apple2e: machineArt({ appleKeys: true, keyRows: 3, deckTop: 82 }),
   apple2plus: machineArt({ appleKeys: false, keyRows: 2, deckTop: 86 }),
@@ -77,6 +107,7 @@ const MACHINE_ART = {
     deckTop: 84,
     driveSlot: true,
   }),
+  apple2gs: iigsArt(),
 };
 
 /** Bytes as the machine's own marketing would have said it. */

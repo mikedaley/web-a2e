@@ -1,0 +1,113 @@
+/*
+ * iigs_spec.hpp - The numbers that belong to a IIgs and to nothing else
+ *
+ * Written by
+ *  Mike Daley <michael_daley@icloud.com>
+ */
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+namespace a2e::iigs {
+
+// ============================================================================
+// Why these are not in MachineProfile
+//
+// MachineProfile is the vocabulary every machine here shares: a clock, a
+// scanline count, how much RAM answers, which slots exist. A IIgs has all of
+// those and they are in its profile.
+//
+// What is below has no meaning for a //e, a II+ or a //c. There is no 8-bit
+// Apple II with a second clock rate, a bank of RAM the CPU reaches only through
+// a 24-bit address, a shadowing map, a 4096-colour palette or 64KB of sound
+// RAM. Putting them in the shared struct would be putting a IIgs's parts in
+// every other machine's description and then explaining, in each of them, that
+// the numbers do not apply — which is the kind of thing that rots.
+//
+// So the split is: what the machines have in common is described in common,
+// and what only a IIgs has is described here, next to the code that reads it.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// The two sides of the machine
+//
+// A IIgs is two computers sharing an address space. The FPI (Fast Processor
+// Interface) side is the 65816 and its fast RAM and ROM, running at 2.8MHz.
+// The Mega II side is an entire //e — the same video generator, the same soft
+// switches, the same 128KB — running at 1.023MHz in banks $E0 and $E1.
+//
+// Every access the 65816 makes to the slow side runs at the slow clock, which
+// is why a IIgs is not simply "a //e at 2.8MHz": the speed a program gets
+// depends on where it is reading.
+// ----------------------------------------------------------------------------
+inline constexpr double FAST_CLOCK_HZ = 2800000.0;
+inline constexpr double SLOW_CLOCK_HZ = 1023000.0;
+
+// ----------------------------------------------------------------------------
+// Memory
+//
+// Banks $00-$7F are RAM: 256KB on a ROM 01 motherboard, up to 8MB with a card
+// in the memory expansion slot. Banks $E0 and $E1 are the Mega II's 128KB, and
+// are the ones the //e-mode video reads. Banks $F0-$FF are ROM: 128KB on ROM
+// 01 (banks $FE-$FF), 256KB on ROM 3 (banks $FC-$FF).
+//
+// Shadowing is what keeps the two sides in step: writes to the display pages of
+// banks $00 and $01 are copied into $E0 and $E1, so a program can run in fast
+// RAM and still be seen by a video generator that only ever looks at the slow
+// side. Which pages are shadowed is a register ($C035), not a constant.
+// ----------------------------------------------------------------------------
+inline constexpr size_t BANK_SIZE = 64 * 1024;
+
+inline constexpr size_t FAST_RAM_SIZE_ROM01 = 256 * 1024; // What a ROM 01 shipped with
+inline constexpr size_t FAST_RAM_SIZE_MAX = 8 * 1024 * 1024;
+inline constexpr size_t SLOW_RAM_SIZE = 128 * 1024; // Banks $E0-$E1: the Mega II's
+
+inline constexpr uint8_t SLOW_BANK_MAIN = 0xE0;
+inline constexpr uint8_t SLOW_BANK_AUX = 0xE1;
+
+inline constexpr size_t ROM_SIZE_ROM01 = 128 * 1024; // Banks $FE-$FF
+inline constexpr size_t ROM_SIZE_ROM3 = 256 * 1024;  // Banks $FC-$FF
+inline constexpr uint8_t ROM_TOP_BANK = 0xFF;
+
+// ----------------------------------------------------------------------------
+// Super Hi-Res
+//
+// A second video system, reading bank $E1 from $2000 to $9FFF: 32KB of pixels
+// followed by a scanline control byte and sixteen palettes for each of the 200
+// lines. Every line chooses its own mode and palette, which is why a IIgs
+// screen can be 320 and 640 pixels wide at the same time.
+// ----------------------------------------------------------------------------
+inline constexpr uint16_t SHR_PIXEL_BASE = 0x2000;   // In bank $E1
+inline constexpr uint16_t SHR_SCB_BASE = 0x9D00;     // One control byte a line
+inline constexpr uint16_t SHR_PALETTE_BASE = 0x9E00; // 16 palettes of 16 colours
+inline constexpr int SHR_LINES = 200;
+inline constexpr int SHR_BYTES_PER_LINE = 160; // 320 pixels at 4bpp, or 640 at 2bpp
+inline constexpr int SHR_PALETTE_COUNT = 16;
+inline constexpr int SHR_PALETTE_ENTRIES = 16;
+
+// A palette entry is $0RGB: four bits each, so 4096 colours to choose from.
+inline constexpr int SHR_COLOUR_DEPTH_BITS = 4;
+
+// ----------------------------------------------------------------------------
+// Sound
+//
+// An Ensoniq 5503 DOC with 32 oscillators and its own 64KB of RAM, which the
+// CPU reaches only a byte at a time through a window at $C03C-$C03F. Nothing
+// else in the Apple II line has anything like it: the //e's speaker is one bit
+// and a Mockingboard is a pair of AY-3-8910s on a card.
+// ----------------------------------------------------------------------------
+inline constexpr size_t SOUND_RAM_SIZE = 64 * 1024;
+inline constexpr int DOC_OSCILLATOR_COUNT = 32;
+
+// ----------------------------------------------------------------------------
+// Battery RAM
+//
+// 256 bytes of settings kept alive by the battery: the slot assignments, the
+// display and speed the machine comes up in, the printer's port. Read and
+// written through the clock chip's serial interface, one bit at a time.
+// ----------------------------------------------------------------------------
+inline constexpr size_t BATTERY_RAM_SIZE = 256;
+
+} // namespace a2e::iigs

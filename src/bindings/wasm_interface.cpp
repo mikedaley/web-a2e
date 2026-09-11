@@ -146,8 +146,18 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += ",\"name\":\"" + std::string(m.name) + "\"";
   json += ",\"shortName\":\"" + std::string(m.shortName) + "\"";
   json += ",\"logotype\":\"" + std::string(m.logotype) + "\"";
-  json += ",\"cpu\":\"" +
-          std::string(m.cpu == a2e::CPUVariant::CMOS_65C02 ? "65C02" : "6502") +
+  const char *cpuName = "6502";
+  switch (m.cpu) {
+  case a2e::CPUVariant::CMOS_65C02: cpuName = "65C02"; break;
+  case a2e::CPUVariant::CMOS_65C816: cpuName = "65C816"; break;
+  case a2e::CPUVariant::NMOS_6502: break;
+  }
+  json += ",\"cpu\":\"" + std::string(cpuName) + "\"";
+  // Which set of parts the machine is built from, so the host can say why one
+  // it cannot run is listed at all.
+  json += ",\"family\":\"" +
+          std::string(m.family == a2e::MachineFamily::AppleIIgs ? "apple2gs"
+                                                                : "apple2")  +
           "\"";
 
   json += ",\"timing\":{";

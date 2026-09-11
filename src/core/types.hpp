@@ -18,7 +18,11 @@ namespace a2e {
 //
 // Lives here rather than in cpu6502.hpp so a machine profile can name the CPU a
 // machine is fitted with without dragging in the whole processor header.
-enum class CPUVariant { NMOS_6502, CMOS_65C02 };
+// The processor a machine is fitted with. CPU6502 models the first two and
+// compares against CMOS_65C02 directly, so a value added here behaves as an
+// NMOS 6502 in that core — which is correct only because a machine fitted with
+// a 65816 is built from a different CPU class entirely (see cpu/65816/).
+enum class CPUVariant { NMOS_6502, CMOS_65C02, CMOS_65C816 };
 
 // ============================================================================
 // Apple //e machine constants

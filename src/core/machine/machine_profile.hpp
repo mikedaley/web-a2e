@@ -41,9 +41,36 @@ enum class MachineId : uint8_t {
   AppleIIe = 0,
   AppleIIPlus = 1,
   AppleIIc = 2,
+  AppleIIgs = 3,
 };
 
-inline constexpr int MACHINE_COUNT = 3;
+inline constexpr int MACHINE_COUNT = 4;
+
+// ----------------------------------------------------------------------------
+// Which set of parts a machine is built from
+//
+// The three 8-bit machines are one design: a 6502-family CPU on a 64KB bus, a
+// Mega II-shaped video generator, the same 128KB of RAM at most, and the same
+// MMU, Video and Audio classes reading a profile to tell them apart. The
+// profile is enough to describe all of them because the differences really are
+// numbers.
+//
+// A IIgs is not that machine. Its CPU has a 24-bit bus and 16-bit registers,
+// its memory controller shadows banks into the Mega II side, its video has a
+// second display system with its own palettes, and its sound is a 32-oscillator
+// synthesiser with its own RAM. None of that is a number: it is a different
+// mechanism, and it gets different classes — which is exactly what the rule at
+// the top of this file has always said would happen.
+//
+// The family is what selects them, once, at construction. It is also what the
+// validation below asks before applying a rule that is only true of one family,
+// so a machine is never checked against invariants that belong to a design it
+// is not built to.
+// ----------------------------------------------------------------------------
+enum class MachineFamily : uint8_t {
+  AppleII,   // //e, II+, //c — MMU, Video, Audio and a CPU6502
+  AppleIIgs, // 65816, FPI/Mega II, Super Hi-Res, Ensoniq (see core/iigs/)
+};
 
 // ----------------------------------------------------------------------------
 // Timing
@@ -196,6 +223,10 @@ struct MachineProfile {
   // as "//+", which is not a designation Apple ever used.
   const char *logotype;
 
+  // Which set of parts the machine is built from, and the first thing the
+  // Emulator asks: a family is chosen once, at construction.
+  MachineFamily family;
+
   CPUVariant cpu;
   MachineTiming timing;
   MachineMemory memory;
@@ -225,6 +256,7 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
     "Apple //e Enhanced",
     "//e",
     "//e",
+    MachineFamily::AppleII,
     CPUVariant::CMOS_65C02,
     // timing
     {
@@ -312,6 +344,7 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
     "Apple II Plus",
     "II+",
     "][+",
+    MachineFamily::AppleII,
     CPUVariant::NMOS_6502,
     // timing — the same video circuit, so the same numbers as a //e
     {
@@ -419,6 +452,7 @@ inline constexpr MachineProfile APPLE_IIC_PROFILE = {
     "Apple //c",
     "//c",
     "//c",
+    MachineFamily::AppleII,
     CPUVariant::CMOS_65C02,
     // timing — the //e's custom chips, so the //e's numbers
     {
@@ -481,12 +515,110 @@ inline constexpr MachineProfile APPLE_IIC_PROFILE = {
 };
 
 // ============================================================================
+// The Apple IIgs
+//
+// The first machine here that is not the same computer as the others. A //e, a
+// II+ and a //c are one design with different parts fitted; a IIgs is a 65816
+// with a 24-bit bus, a memory controller that shadows banks into the Mega II
+// side, a second display system with its own palettes, and a 32-oscillator
+// synthesiser. None of that is a number, so none of it is here: what this
+// profile carries is the vocabulary every machine shares, and the IIgs's own
+// numbers live with the IIgs's own code in core/iigs/iigs_spec.hpp.
+//
+// What *is* shared is real, though, and is why the timing below is a //e's. A
+// IIgs contains a Mega II, and the Mega II is the //e: the same 65 cycles a
+// scanline, the same 262 lines, the same 40 columns of one byte, the same text
+// and lo-res and hi-res drawn the same way. Super Hi-Res is a second video
+// system running alongside it, which is why the display section describes 640
+// dots while the timing describes a 40-column machine — the one place a
+// machine here needs two answers to the same question.
+//
+// NOT RUNNABLE YET. The profile describes the machine so that the registry,
+// the menu and the tests can talk about it; the parts it names do not exist.
+// Emulator::isMachineRunnable says so, whatever ROMs are present.
+// ============================================================================
+inline constexpr MachineProfile APPLE_IIGS_PROFILE = {
+    MachineId::AppleIIgs,
+    "apple2gs",
+    "Apple IIgs",
+    "IIgs",
+    "IIGS",
+
+    MachineFamily::AppleIIgs,
+    CPUVariant::CMOS_65C816,
+    // timing — the Mega II's, which is to say the //e's. The 65816 runs at
+    // 2.8MHz, but only where it is not talking to the Mega II; the slow side is
+    // still 1.023MHz and that is what the video counts in. iigs_spec.hpp holds
+    // the fast clock, because which of the two applies is a IIgs question.
+    {
+        1023000.0, // cpuClockHz — the slow side, which the video is counted in
+        65,        // cyclesPerScanline
+        25,        // hblankCycles
+        40,        // visibleColumns
+        262,       // scanlinesPerFrame
+        192,       // visibleScanlines — the Mega II's picture
+        160,       // mixedModeTextScanline
+    },
+    // memory — the Mega II side only: banks $E0 and $E1, which are the //e's
+    // main and auxiliary RAM and are what the //e-mode video reads. Everything
+    // else a IIgs has — fast RAM, its expansion, the 128KB or 256KB of ROM —
+    // is in iigs_spec.hpp, because no other machine has anything like it.
+    {
+        64 * 1024,  // mainRamSize — bank $E0
+        64 * 1024,  // auxRamSize — bank $E1
+        64 * 1024,  // romSize — the part of ROM that answers in a 16-bit space
+        0x0000,     // romBaseAddress — a IIgs's ROM is banked, not based
+        4 * 1024,   // charRomSize
+        {false, 0}, // charRom: as a //e's
+        4 * 1024,   // lcBankSize
+        8 * 1024,   // lcHighSize
+    },
+    // display — Super Hi-Res: 640 dots across, 200 lines, doubled to 400.
+    {
+        640, // dotsPerLine
+        640, // pixelWidth
+        400, // pixelHeight
+        2,   // lineDoubling
+    },
+    // caps
+    {
+        true,  // hasAuxRam
+        true,  // has80Column
+        true,  // hasDoubleHires
+        true,  // hasLanguageCard
+        true,  // hasAltCharSet
+        false, // hasUkCharSet
+        true,  // hasLowercase
+        true,  // hasOpenAppleKeys
+        true,  // hasIOUDisable
+        true,  // hasInternalSlotRom
+        true,  // hasExpansionSlots — seven, and each can be a card or the port
+        true,  // inhibitsBurstInText
+    },
+    1, // firstSlot
+    7, // lastSlot
+    // Every slot is switchable in the Control Panel between the card in it and
+    // the port built into the back, which is a third state no other machine
+    // here has and is not modelled yet. Described as empty sockets until it is.
+    {{
+        {nullptr, nullptr}, // 0
+        {nullptr, nullptr}, // 1
+        {nullptr, nullptr}, // 2
+        {nullptr, nullptr}, // 3
+        {nullptr, nullptr}, // 4
+        {nullptr, nullptr}, // 5
+        {nullptr, nullptr}, // 6
+        {nullptr, nullptr}, // 7
+    }},
+};
+
+// ============================================================================
 // Registry
 // ============================================================================
 // Ordered by MachineId, which machineProfile() relies on and a test pins.
 inline constexpr std::array<const MachineProfile *, MACHINE_COUNT>
     MACHINE_PROFILES = {{&APPLE_IIE_PROFILE, &APPLE_II_PLUS_PROFILE,
-                         &APPLE_IIC_PROFILE}};
+                         &APPLE_IIC_PROFILE, &APPLE_IIGS_PROFILE}};
 
 constexpr const MachineProfile &defaultMachineProfile() {
   return APPLE_IIE_PROFILE;
@@ -531,14 +663,21 @@ constexpr const MachineProfile *findMachineProfile(const char *key) {
 // types.hpp from drifting apart, since the latter size arrays at compile time
 // and so cannot simply become profile lookups: change one and the build fails.
 //
-// The second matters more now there is a second machine. Those same arrays are
-// sized for the //e, which makes them the ceiling for *every* profile — a
-// machine claiming more RAM or a bigger picture than the compiled storage would
-// run off the end of it. So every registered profile is checked against the
-// ceiling, and against its own internal consistency, at compile time.
+// The second matters more now there is more than one machine. Those same arrays
+// are sized for the //e, which makes them the ceiling for every profile built
+// from those subsystems — a machine claiming more RAM or a bigger picture than
+// the compiled storage would run off the end of it. So every registered profile
+// is checked against the ceiling, and against its own internal consistency, at
+// compile time.
+//
+// Both of those are Apple II family rules, and are asked only of that family. A
+// IIgs does not use MMU's arrays or Video's framebuffer — it brings its own,
+// sized by its own code — and it is not a 40-column machine whose columns clock
+// out 14 dots each. Checking it against either would be asserting something
+// that was never true of it, so the rules that belong to one design say so.
 // ============================================================================
 
-// Every profile must fit the storage the build actually allocates.
+// Every Apple II family profile must fit the storage the build allocates.
 constexpr bool profileFitsCompiledStorage(const MachineProfile &m) {
   return m.memory.mainRamSize <= MAIN_RAM_SIZE &&
          m.memory.auxRamSize <= AUX_RAM_SIZE &&
@@ -549,16 +688,27 @@ constexpr bool profileFitsCompiledStorage(const MachineProfile &m) {
 
 // ...and must describe a machine that could exist.
 constexpr bool profileIsSelfConsistent(const MachineProfile &m) {
-  // A scanline is its blanking plus one cycle per visible column.
+  // A scanline is its blanking plus one cycle per visible column. True of a
+  // IIgs too: its Mega II is the same video generator.
   if (m.timing.hblankCycles + m.timing.visibleColumns !=
       m.timing.cyclesPerScanline)
     return false;
-  // Each visible column clocks out 14 dots of the colour subcarrier stream.
-  if (m.timing.visibleColumns * 14 != m.display.dotsPerLine) return false;
-  // The framebuffer holds every visible scanline, doubled.
-  if (m.timing.visibleScanlines * m.display.lineDoubling !=
-      m.display.pixelHeight)
-    return false;
+  if (m.family == MachineFamily::AppleII) {
+    // Each visible column clocks out 14 dots of the colour subcarrier stream,
+    // and the framebuffer is every visible scanline doubled. Neither holds on a
+    // IIgs, where the picture is Super Hi-Res — 640 dots over 200 lines — and
+    // the 40-column modes are drawn into a corner of it.
+    if (m.timing.visibleColumns * 14 != m.display.dotsPerLine) return false;
+    if (m.timing.visibleScanlines * m.display.lineDoubling !=
+        m.display.pixelHeight)
+      return false;
+    // The ROM has to end at the top of the 16-bit address space. A IIgs's is
+    // banked and does not live in one.
+    if (m.memory.romBaseAddress + m.memory.romSize != 0x10000) return false;
+  }
+  // Whatever the family, the picture must be the dots it says it draws.
+  if (m.display.pixelWidth != m.display.dotsPerLine) return false;
+  if (m.display.lineDoubling < 1) return false;
   // Mixed mode's text band is the tail of the visible area.
   if (m.timing.mixedModeTextScanline >= m.timing.visibleScanlines) return false;
   // A machine with no auxiliary bank must not claim auxiliary RAM, and one
@@ -566,8 +716,6 @@ constexpr bool profileIsSelfConsistent(const MachineProfile &m) {
   if (m.caps.hasAuxRam != (m.memory.auxRamSize > 0)) return false;
   // Double hi-res is an 80-column mode; it cannot exist without one.
   if (m.caps.hasDoubleHires && !m.caps.has80Column) return false;
-  // The ROM has to end at the top of the 16-bit address space.
-  if (m.memory.romBaseAddress + m.memory.romSize != 0x10000) return false;
   // Slot numbers must be real and in order.
   if (m.firstSlot < 0 || m.lastSlot >= MACHINE_SLOT_COUNT) return false;
   if (m.firstSlot > m.lastSlot) return false;
@@ -592,7 +740,10 @@ constexpr bool allProfilesValid() {
     const auto &m = *MACHINE_PROFILES[i];
     // The registry is ordered by id, which machineProfile() indexes directly.
     if (static_cast<int>(m.id) != i) return false;
-    if (!profileFitsCompiledStorage(m)) return false;
+    // The compiled arrays are the Apple II subsystems'. A machine built from
+    // its own is checked against its own, in its own header.
+    if (m.family == MachineFamily::AppleII && !profileFitsCompiledStorage(m))
+      return false;
     if (!profileIsSelfConsistent(m)) return false;
   }
   return true;

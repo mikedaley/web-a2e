@@ -2,7 +2,7 @@
 
 The emulator models one machine at a time, and the badge in the header names it. Click the badge to choose a different one.
 
-There are three: the **Apple //e**, the **Apple II Plus** and the **Apple //c**.
+There are three you can run — the **Apple //e**, the **Apple II Plus** and the **Apple //c** — and a fourth being built, the **Apple IIgs**.
 
 ---
 
@@ -12,6 +12,7 @@ There are three: the **Apple //e**, the **Apple II Plus** and the **Apple //c**.
 - [Apple //e](#apple-e)
 - [Apple II Plus](#apple-ii-plus)
 - [Apple //c](#apple-c)
+- [Apple IIgs](#apple-iigs)
 - [What Survives a Switch](#what-survives-a-switch)
 - [ROMs](#roms)
 - [How It Works](#how-it-works)
@@ -133,6 +134,16 @@ A //e's mouse is a card in a slot: a PIA, a ROM, and a command protocol the firm
 There is no counter in the hardware. Every unit of travel is an interrupt, and the firmware in the system ROM reads the direction and adds one to a position it keeps in slot 4's screen holes; the button is sampled in the same handler's vertical-blanking path. Slot 4 names "mouse" in the slot window for that firmware's sake, but there is nothing in a socket and nothing to remove.
 
 Mouse-driven software — MousePaint, AppleWorks' mouse support — therefore works on a //c with no card installed, and the mouse is captured in the browser exactly as it is on a //e (see [[Input-Devices]]).
+
+## Apple IIgs
+
+The 1986 machine that took the Apple II 16-bit: a 65C816, megabytes of RAM, 4096 colours and a synthesiser. **Not runnable** — it is described and listed, and the menu marks it unavailable.
+
+It is the first machine here that is not the same computer as the others. A //e, a II Plus and a //c differ by numbers, which is what a machine profile is for; a IIgs differs by mechanism — a 24-bit bus, a shadowing memory map, a second display system, an Ensoniq — and those get their own classes in their own directory rather than flags in everyone else's.
+
+What it *does* share is real: a IIgs contains a Mega II, and a Mega II is a //e. Its video timing is the //e's to the cycle, which is why its profile carries those numbers and why it runs //e software at all.
+
+See [[Apple-IIgs]] for what is built, what is not, and the order the rest arrives in.
 
 ## What Survives a Switch
 

@@ -169,6 +169,10 @@ SystemRoms romsFor(MachineId machine) {
   case MachineId::AppleIIc:
     return {roms::ROM_SYSTEM_IIC, roms::ROM_SYSTEM_IIC_SIZE,
             roms::ROM_CHAR_IIC, roms::ROM_CHAR_IIC_SIZE};
+  case MachineId::AppleIIgs:
+    // Its character generator is inside the system ROM rather than in a part
+    // of its own, so there is no second image to hand over.
+    return {roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, nullptr, 0};
   case MachineId::AppleIIe:
     break;
   }
@@ -179,6 +183,15 @@ SystemRoms romsFor(MachineId machine) {
 } // namespace
 
 bool Emulator::isMachineRunnable(MachineId machine) {
+  // A machine this class cannot build is not runnable however complete its
+  // description is. Emulator is the Apple II family's coordinator — an MMU, a
+  // Video, an Audio and a CPU6502 — and a IIgs is a 65816 on a 24-bit bus with
+  // its own memory controller, its own second display system and its own
+  // sound. Those parts are being written (see core/iigs/); until they are here
+  // the machine is described, listed, and honestly marked unavailable rather
+  // than started as something it is not.
+  if (machineProfile(machine).family != MachineFamily::AppleII) return false;
+
   // A machine's ROM has to actually fill the space its profile claims. A short
   // image would leave the reset vector reading whatever the array was
   // initialised to, which looks like a running machine that immediately goes

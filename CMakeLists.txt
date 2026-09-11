@@ -498,6 +498,7 @@ else()
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/core/cpu/6502
         ${CMAKE_SOURCE_DIR}/src/core/machine
+        ${CMAKE_SOURCE_DIR}/src/core/iigs
         ${CMAKE_SOURCE_DIR}/src/core/mmu
         ${CMAKE_SOURCE_DIR}/src/core/video
         ${CMAKE_SOURCE_DIR}/src/core/audio

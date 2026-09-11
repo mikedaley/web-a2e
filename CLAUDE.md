@@ -85,6 +85,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
+- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's: `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM). Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -149,8 +150,21 @@ edge; what it cannot do is re-interrupt a handler that ignored it.
 
 The emulator models one machine at a time, and which machine it is comes from a
 **profile**: `src/core/machine/machine_profile.hpp` holds a `MachineProfile`
-per machine and a registry of them. There are three, `APPLE_IIE_PROFILE`,
-`APPLE_II_PLUS_PROFILE` and `APPLE_IIC_PROFILE`.
+per machine and a registry of them. There are four: `APPLE_IIE_PROFILE`,
+`APPLE_II_PLUS_PROFILE`, `APPLE_IIC_PROFILE` and `APPLE_IIGS_PROFILE`.
+
+**A profile also says which family it belongs to, and that is what selects the
+parts.** `MachineFamily::AppleII` is the three 8-bit machines: one design, built
+from `MMU`, `Video`, `Audio` and `CPU6502`, differing only by the numbers in
+their profiles. `MachineFamily::AppleIIgs` is a different computer — a 65816 on
+a 24-bit bus, a memory controller that shadows banks, a second display system,
+an Ensoniq — and it is built from its own classes in `core/iigs/`. The family is
+chosen once, at construction, and is also what the compile-time validation asks
+before applying a rule that only holds for one design: a IIgs is not measured
+against the //e-sized arrays it does not use, or against "a visible column
+clocks out 14 dots" when its picture is 640 dots wide. See `wiki/Apple-IIgs.md`
+for the plan; `Emulator::isMachineRunnable` returns false for the whole family
+until its parts exist, whatever ROMs are in the build.
 
 **The profile is data, not polymorphism.** The parts of a machine that differ
 between a //e, a II+ and a IIgs are overwhelmingly numbers — a clock rate, a

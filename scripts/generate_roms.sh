@@ -112,6 +112,27 @@ if [ -f "$ROM_DIR/342-0265-A.bin" ]; then
 else
     generate_array "$ROM_DIR/341-0265-A.bin" "ROM_CHAR_IIC"
 fi
+# Apple IIgs. Optional in the same way, and the machine cannot start whether
+# they are here or not until the parts it names exist.
+#
+# A ROM 01 carries one 128KB image in banks $FE-$FF. A ROM 3 carries 256KB in
+# banks $FC-$FF, split across two chips: 341-0728 holds $FC-$FD and 341-0748 or
+# 341-0749 holds $FE-$FF, concatenated in bank order. A single pre-combined
+# apple2gs.rom is accepted for either.
+if [ -f "$ROM_DIR/341-0728.bin" ] && \
+   { [ -f "$ROM_DIR/341-0749.bin" ] || [ -f "$ROM_DIR/341-0748.bin" ]; }; then
+    gs_high="$ROM_DIR/341-0749.bin"
+    [ -f "$gs_high" ] || gs_high="$ROM_DIR/341-0748.bin"
+    combined="$ROM_DIR/.iigs-combined.tmp"
+    cat "$ROM_DIR/341-0728.bin" "$gs_high" > "$combined"
+    generate_array "$combined" "ROM_SYSTEM_IIGS"
+    rm -f "$combined"
+elif [ -f "$ROM_DIR/342-0077-B.bin" ]; then
+    generate_array "$ROM_DIR/342-0077-B.bin" "ROM_SYSTEM_IIGS"
+else
+    generate_array "$ROM_DIR/apple2gs.rom" "ROM_SYSTEM_IIGS"
+fi
+
 generate_array "$ROM_DIR/341-0027.bin" "ROM_DISK2"
 generate_array "$ROM_DIR/Thunderclock Plus ROM.bin" "ROM_THUNDERCLOCK"
 generate_array "$ROM_DIR/Apple Mouse Interface Card ROM - 342-0270-C.bin" "ROM_MOUSE"
