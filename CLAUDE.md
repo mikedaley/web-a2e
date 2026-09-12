@@ -86,7 +86,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
-- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers; `iigs_video.*` is Super Hi-Res and the `$C029` switch between the machine's two video systems; `iigs_adb.*` is the keyboard and mouse controller; `iigs_clock.*` is the battery-backed clock and the 256 bytes of settings beside it; `iigs_sound.*` is the Ensoniq's RAM and the window onto it; `iigs_machine.*` is the coordinator, as `Emulator` is for the 8-bit machines. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
+- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers; `iigs_video.*` is Super Hi-Res and the `$C029` switch between the machine's two video systems; `iigs_adb.*` is the keyboard and mouse controller; `iigs_clock.*` is the battery-backed clock and the 256 bytes of settings beside it; `iigs_sound.*` is the Ensoniq — its RAM, the window onto it, and the thirty-two oscillators, clocked and interrupting; `iigs_machine.*` is the coordinator, as `Emulator` is for the 8-bit machines. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -320,6 +320,22 @@ counter by then and a 65816 has not, and the card must not guess.
 **A IIgs has a speaker as well as an Ensoniq.** `$C030` is a Mega II address, so
 `IIgsMachine` owns an `Audio` toggled on the slow clock and adds the Ensoniq's
 samples on top. Without it the machine is silent through every beep and click.
+The volume nibble in `$C03C` is the amplifier's and scales both: the ROM's bell
+fades out by turning it down, and the firmware sets it to 5 from battery RAM.
+
+**The Ensoniq runs on the machine's clock and it interrupts.** `IIgsSound` is
+the chip as GSSquared and MAME model it — resolution-shifted table addressing,
+a zero byte halting every mode, the table's end wrapping free-run and halting
+the rest, swap mode handing over to the partner, sync mode restarting the
+oscillator below, one scan per `8 × (oscillators + 2)` ticks of 7.16MHz.
+`IIgsMachine::step` feeds `advance()` the slow clock and the chip produces a
+frame per scan into a ring that `generateSamples()` resamples to the host,
+consuming everything since the last call so the clocks cannot drift. An
+oscillator with its interrupt bit set raises one when it halts; `$E0` names it
+active low and clears it on the read; `IIgsMemory::interruptPending()` includes
+the chip. The sound tools play every sample through swapped pairs refilled
+from those interrupts, so a chip that only ran when the host asked for a
+buffer, and never interrupted, played the first buffer of anything and stopped.
 
 **ENABLE is not the motor, and `DiskController::isDriveEnabled()` is the
 difference.** A drive keeps turning for about a second after the CPU switches

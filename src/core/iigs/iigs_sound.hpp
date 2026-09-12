@@ -1,5 +1,6 @@
 /*
- * iigs_sound.hpp - The Ensoniq's RAM and the window the CPU reaches it through
+ * iigs_sound.hpp - The Ensoniq 5503: its RAM, the window onto it, and the
+ * thirty-two oscillators
  *
  * Written by
  *  Mike Daley <michael_daley@icloud.com>
@@ -11,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace a2e::iigs {
 
@@ -27,16 +29,31 @@ namespace a2e::iigs {
  * the sound RAM at a rate its own frequency register sets, reads a byte,
  * scales it by its volume, and adds the result to one of sixteen output
  * channels. A byte of zero is silence and also a *stop*: the chip halts an
- * oscillator that reads one, which is how a sample knows where it ends.
+ * oscillator that reads one, in every mode, which is how a sample knows where
+ * it ends. Reaching the end of its table is the other way a sound ends — a
+ * free-running oscillator wraps, a one-shot halts, a swapped one halts and
+ * starts its partner, a synced one restarts the oscillator below it.
  *
- * Thirty-two of them run at 26,320 samples a second between them — the chip
- * divides its clock among however many are enabled — so the machine's music is
- * whatever the RAM holds and the registers say about it.
+ * **It runs on the machine's clock, not the host's.** The chip scans its
+ * enabled oscillators in turn, one per eight ticks of the 7.16MHz clock with
+ * two spare slots per scan, so thirty-two of them produce a sample every 544
+ * ticks — 26,320 a second — and eight of them one every 160. `advance()` is
+ * fed the slow clock as the machine runs and produces one frame per scan into
+ * a ring; `generateSamples()` resamples that ring to whatever rate the host
+ * wants. Running the chip only when the host asked for a buffer put every
+ * oscillator interrupt tens of milliseconds late, and a program refilling a
+ * buffer from that interrupt never keeps up.
  *
- * The read behaviour is the part worth knowing: a read of the data port
- * returns the byte the chip fetched *last* time and then fetches the next, so
- * after setting the address a program reads once to prime the window and takes
- * the answer from the second read. Getting that wrong looks like memory that
+ * **It interrupts.** An oscillator whose control byte has the interrupt bit
+ * raises one when it halts, and the sound tools run on exactly that: a sample
+ * is played by a swapped pair, each half refilled from the interrupt the other
+ * half's end raises. Register $E0 says which oscillator, active low, and
+ * reading it clears that one and re-raises the line if another is waiting.
+ *
+ * The data port is the part worth knowing: a read returns the byte the chip
+ * fetched *last* time and then fetches the one at the current address, so a
+ * program sets the address, reads once to prime the window, and takes its
+ * answer from the read after that. Getting that wrong looks like memory that
  * is off by one, which is exactly what the self-test is checking for.
  */
 class IIgsSound {
@@ -47,8 +64,9 @@ public:
 
   // ===== The window, at $C03C-$C03F =====
 
-  uint8_t readControl() const { return control_; }
-  void writeControl(uint8_t value) { control_ = value; }
+  /** $C03C: bit 7 busy (never, here), 6 RAM/registers, 5 auto-increment, 3-0 volume. */
+  uint8_t readControl() const { return control_ | 0x0F; }
+  void writeControl(uint8_t value);
 
   uint8_t readData();
   void writeData(uint8_t value);
@@ -63,13 +81,22 @@ public:
   uint8_t soundRam(uint16_t address) const { return ram_[address]; }
   void setSoundRam(uint16_t address, uint8_t value) { ram_[address] = value; }
 
-  /** A DOC register, as the chip sees it. */
-  uint8_t docRegister(uint8_t index) const { return doc_[index]; }
+  /** A DOC register, as the chip would answer for it. */
+  uint8_t docRegister(uint8_t index) const;
 
   // ===== The synthesiser =====
 
   /**
-   * Run the oscillators forward and mix what they produce.
+   * The machine's clock has moved: run the chip for that long, producing a
+   * frame for every scan of the oscillators it completes.
+   */
+  void advance(uint32_t slowCycles);
+
+  /**
+   * Resample what the chip has produced since the last call to the host's
+   * rate and mix it, scaled by the volume nibble, into an interleaved stereo
+   * buffer. The ring is consumed whole each time: the host asks for exactly
+   * the time the machine ran, so what was produced is what is due.
    *
    * @param buffer  interleaved stereo, filled with what the chip is playing
    * @param frames  how many stereo frames to produce
@@ -78,7 +105,13 @@ public:
   void generateSamples(float *buffer, int frames, int rate);
 
   /** How many oscillators are enabled, which is what sets the chip's rate. */
-  int activeOscillators() const;
+  int activeOscillators() const { return oscillatorsEnabled_; }
+
+  /** Frames a second at the current number of oscillators. */
+  double sampleRate() const;
+
+  /** Whether an oscillator is holding the interrupt line down. */
+  bool interruptPending() const;
 
   /** One oscillator's state, for tests and for looking. */
   struct Oscillator {
@@ -86,8 +119,10 @@ public:
     uint8_t volume = 0;       // 0-255, scaling what it reads
     uint8_t waveTablePointer = 0; // The high byte of where it reads from
     uint8_t control = 0;      // Halt, mode, channel and interrupt enable
-    uint8_t tableSize = 0;    // How much of the RAM it walks before wrapping
+    uint8_t tableSize = 0;    // Bank, size and resolution, as written to $C0
     uint32_t accumulator = 0; // Where it has got to, in fractional steps
+    uint8_t data = 0x80;      // The last byte it read
+    bool interruptPending = false;
   };
 
   Oscillator oscillator(int index) const;
@@ -106,8 +141,9 @@ public:
   static constexpr uint8_t DOC_WAVE_POINTER = 0x80;
   static constexpr uint8_t DOC_CONTROL = 0xA0;
   static constexpr uint8_t DOC_WAVE_SIZE = 0xC0;
-  static constexpr uint8_t DOC_OSCILLATOR_ENABLE = 0xE1;
   static constexpr uint8_t DOC_INTERRUPT = 0xE0; // the oscillator interrupt register
+  static constexpr uint8_t DOC_OSCILLATOR_ENABLE = 0xE1;
+  static constexpr uint8_t DOC_ADC = 0xE2;
 
   // Control register bits.
   static constexpr uint8_t OSC_HALT = 0x01;
@@ -119,28 +155,71 @@ public:
   static constexpr uint8_t OSC_INTERRUPT_ENABLE = 0x08;
   static constexpr uint8_t OSC_CHANNEL_MASK = 0xF0;
 
+  // Wave size register bits.
+  static constexpr uint8_t SIZE_BANK = 0x40;
+  static constexpr uint8_t SIZE_TABLE_MASK = 0x38;
+  static constexpr uint8_t SIZE_RESOLUTION_MASK = 0x07;
+
   static constexpr uint8_t CONTROL_BUSY = 0x80;
-  static constexpr uint8_t CONTROL_AUTO_INCREMENT = 0x20;
   static constexpr uint8_t CONTROL_RAM = 0x40;
+  static constexpr uint8_t CONTROL_AUTO_INCREMENT = 0x20;
   static constexpr uint8_t CONTROL_VOLUME_MASK = 0x0F;
 
-private:
-  // A register as the processor reads it, which for one of them is not what
-  // was written: see readDocRegister.
-  uint8_t readDocRegister(uint8_t reg) const;
-  void advance();
+  /** The 7.16MHz clock the chip divides, in ticks per second. */
+  static constexpr double DOC_CLOCK_HZ = 7159090.0;
 
-  // Where each oscillator has got to, in the same fixed-point the chip uses:
-  // the frequency register is added to an accumulator and the top bits of it
-  // are the address. Keeping the fraction is what makes a pitch a pitch rather
-  // than a staircase.
-  std::array<uint32_t, DOC_OSCILLATOR_COUNT> accumulator_{};
+private:
+  struct Voice {
+    uint16_t frequency = 0;
+    uint8_t volume = 0;
+    uint32_t wavePointer = 0; // Bits 8-15 from $80, bit 16 from $C0's bank bit
+    uint8_t control = 0;
+    uint8_t sizeCode = 0;     // 0-7: 256 bytes to 32K
+    uint8_t resolution = 0;   // 0-7
+    uint32_t accumulator = 0;
+    uint8_t data = 0x80;
+    bool interruptPending = false;
+  };
+
+  uint8_t readDocRegister(uint8_t reg);
+  void writeDocRegister(uint8_t reg, uint8_t value);
+  void advancePointer();
+
+  /** One scan of the enabled oscillators: one frame into the ring. */
+  void scan();
+
+  /**
+   * An oscillator has reached the end of its table (fromEnd) or read a zero
+   * byte (!fromEnd): loop, halt, hand over to a partner, and interrupt, as
+   * its mode says.
+   */
+  void haltOscillator(int index, bool fromEnd, uint8_t newControl);
+
+  uint32_t tableLength(const Voice &v) const { return 256u << v.sizeCode; }
+  int resolutionShift(const Voice &v) const {
+    return 9 + v.resolution - v.sizeCode;
+  }
+
+  std::array<Voice, DOC_OSCILLATOR_COUNT> voices_{};
+  int oscillatorsEnabled_ = 1;
+  uint8_t enableRegister_ = 0;
+  uint8_t interruptRegister_ = 0xFF;
 
   std::array<uint8_t, SOUND_RAM_SIZE> ram_{};
-  std::array<uint8_t, 256> doc_{};
   uint16_t address_ = 0;
   uint8_t control_ = 0;
-  uint8_t latch_ = 0; // What the next read will return
+  uint8_t latch_ = 0; // What the next read of the data port returns
+
+  // The chip's clock, carried between advances, in ticks of DOC_CLOCK_HZ.
+  double ticks_ = 0.0;
+
+  // What the oscillators have produced and the host has not yet taken: stereo
+  // frames at the chip's own rate. Sized for the fastest the chip can run for
+  // longer than any host buffer.
+  static constexpr size_t RING_FRAMES = 32768;
+  std::vector<float> ring_;
+  uint64_t produced_ = 0;    // Frames ever written
+  double consumed_ = 0.0;    // Frames ever read, with the fraction
 };
 
 } // namespace a2e::iigs

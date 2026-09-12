@@ -316,6 +316,10 @@ TEST_CASE("A IIgs has a speaker as well as an Ensoniq", "[iigs][boot][audio]") {
   // asking it for audio, so the toggles go between short buffers rather than
   // in a loop of their own: that is how a program on it makes a sound, and it
   // keeps each buffer's span of time the length the mixer expects.
+  // The speaker and the synthesiser share an amplifier whose volume is the
+  // bottom nibble of $C03C, and the firmware sets it from battery RAM on the
+  // way up — this machine has not got that far, so turn it up by hand.
+  machine.memory().write(0x00C03C, 0x0F);
   std::vector<float> chunk(64, 0.0f);
   float tonePeak = 0.0f;
   for (int round = 0; round < 40; round++) {
@@ -684,4 +688,57 @@ TEST_CASE("A IIgs's 80-column text puts its even columns in the auxiliary bank",
   const std::string text = screenText80(machine);
   INFO("80-column screen:\n" << text);
   REQUIRE(text.find("ABCDEFGH") != std::string::npos);
+}
+
+TEST_CASE("The firmware services an oscillator interrupt and comes back",
+          "[iigs][boot][interrupt][sound]") {
+  // Play a one-shot through the Ensoniq with its interrupt bit set, from the
+  // firmware's prompt. When the oscillator reaches the end of its table it
+  // interrupts; the ROM's interrupt manager must find the chip asking in $E0,
+  // dispatch it, clear it, and get back to what it was doing — rather than
+  // take it for something else or take it for ever.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the oscillator interrupt test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  IIgsMemory &memory = machine.memory();
+  IIgsSound &sound = memory.sound();
+
+  // A short sound in the chip's RAM, through the window as a program would.
+  memory.write(0x00C03C, 0x6F); // RAM, auto-increment, full volume
+  memory.write(0x00C03F, 0x01);
+  memory.write(0x00C03E, 0x00);
+  for (int i = 0; i < 255; i++) memory.write(0x00C03D, (i % 2) ? 0xC0 : 0x40);
+  memory.write(0x00C03D, 0x00);
+
+  // One oscillator, one-shot, interrupting, on the wave at $0100.
+  auto reg = [&](uint8_t r, uint8_t v) {
+    memory.write(0x00C03C, 0x0F); // registers
+    memory.write(0x00C03E, r);
+    memory.write(0x00C03D, v);
+  };
+  reg(IIgsSound::DOC_OSCILLATOR_ENABLE, 0);
+  reg(IIgsSound::DOC_WAVE_POINTER, 0x01);
+  reg(IIgsSound::DOC_WAVE_SIZE, 0x00);
+  reg(IIgsSound::DOC_VOLUME, 0xFF);
+  reg(IIgsSound::DOC_FREQUENCY_LOW, 0x00);
+  reg(IIgsSound::DOC_FREQUENCY_HIGH, 0x04);
+  reg(IIgsSound::DOC_CONTROL, IIgsSound::OSC_MODE_ONE_SHOT | IIgsSound::OSC_INTERRUPT_ENABLE);
+  REQUIRE_FALSE(sound.oscillatorHalted(0));
+  machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() & ~0x04)); // I clear
+
+  bool interrupted = false;
+  for (int i = 0; i < 400000; i++) {
+    machine.step();
+    if (sound.interruptPending()) interrupted = true;
+  }
+  REQUIRE(sound.oscillatorHalted(0));
+  REQUIRE(interrupted);                         // it asked
+  REQUIRE_FALSE(sound.interruptPending());      // and was answered
+  REQUIRE_FALSE(memory.interruptPending());
+  REQUIRE(machine.cpu().getPBR() == 0xFF);      // back in the firmware's prompt loop
 }

@@ -181,6 +181,7 @@ void IIgsMachine::reset() {
   audio_->reset();
   lastFrameCycle_ = 0;
   linesFinished_ = 0;
+  soundCycle_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
 
@@ -220,6 +221,12 @@ int IIgsMachine::step() {
   // is — a program timing itself against the beam would see it wander.
   if (disk_) disk_->update(cycles);
   memory_->tickClocks();
+  // The Ensoniq runs on the machine's clock, so its oscillators reach the ends
+  // of their tables — and interrupt — when the machine says, not when the host
+  // next asks for a buffer.
+  memory_->sound().advance(
+      static_cast<uint32_t>(memory_->slowCycles() - soundCycle_));
+  soundCycle_ = memory_->slowCycles();
   video_->renderUpToCycle(memory_->slowCycles());
   raiseScanLineInterrupts();
 
@@ -420,11 +427,16 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
   if (buffer) {
     audio_->generateStereoSamples(buffer, sampleCount, memory_->slowCycles());
 
+    // The volume nibble in $C03C is the amplifier's, and the speaker is on
+    // the same amplifier as the synthesiser: the ROM's bell fades out by
+    // turning it down, and a bell that did not was a flat buzz.
+    const float master =
+        static_cast<float>(memory_->sound().volume()) / 15.0f;
     ensoniqMix_.resize(static_cast<size_t>(sampleCount) * 2);
     memory_->sound().generateSamples(ensoniqMix_.data(), sampleCount,
                                      AUDIO_SAMPLE_RATE);
     for (size_t at = 0; at < ensoniqMix_.size(); at++) {
-      buffer[at] += ensoniqMix_[at];
+      buffer[at] = buffer[at] * master + ensoniqMix_[at];
     }
   }
   return sampleCount;

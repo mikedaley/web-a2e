@@ -98,6 +98,36 @@ address and the same one-bit speaker every Apple II has. A machine given only
 the synthesiser is silent through every beep, every click and every game written
 before 1986 — which is most of what it runs. `IIgsMachine` owns an `Audio` for
 it, toggled on the slow clock, and the Ensoniq's samples are added on top.
+**The volume nibble in `$C03C` is the amplifier's, and the speaker is on the
+same amplifier:** the ROM's bell fades out by turning it down, and a bell that
+did not was a flat buzz. The firmware sets it to 5 from battery RAM on the way
+up, so a fresh machine is a third as loud as it could be, as a real one is.
+
+**The Ensoniq runs on the machine's clock, not the host's.** `IIgsSound` is a
+port of the chip as GSSquared and MAME model it: an oscillator's accumulator
+grows by its frequency register once per scan, the table address is the
+accumulator shifted by the resolution and masked to the table size, a zero byte
+halts every mode, the end of the table wraps a free-running oscillator and
+halts the rest, swap mode hands over to the partner, sync mode restarts the
+oscillator below, and the last enabled oscillator is heard three times over.
+The chip scans one oscillator per eight ticks of 7.16MHz with two spare slots a
+scan, so thirty-two of them produce 26,320 frames a second and eight of them
+55,930. `advance()` is fed the slow clock from `IIgsMachine::step` and produces
+one frame per scan into a ring; `generateSamples()` resamples the ring to the
+host's rate, consuming everything produced since the last call so the two
+clocks cannot drift. Running the chip only when the host asked for a buffer put
+every oscillator interrupt tens of milliseconds late, and a program refilling a
+buffer from that interrupt never keeps up.
+
+**It interrupts, and the sound tools depend on it.** An oscillator whose control
+byte has the interrupt bit set raises one when it halts; a long sample is played
+by a swapped pair, each half refilled from the interrupt the other half's end
+raises. `IIgsMemory::interruptPending()` includes the chip, register `$E0`
+reports the first waiting oscillator active low and clears it on the read, and
+the line stays down while another waits. `test_iigs_boot.cpp` plays a one-shot
+from the firmware's prompt and checks the ROM's manager takes the interrupt and
+comes back. A machine whose chip never interrupted played the first buffer of
+anything and stopped, which is what "I'm not hearing the Ensoniq" was.
 
 ## What the Host Sees
 
@@ -221,10 +251,11 @@ Two more things had to be right before the manager would claim any of them:
   reported an *Unclaimed Sound Interrupt*. `IIgsMemory::readSerial` is a
   register pointer, RR3 of zero, and a transmit buffer that is always empty.
 - **The Ensoniq's interrupt register is active low.** Register `$E0` with bit 7
-  clear means an oscillator interrupted, and this chip raises none. Reading the
-  zero it was never written with told the manager the sound chip was asking,
-  and then that no oscillator was — the same *Unclaimed Sound Interrupt*, with
-  the chip having done nothing at all.
+  clear means an oscillator interrupted, and bits 5-1 say which. With none
+  waiting it must read with bit 7 set: reading the zero it was never written
+  with told the manager the sound chip was asking, and then that no oscillator
+  was — the same *Unclaimed Sound Interrupt*, with the chip having done nothing
+  at all. Bits 0 and 6 always read set, as on the chip.
 
 And the vectors themselves: `$C071-$C07F` is firmware mapped into the I/O page —
 `SEP #$40 / BVC / JML $E1:0010`, which is how an 8-bit vector reaches a 16-bit
@@ -353,7 +384,7 @@ Each step is meant to be a commit that stands on its own, with tests that pass b
 1. **Describe the machine.** Profile, family, spec header, ROMs, and an honest "not runnable". *(Done.)*
 2. **The 65816.** *(Done.)* A standalone core in `src/core/cpu/65816/` with no emulator wiring at all: registers, both modes, every addressing mode, all 256 opcodes, cycle counts. Tested on its own against a flat 16MB of memory, and checked against 5.1 million recorded states from a real chip — see [[CPU-Emulation]] and `tests/conformance/test_65816_vectors.cpp`.
 3. **Memory.** *(Done.)* `IIgsMemory` in `src/core/iigs/`: banks, fast and slow RAM, ROM, the language card, shadowing, and the machine's own registers. The Mega II side is an `MMU` — the same class a //e is built from — rather than a second copy of that map, so the video will later read it exactly as a //e's video does. Bank `$00` obeys the //e's memory switches, and they send it into bank `$01`: RAMRD and RAMWRT move `$0200-$BFFF`, ALTZP the zero page, stack and language card, and 80STORE with PAGE2 (and HIRES) the text and first hi-res pages, overriding RAMRD/RAMWRT there. `IIgsMemory::effectiveBank` is the rule, applied before a write lands and before it shadows, so a bank `$00` write meant for auxiliary memory reaches `$E1`. The 80-column firmware writes a line's even columns that way, and a machine that left them in bank `$00` drew every other column blank — `PR#3` then `PRINT "ABCDEFGH"` showed `B D F H`. GSSquared applies the same rule in `calc_aux_read`/`calc_aux_write`. The odd-bank hi-res pages are shadowed unless both their own inhibit bit and Super Hi-Res's say not to; the two per-page bits are bank `$00`'s.
-4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Neither is finished — there is no keyboard, no mouse and no synthesiser — but both are real devices in their own files rather than stubs in somebody else's.
+4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Both are real devices in their own files rather than stubs in somebody else's; the keyboard, the mouse and the synthesiser came later.
 5. **Super Hi-Res.** *(Done.)* `iigs_video.*`: both widths, per-line control bytes, sixteen palettes of sixteen colours out of 4096, fill mode, and the `$C029` switch that decides which of the machine's two video systems is on screen. Nothing in the firmware turns it on — a IIgs boots in text — so it shows up when a program asks for it.
 6. **Sound.** *(Done.)* The 32 oscillators: each walks a pointer through the sound RAM at its own frequency, scales what it reads by its volume, and adds it to one of sixteen channels — even ones to one speaker, odd to the other. A zero byte is the end of a sound, and the chip halts an oscillator that reads one, which is how a sample knows where it stops without anybody counting. The machine's audio call now asks the chip rather than returning silence.
 7. **Input and settings.** *(Mostly done.)* The keyboard works: a browser key event is translated the //e's way, handed to the ADB controller, and put by it into the register the Mega II reads — so //e software finds the keyboard where it expects it without knowing a microcontroller is involved. The mouse reports through the same controller, seven bits of signed movement a byte with the button in the top bit. The clock and its 256 bytes of battery RAM work, and the firmware writes its settings there at startup. Still to come: the Control Panel hotkey, which the controller itself intercepts on real hardware, and the slots.

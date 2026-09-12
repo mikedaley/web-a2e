@@ -243,15 +243,17 @@ TEST_CASE("The Ensoniq's RAM is reached a byte at a time", "[iigs][sound]") {
   }
 
   SECTION("and reading is one behind, which is what firmware expects") {
-    // The chip hands back what it fetched last time and goes for the next, so
-    // a program sets the address, reads once to prime the window, and takes
-    // its answer from the read after that.
+    // The chip hands back what it fetched last time and goes for the byte at
+    // the address as set, so a program sets the address, reads once to prime
+    // the window, and takes its answer from the read after that. The pointer
+    // moves on after each fetch, so the third read is the next byte.
     sound.setSoundRam(0x2000, 0xAA);
     sound.setSoundRam(0x2001, 0xBB);
     sound.writeAddressLow(0x00);
     sound.writeAddressHigh(0x20);
 
-    REQUIRE(sound.readData() == 0xAA); // primed by setting the address
+    sound.readData();                  // whatever was there before
+    REQUIRE(sound.readData() == 0xAA);
     REQUIRE(sound.readData() == 0xBB);
   }
 
@@ -381,7 +383,7 @@ namespace {
 
 // Set one of the chip's registers the way a program does: through the window.
 void setDocRegister(IIgsSound &sound, uint8_t reg, uint8_t value) {
-  sound.writeControl(0x00); // the window is on the registers, not the RAM
+  sound.writeControl(0x0F); // registers, amplifier up // the window is on the registers, not the RAM
   sound.writeAddressLow(reg);
   sound.writeAddressHigh(0x00);
   sound.writeData(value);
@@ -396,6 +398,13 @@ void putSquareWave(IIgsSound &sound, uint16_t at, int length) {
   sound.setSoundRam(static_cast<uint16_t>(at + length), 0x00);
 }
 
+// Run the chip for as long as the host frames represent, then take them: the
+// chip runs on the machine's clock, and a buffer is what it produced meanwhile.
+void render(IIgsSound &sound, std::vector<float> &samples, int frames) {
+  sound.advance(static_cast<uint32_t>(frames * 1023000.0 / 48000.0));
+  sound.generateSamples(samples.data(), frames, 48000);
+}
+
 float loudest(const std::vector<float> &samples) {
   float peak = 0.0f;
   for (float sample : samples) peak = std::max(peak, std::abs(sample));
@@ -406,21 +415,22 @@ float loudest(const std::vector<float> &samples) {
 
 TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
   IIgsSound sound;
+  sound.writeControl(0x0F); // amplifier up
   putSquareWave(sound, 0x0100, 256);
 
   setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01); // $0100
   setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_LOW, 0x00);
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
-  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x00); // running, free-run, left
+  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x10); // running, free-run, left
 
   std::vector<float> samples(512 * 2, 0.0f);
-  sound.generateSamples(samples.data(), 512, 48000);
-
+  render(sound, samples, 512);
   REQUIRE(loudest(samples) > 0.0f);
 
   SECTION("and a halted one plays nothing") {
     IIgsSound silent;
+    silent.writeControl(0x0F);
     putSquareWave(silent, 0x0100, 256);
     setDocRegister(silent, IIgsSound::DOC_WAVE_POINTER, 0x01);
     setDocRegister(silent, IIgsSound::DOC_VOLUME, 0xFF);
@@ -428,23 +438,52 @@ TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
     setDocRegister(silent, IIgsSound::DOC_CONTROL, IIgsSound::OSC_HALT);
 
     std::vector<float> quiet(512 * 2, 0.0f);
-    silent.generateSamples(quiet.data(), 512, 48000);
+    render(silent, quiet, 512);
     REQUIRE(loudest(quiet) == 0.0f);
   }
 
   SECTION("volume scales it") {
     setDocRegister(sound, IIgsSound::DOC_VOLUME, 0x40);
     std::vector<float> quieter(512 * 2, 0.0f);
-    sound.generateSamples(quieter.data(), 512, 48000);
+    // Twice: the resampler carries the last frame over, so the first buffer
+    // after a change opens on a frame made before it.
+    render(sound, quieter, 512);
+    render(sound, quieter, 512);
     REQUIRE(loudest(quieter) < loudest(samples));
     REQUIRE(loudest(quieter) > 0.0f);
+  }
+
+  SECTION("and so does the amplifier's nibble in $C03C") {
+    sound.writeControl(0x05);
+    std::vector<float> quieter(512 * 2, 0.0f);
+    render(sound, quieter, 512);
+    REQUIRE(quieter[0] != 0.0f);
+    REQUIRE(loudest(quieter) < loudest(samples) * 0.4f);
+    sound.writeControl(0x00);
+    render(sound, quieter, 512);
+    REQUIRE(loudest(quieter) == 0.0f);
+  }
+
+  SECTION("nothing comes out until the machine's clock has run") {
+    IIgsSound idle;
+    idle.writeControl(0x0F);
+    putSquareWave(idle, 0x0100, 256);
+    setDocRegister(idle, IIgsSound::DOC_WAVE_POINTER, 0x01);
+    setDocRegister(idle, IIgsSound::DOC_VOLUME, 0xFF);
+    setDocRegister(idle, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
+    setDocRegister(idle, IIgsSound::DOC_CONTROL, 0x10);
+    std::vector<float> quiet(512 * 2, 0.0f);
+    idle.generateSamples(quiet.data(), 512, 48000);
+    REQUIRE(loudest(quiet) == 0.0f);
   }
 }
 
 TEST_CASE("A zero byte is where a sound ends", "[iigs][sound]") {
-  // The chip halts an oscillator that reads one, and firmware relies on it: a
-  // sound is a run of bytes with a zero after it, and nobody counts a length.
+  // The chip halts an oscillator that reads one, in every mode, and firmware
+  // relies on it: a sound is a run of bytes with a zero after it, and nobody
+  // counts a length.
   IIgsSound sound;
+  sound.writeControl(0x0F);
   putSquareWave(sound, 0x0100, 16); // ...and a zero at $0110
 
   setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
@@ -454,51 +493,152 @@ TEST_CASE("A zero byte is where a sound ends", "[iigs][sound]") {
   REQUIRE_FALSE(sound.oscillatorHalted(0));
 
   std::vector<float> samples(2048 * 2, 0.0f);
-  sound.generateSamples(samples.data(), 2048, 48000);
-
+  render(sound, samples, 2048);
   REQUIRE(sound.oscillatorHalted(0)); // it found the end and stopped
 
-  SECTION("a free-running oscillator starts again instead") {
+  SECTION("a free-running oscillator stops at a zero too") {
     IIgsSound looping;
     putSquareWave(looping, 0x0100, 16);
     setDocRegister(looping, IIgsSound::DOC_WAVE_POINTER, 0x01);
     setDocRegister(looping, IIgsSound::DOC_VOLUME, 0xFF);
     setDocRegister(looping, IIgsSound::DOC_FREQUENCY_HIGH, 0x20);
     setDocRegister(looping, IIgsSound::DOC_CONTROL, IIgsSound::OSC_MODE_FREE_RUN);
-
-    std::vector<float> long_(2048 * 2, 0.0f);
-    looping.generateSamples(long_.data(), 2048, 48000);
-    REQUIRE_FALSE(looping.oscillatorHalted(0));
+    render(looping, samples, 2048);
+    REQUIRE(looping.oscillatorHalted(0));
   }
+
+  SECTION("but the end of its table is where it goes round again") {
+    IIgsSound looping;
+    putSquareWave(looping, 0x0100, 256); // fills the 256-byte table; the zero is outside it
+    setDocRegister(looping, IIgsSound::DOC_WAVE_POINTER, 0x01);
+    setDocRegister(looping, IIgsSound::DOC_VOLUME, 0xFF);
+    setDocRegister(looping, IIgsSound::DOC_FREQUENCY_HIGH, 0x20);
+    setDocRegister(looping, IIgsSound::DOC_CONTROL, IIgsSound::OSC_MODE_FREE_RUN);
+    render(looping, samples, 2048);
+    REQUIRE_FALSE(looping.oscillatorHalted(0));
+
+    // ...where a one-shot stops.
+    IIgsSound once;
+    putSquareWave(once, 0x0100, 256);
+    setDocRegister(once, IIgsSound::DOC_WAVE_POINTER, 0x01);
+    setDocRegister(once, IIgsSound::DOC_VOLUME, 0xFF);
+    setDocRegister(once, IIgsSound::DOC_FREQUENCY_HIGH, 0x20);
+    setDocRegister(once, IIgsSound::DOC_CONTROL, IIgsSound::OSC_MODE_ONE_SHOT);
+    render(once, samples, 2048);
+    REQUIRE(once.oscillatorHalted(0));
+  }
+}
+
+TEST_CASE("Clearing the halt bit starts a sound from the top", "[iigs][sound]") {
+  IIgsSound sound;
+  putSquareWave(sound, 0x0100, 256);
+  setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
+  setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
+  setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
+  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x00);
+  sound.advance(20000);
+  REQUIRE(sound.oscillator(0).accumulator != 0);
+
+  setDocRegister(sound, IIgsSound::DOC_CONTROL, IIgsSound::OSC_HALT);
+  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x00); // key on
+  REQUIRE(sound.oscillator(0).accumulator == 0);
 }
 
 TEST_CASE("The chip divides its clock between the oscillators in use",
           "[iigs][sound]") {
-  // Eight running oscillators each step twice as often as sixteen would, which
-  // is why the enable register changes the pitch of everything at once.
+  // One oscillator per eight ticks of 7.16MHz, with two spare slots a scan:
+  // thirty-two of them make 26,320 frames a second, eight make 55,930. The
+  // enable register therefore changes the pitch of everything at once.
   IIgsSound sound;
   REQUIRE(sound.activeOscillators() >= 1);
 
   setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 14); // (14/2)+1 = 8
   REQUIRE(sound.activeOscillators() == 8);
+  REQUIRE(sound.sampleRate() == Approx(894886.25 / 10));
 
-  setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 30);
-  REQUIRE(sound.activeOscillators() == 16);
+  setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 62);
+  REQUIRE(sound.activeOscillators() == 32);
+  REQUIRE(sound.sampleRate() == Approx(26320.2).epsilon(0.001));
+
+  // A second of the slow clock is that many frames.
+  sound.advance(1023000);
+  std::vector<float> samples(48000 * 2, 0.0f);
+  sound.generateSamples(samples.data(), 48000, 48000);
+  REQUIRE(sound.oscillator(0).accumulator == 0); // halted: nothing to hear, but the clock ran
+}
+
+TEST_CASE("A swapped pair hand over to each other, and say so", "[iigs][sound][interrupt]") {
+  // The sound tools play a long sample through two oscillators in swap mode:
+  // when one reaches the end of its table it halts, starts its partner from
+  // the top, and — with the interrupt bit set — raises an interrupt, which is
+  // when the program refills the half that just finished. A chip that did
+  // none of this played the first buffer and stopped.
+  IIgsSound sound;
+  sound.writeControl(0x0F);
+  putSquareWave(sound, 0x0100, 256);
+  putSquareWave(sound, 0x0200, 256);
+  setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 2); // two oscillators
+
+  setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
+  setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
+  setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x02);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_WAVE_POINTER + 1), 0x02);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0xFF);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_FREQUENCY_HIGH + 1), 0x02);
+  // Partner halted and waiting, in swap mode with interrupts.
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1),
+                 IIgsSound::OSC_MODE_SWAP | IIgsSound::OSC_INTERRUPT_ENABLE | IIgsSound::OSC_HALT);
+  setDocRegister(sound, IIgsSound::DOC_CONTROL,
+                 IIgsSound::OSC_MODE_SWAP | IIgsSound::OSC_INTERRUPT_ENABLE);
+  REQUIRE_FALSE(sound.interruptPending());
+
+  // Run until oscillator 0 reaches the end of its 256 bytes.
+  for (int i = 0; i < 200 && !sound.oscillatorHalted(0); i++) sound.advance(1000);
+  REQUIRE(sound.oscillatorHalted(0));
+  REQUIRE_FALSE(sound.oscillatorHalted(1)); // the partner took over
+  REQUIRE(sound.interruptPending());
+
+  // $E0 names it, active low, and reading clears it.
+  sound.writeControl(0x00); // registers
+  sound.writeAddressLow(IIgsSound::DOC_INTERRUPT);
+  sound.readData();
+  const uint8_t status = sound.readData();
+  REQUIRE((status & 0x80) == 0);
+  REQUIRE(((status >> 1) & 0x1F) == 0);
+  REQUIRE_FALSE(sound.interruptPending());
+  sound.readData();
+  REQUIRE((sound.readData() & 0x80) != 0);
+
+  // And the partner, in its turn, hands back and interrupts.
+  for (int i = 0; i < 200 && !sound.oscillatorHalted(1); i++) sound.advance(1000);
+  REQUIRE(sound.oscillatorHalted(1));
+  REQUIRE_FALSE(sound.oscillatorHalted(0));
+  REQUIRE(sound.interruptPending());
+
+  SECTION("a halt the program writes without the interrupt bit is not reported") {
+    sound.writeAddressLow(IIgsSound::DOC_INTERRUPT);
+    sound.readData(); sound.readData(); // clear
+    REQUIRE_FALSE(sound.interruptPending());
+    setDocRegister(sound, IIgsSound::DOC_CONTROL, IIgsSound::OSC_MODE_SWAP | IIgsSound::OSC_HALT);
+    REQUIRE_FALSE(sound.interruptPending());
+  }
 }
 
 TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
+  // Channel bit 0 picks the speaker; the stereo cards of the day put the odd
+  // channels on the left, so channel 1 is left and channel 0 is right.
   IIgsSound sound;
+  sound.writeControl(0x0F);
   putSquareWave(sound, 0x0100, 256);
   setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 2); // two of them
 
-  // Oscillator 0 on an even channel, oscillator 1 on an odd one.
   setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
   setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
-  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x00);
+  setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x10); // channel 1
 
   std::vector<float> samples(256 * 2, 0.0f);
-  sound.generateSamples(samples.data(), 256, 48000);
+  render(sound, samples, 256);
 
   float left = 0.0f, right = 0.0f;
   for (size_t i = 0; i < samples.size(); i += 2) {
@@ -506,15 +646,15 @@ TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
     right = std::max(right, std::abs(samples[i + 1]));
   }
   REQUIRE(left > 0.0f);
-  REQUIRE(right == 0.0f); // channel 0 is one speaker only
+  REQUIRE(right == 0.0f);
 
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x10);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x00); // channel 0
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_WAVE_POINTER + 1), 0x01);
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0xFF);
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_FREQUENCY_HIGH + 1), 0x08);
 
   std::fill(samples.begin(), samples.end(), 0.0f);
-  sound.generateSamples(samples.data(), 256, 48000);
+  render(sound, samples, 256);
   right = 0.0f;
   for (size_t i = 1; i < samples.size(); i += 2) {
     right = std::max(right, std::abs(samples[i]));
@@ -560,7 +700,7 @@ TEST_CASE("The ADB controller interrupts only when asked to, and only for what i
 TEST_CASE("The Ensoniq's interrupt register says no oscillator is asking",
           "[iigs][sound][interrupt]") {
   // Register $E0 is active low: bit 7 clear means an oscillator interrupted.
-  // This chip raises none, and it must say so rather than read back the zero
+  // With none having done so it must say so rather than read back the zero
   // it was never written with — the ROM's interrupt manager asks it on every
   // interrupt it cannot otherwise place, and a zero here is "Unclaimed Sound
   // Interrupt" on a machine whose sound chip has done nothing.
@@ -570,4 +710,5 @@ TEST_CASE("The Ensoniq's interrupt register says no oscillator is asking",
   sound.writeAddressLow(0xE0);
   sound.readData();                // the window is one behind
   REQUIRE((sound.readData() & 0x80) != 0);
+  REQUIRE_FALSE(sound.interruptPending());
 }

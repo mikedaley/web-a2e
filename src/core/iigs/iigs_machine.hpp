@@ -253,6 +253,9 @@ private:
   // How many of this frame's lines the beam has finished, for the VGC's
   // scan-line interrupt (see raiseScanLineInterrupts).
   int linesFinished_ = 0;
+  // Where the Ensoniq's clock had got to, so each step feeds it the cycles
+  // the step took.
+  uint64_t soundCycle_ = 0;
   std::vector<uint8_t> frame_;
 
   void raiseScanLineInterrupts();

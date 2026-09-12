@@ -606,6 +606,7 @@ uint8_t IIgsMemory::interruptStatusRegister() const {
 
 bool IIgsMemory::interruptPending() const {
   if (adb_.interruptPending()) return true;
+  if (sound_.interruptPending()) return true;
   if (vgcInterruptRegister() & VGC_ANY_PENDING) return true;
   if (interruptStatusRegister() & INT_STATUS_ANY) return true;
   return false;
