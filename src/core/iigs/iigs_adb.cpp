@@ -117,22 +117,26 @@ uint8_t IIgsADB::readMouseData() {
   }
   if (!hasMouseData()) return 0x00;
 
-  // Seven bits of signed movement with the button in the top bit, X first.
-  // The button travels with the movement rather than separately, which is why
-  // it is in both bytes: the firmware takes whichever it reads. What the
-  // seven bits cannot carry stays pending for the next report, so a fast
-  // shove arrives in a few reports rather than being cut short.
-  auto take = [this](int &pending) {
+  // Seven bits of signed movement with a button in the top bit, X first.
+  // The two top bits are two *different* buttons: the X byte's is button 1,
+  // the second button a two-button mouse has, and the Y byte's is button 0,
+  // the one everybody presses — which is how GSSquared lays the report out.
+  // Putting the same button in both, so the firmware would take whichever
+  // it read, made every press two presses: the Finder opened a folder on a
+  // single click. Button 1 is never pressed here, so its bit is always up.
+  // What the seven bits cannot carry stays pending for the next report, so a
+  // fast shove arrives in a few reports rather than being cut short.
+  auto take = [this](int &pending, bool withButton) {
     const int clamped = pending < -63 ? -63 : (pending > 63 ? 63 : pending);
     pending -= clamped;
     uint8_t byte = static_cast<uint8_t>(clamped & 0x7F);
     // A pressed button reads as zero in the top bit, as it does everywhere
     // else on this machine.
-    if (!mouseButton_) byte |= 0x80;
+    if (!(withButton && mouseButton_)) byte |= 0x80;
     return byte;
   };
-  const uint8_t x = take(pendingX_);
-  reportY_ = take(pendingY_);
+  const uint8_t x = take(pendingX_, false);
+  reportY_ = take(pendingY_, true);
   buttonChanged_ = false;
   reportInProgress_ = true;
   return x;

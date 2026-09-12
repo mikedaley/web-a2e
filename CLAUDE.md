@@ -359,6 +359,12 @@ nothing inserted the SmartPort has no ROM and that firmware shows through.
 its entry point rather than reading it — a 6502 has already advanced the program
 counter by then and a 65816 has not, and the card must not guess.
 
+**A mouse report's two top bits are two buttons.** `$C024` gives X then Y,
+seven bits of movement each; the X byte's bit 7 is button 1, which the mouse
+here does not have, and the Y byte's is button 0. The same button in both
+was two presses to the firmware, and the Finder opened a folder on a single
+click.
+
 **A IIgs has a speaker as well as an Ensoniq.** `$C030` is a Mega II address, so
 `IIgsMachine` owns an `Audio` toggled on the slow clock and adds the Ensoniq's
 samples on top. Without it the machine is silent through every beep and click.

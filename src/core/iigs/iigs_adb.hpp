@@ -45,7 +45,12 @@ public:
 
   // ===== The four registers =====
 
-  /** $C024: the mouse's movement, a byte at a time. */
+  /**
+   * $C024: the mouse's movement, a byte at a time — X then Y, seven bits of
+   * signed movement each, with button 1 in the X byte's top bit and button 0
+   * in the Y byte's. One button per byte: the same button in both was two
+   * presses to the firmware.
+   */
   uint8_t readMouseData();
 
   /** $C025: which modifier keys are down. */

@@ -223,6 +223,11 @@ A IIgs has three interrupt sources a //e has not, and GS/OS needs all of them:
   is: the interrupt manager reads this register first on every interrupt, and a
   bit 5 that was always set was an ADB interrupt to service every time, so
   nothing underneath it was ever acknowledged.
+- **The two top bits of a mouse report are two buttons.** The X byte's bit 7
+  is button 1, the second button of a two-button mouse, and the Y byte's is
+  button 0, the one everybody presses — GSSquared's layout. Reporting the
+  same button in both made every press two presses to the firmware, and the
+  Finder opened a folder on a single click.
 - **The mouse register, `$C024`, reports what has added up, not what arrived.**
   The host sends every twitch it gets, hundreds a second on a fast mouse. Queued
   one behind the other, each cost GS/OS a whole interrupt handler and the

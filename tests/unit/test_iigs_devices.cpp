@@ -23,9 +23,10 @@ using namespace a2e::iigs;
 // ---------------------------------------------------------------------------
 
 TEST_CASE("The mouse reports movement and its button together", "[iigs][adb]") {
-  // Seven bits of signed movement with the button in the top bit — which is
-  // why a IIgs mouse cannot move more than 63 units between reports, and why
-  // the button comes back twice for every movement.
+  // Seven bits of signed movement with a button in the top bit — which is
+  // why a IIgs mouse cannot move more than 63 units between reports. The X
+  // byte's bit is button 1, which this mouse does not have, and the Y byte's
+  // is button 0: one button per byte, or a press is heard twice.
   IIgsADB adb;
 
   adb.queueMouse(-5, 10);
@@ -35,11 +36,13 @@ TEST_CASE("The mouse reports movement and its button together", "[iigs][adb]") {
   REQUIRE(static_cast<int8_t>(x << 1) / 2 == -5);
   REQUIRE((y & 0x7F) == 10);
 
-  SECTION("a pressed button reads low, in both bytes") {
+  SECTION("a pressed button reads low in the Y byte, and only there") {
+    // The Finder opened a folder on a single click when the same button was
+    // in both bytes: the firmware took each bit as a button of its own.
     adb.setMouseButton(true);
     adb.queueMouse(1, 1);
-    REQUIRE((adb.readMouseData() & 0x80) == 0);
-    REQUIRE((adb.readMouseData() & 0x80) == 0);
+    REQUIRE((adb.readMouseData() & 0x80) != 0); // X: button 1, never pressed
+    REQUIRE((adb.readMouseData() & 0x80) == 0); // Y: button 0, pressed
   }
 
   SECTION("and a shove further than a report can carry takes several") {
@@ -68,8 +71,8 @@ TEST_CASE("The mouse reports movement and its button together", "[iigs][adb]") {
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
     adb.setMouseButton(true);
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0);
-    REQUIRE(adb.readMouseData() == 0x00); // pressed, and no movement
-    REQUIRE(adb.readMouseData() == 0x00);
+    REQUIRE(adb.readMouseData() == 0x80); // X: no movement, button 1 up
+    REQUIRE(adb.readMouseData() == 0x00); // Y: no movement, button 0 pressed
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
 
     adb.setMouseButton(true); // still down: nothing new to say
