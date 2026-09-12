@@ -10,6 +10,7 @@
 #include "../machine/machine_profile.hpp"
 #include "iigs_adb.hpp"
 #include "iigs_clock.hpp"
+#include "iigs_scc.hpp"
 #include "iigs_sound.hpp"
 #include "iigs_spec.hpp"
 
@@ -161,6 +162,14 @@ public:
   IIgsClock &clock() { return clock_; }
   const IIgsClock &clock() const { return clock_; }
 
+  /**
+   * The Z8530 behind the two serial ports, at $C038-$C03B. Nothing is plugged
+   * into either, but the chip is real: the ROM's interrupt manager asks it
+   * first on every interrupt, and the Diagnostic sends bytes round its loop.
+   */
+  IIgsSCC &scc() { return scc_; }
+  const IIgsSCC &scc() const { return scc_; }
+
   /** The keyboard and mouse controller, at $C024-$C027. */
   IIgsADB &adb() { return adb_; }
   const IIgsADB &adb() const { return adb_; }
@@ -307,24 +316,6 @@ public:
   /** The slow clock has moved; raise whichever ticks it has crossed. */
   void tickClocks();
 
-  /**
-   * The serial chip, as far as it needs to exist: quiet.
-   *
-   * $C038-$C03B is the Z8530 SCC behind a IIgs's two serial ports, and the
-   * interrupt manager asks it *first* on every interrupt — writes 3 to the
-   * command register to select RR3, reads it back, and takes any set bit as
-   * "the SCC is interrupting". A machine with no chip there returned the
-   * bus, which read as an interrupting SCC, so the manager serviced a serial
-   * port that does not exist and never got as far as the vertical-blanking
-   * interrupt that had actually fired — over and over, until it gave up and
-   * called it an unclaimed sound interrupt.
-   *
-   * So the chip answers: a register pointer, no interrupts pending, and a
-   * transmit buffer that is always empty so that anything printing to a port
-   * finishes rather than waits.
-   */
-  uint8_t readSerial(uint16_t offset);
-  void writeSerial(uint16_t offset, uint8_t value);
 
   uint8_t textColourRegister() const { return textColour_; }
   void setTextColourRegister(uint8_t value) {
@@ -580,9 +571,7 @@ private:
   uint8_t textColour_ = 0xF0;
   uint8_t border_ = 0x00;
 
-  // The SCC's register pointer, one per channel; a write selects, the next
-  // access uses it and puts it back to zero.
-  uint8_t serialPointer_[2] = {0, 0};
+  IIgsSCC scc_;
 
   // Interrupt state: what is enabled, and what has happened since it was
   // last cleared.

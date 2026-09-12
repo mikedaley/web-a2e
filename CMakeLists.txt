@@ -36,6 +36,7 @@ set(CORE_SOURCES
     src/core/iigs/iigs_sound.cpp
     src/core/iigs/iigs_video.cpp
     src/core/iigs/iigs_adb.cpp
+    src/core/iigs/iigs_scc.cpp
     src/core/cpu/65816/cpu65816.cpp
     src/core/cpu/65816/cpu65816_dispatch.cpp
     src/core/cards/disk_controller.cpp
@@ -576,6 +577,7 @@ else()
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
         src/core/cpu/65816/cpu65816.cpp
         src/core/cpu/65816/cpu65816_dispatch.cpp
         src/core/cards/disk_controller.cpp
@@ -670,6 +672,7 @@ else()
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
         src/core/cpu/65816/cpu65816.cpp
         src/core/cpu/65816/cpu65816_dispatch.cpp
         src/core/mmu/mmu.cpp
@@ -683,6 +686,7 @@ else()
     add_catch2_test(test_iigs_devices
         tests/unit/test_iigs_devices.cpp
         src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_clock.cpp
     )
@@ -710,6 +714,7 @@ else()
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
         src/core/cpu/65816/cpu65816.cpp
         src/core/cpu/65816/cpu65816_dispatch.cpp
         src/core/mmu/mmu.cpp
@@ -727,6 +732,7 @@ else()
         src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
         src/core/mmu/mmu.cpp
         src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp

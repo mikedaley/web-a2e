@@ -742,7 +742,7 @@ TEST_CASE("The serial chip is quiet", "[iigs][memory][interrupt]") {
   IIgsMemory memory;
   memory.write(0x00C039, 0x03);
   REQUIRE(memory.read(0x00C039) == 0x00); // RR3: nothing pending
-  REQUIRE(memory.read(0x00C039) == 0x04); // RR0 after the pointer resets: transmit buffer empty
+  REQUIRE((memory.read(0x00C039) & 0x05) == 0x04); // RR0 after the pointer resets: transmit buffer empty, nothing received
   memory.write(0x00C038, 0x03);
   REQUIRE(memory.read(0x00C038) == 0x00);
   REQUIRE(memory.read(0x00C03B) == 0x00); // nothing received

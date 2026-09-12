@@ -258,6 +258,8 @@ int IIgsMachine::step() {
   // next asks for a buffer.
   memory_->sound().advance(
       static_cast<uint32_t>(memory_->slowCycles() - soundCycle_));
+  memory_->scc().advance(
+      static_cast<uint32_t>(memory_->slowCycles() - soundCycle_));
   soundCycle_ = memory_->slowCycles();
   video_->renderUpToCycle(memory_->slowCycles());
   raiseScanLineInterrupts();

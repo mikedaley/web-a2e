@@ -86,7 +86,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
 - `input/mouse_iou.cpp` - A //c's mouse: IOU soft switches and an interrupt per unit of travel, rather than a card
-- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers; `iigs_video.*` is Super Hi-Res and the `$C029` switch between the machine's two video systems; `iigs_adb.*` is the keyboard and mouse controller; `iigs_clock.*` is the battery-backed clock and the 256 bytes of settings beside it; `iigs_sound.*` is the Ensoniq — its RAM, the window onto it, and the thirty-two oscillators, clocked and interrupting; `iigs_machine.*` is the coordinator, as `Emulator` is for the 8-bit machines. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
+- `iigs/` - The Apple IIgs's own parts, kept apart from every other machine's. `iigs_spec.hpp` holds the numbers no other machine has (two clock rates, fast and slow RAM, shadowing, Super Hi-Res geometry, sound RAM); `iigs_memory.*` is the 24-bit address space — banks, fast RAM, ROM, shadowing, and the SHADOW/SPEED/STATE registers; `iigs_video.*` is Super Hi-Res and the `$C029` switch between the machine's two video systems; `iigs_adb.*` is the keyboard and mouse controller; `iigs_clock.*` is the battery-backed clock and the 256 bytes of settings beside it; `iigs_sound.*` is the Ensoniq — its RAM, the window onto it, and the thirty-two oscillators, clocked and interrupting; `iigs_scc.*` is the Z8530 behind the serial ports, with nothing plugged into it; `iigs_machine.*` is the coordinator, as `Emulator` is for the 8-bit machines. Nothing here is included by a machine that is not a IIgs, and nothing outside it grows an `if (IIgs)`
 - `machine/machine_profile.hpp` - Per-machine description (CPU variant, timing, memory sizes, display geometry, capabilities, slot layout) and the registry of machines. See Machine Profiles below
 - `cards/` - Pluggable expansion card system (ExpansionCard interface)
 - `cards/disk_controller.*` - The 5.25" drive mechanism both machines share: two drives, the stepper, the motor and Woz's Logic State Sequencer clocked from the P6 ROM
@@ -285,6 +285,24 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
+**The SCC is a real Z8530 with nothing plugged into it.** `IIgsSCC`
+(`core/iigs/iigs_scc.*`) at `$C038-$C03B` is the register file behind the
+command/data pair per channel, the transmitter and receiver with their
+timing, local loopback and auto echo, the baud rate generator, and the
+interrupt logic — because software exercises all of that without a cable.
+The Diagnostic's Serial Internal Test writes every register and reads it
+back, then arms the zero-count interrupt with the slowest time constant and
+measures the interval between two of them: **the zero count comes every
+`TC + 2` clocks of 3.6864MHz, not twice that**, because the generator's output
+toggles at each zero and the baud rate is half the zero count. A generator
+counting the output's period fell outside the window. It then sends bytes
+round the local loop at 600 baud, polling RR1's all-sent and RR0's receive
+bit. `IIgsMachine::step` advances the chip on the slow clock beside the
+Ensoniq, and `IIgsMemory::interruptPending()` includes it, gated on WR9's
+MIE. The External Serial Ports Test asks for a loopback cable between the
+two ports, which there is no way to supply. `test_iigs_devices.cpp` pins the
+register file, the zero count, the loop and the interrupts.
+
 **The clock chip is a serial line, and it answers on the read transfer.**
 `$C033` is the byte and `$C034` drives it: bit 7 starts a transfer, bit 6 is
 its direction (set, the chip supplies the byte; clear, it takes the one in
@@ -332,9 +350,9 @@ QuickDraw II draws the mouse pointer from it, through the handler it installs
 at `$E1:0028` — the vector the ROM's `AND #$22 / LSR / LSR` dispatch reaches —
 so with the two VGC pairs swapped the pointer was redrawn once a second, on the
 tick that arrived through QuickDraw's vector instead. The ROM's manager asks the SCC *first*
-and the Ensoniq's `$E0` *last*, so `$C038-$C03B` answer as a quiet Z8530 and
-register `$E0` reads active-low "none" — either one wrong is *Unclaimed Sound
-Interrupt*. `$C071-$C07F` map the ROM's vector firmware into the I/O page.
+and the Ensoniq's `$E0` *last*, so `$C038-$C03B` must answer RR3 with nothing
+pending until something is, and register `$E0` reads active-low "none" —
+either one wrong is *Unclaimed Sound Interrupt*. `$C071-$C07F` map the ROM's vector firmware into the I/O page.
 
 **How much fast RAM a IIgs has is a user choice**, from 256K to 8M, in the
 Machine menu and remembered in localStorage. `_setIIgsMemoryKB` rebuilds the

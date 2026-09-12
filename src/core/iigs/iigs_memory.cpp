@@ -106,7 +106,7 @@ void IIgsMemory::reset() {
   speed_ = 0;
   interruptEnable_ = 0;
   vgcInterrupt_ = 0;
-  serialPointer_[0] = serialPointer_[1] = 0;
+  scc_.reset();
   vblPending_ = quarterSecondPending_ = oneSecondPending_ = false;
   scanLinePending_ = false;
   lastQuarterSecond_ = lastSecond_ = 0;
@@ -354,7 +354,7 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
   case REG_SCC_COMMAND_A:
   case REG_SCC_DATA_B:
   case REG_SCC_DATA_A:
-    return readSerial(offset);
+    return scc_.read(static_cast<uint8_t>(offset - REG_SCC_COMMAND_B));
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -433,7 +433,7 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   case REG_SCC_COMMAND_A:
   case REG_SCC_DATA_B:
   case REG_SCC_DATA_A:
-    writeSerial(offset, value);
+    scc_.write(static_cast<uint8_t>(offset - REG_SCC_COMMAND_B), value);
     return;
   case REG_SOUND_CONTROL: {
     const uint8_t before = sound_.volume();
@@ -529,7 +529,7 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
   case REG_SCC_COMMAND_A:
   case REG_SCC_DATA_B:
   case REG_SCC_DATA_A:
-    return 0x00; // Reading the chip moves its pointer; a debugger does not
+    return scc_.peek(static_cast<uint8_t>(offset - REG_SCC_COMMAND_B));
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -588,29 +588,6 @@ bool IIgsMemory::slotIsExternalAndEmpty(uint16_t offset) const {
   return !card || !card->hasROM();
 }
 
-uint8_t IIgsMemory::readSerial(uint16_t offset) {
-  const int channel = (offset == REG_SCC_COMMAND_A || offset == REG_SCC_DATA_A) ? 0 : 1;
-  if (offset == REG_SCC_DATA_A || offset == REG_SCC_DATA_B) return 0x00; // nothing received
-  const uint8_t reg = serialPointer_[channel];
-  serialPointer_[channel] = 0;
-  // RR0: transmit buffer empty, and nothing else. RR3, the one the interrupt
-  // manager asks for: no interrupt pending. Every other register: zero.
-  if (reg == 0) return 0x04;
-  return 0x00;
-}
-
-void IIgsMemory::writeSerial(uint16_t offset, uint8_t value) {
-  const int channel = (offset == REG_SCC_COMMAND_A || offset == REG_SCC_DATA_A) ? 0 : 1;
-  if (offset == REG_SCC_DATA_A || offset == REG_SCC_DATA_B) return; // transmitted into nothing
-  // The first write to the command register chooses a register; the second
-  // writes it, and the pointer goes back to zero either way after that.
-  if (serialPointer_[channel] == 0) {
-    serialPointer_[channel] = static_cast<uint8_t>(value & 0x0F);
-  } else {
-    serialPointer_[channel] = 0;
-  }
-}
-
 namespace {
 uint16_t verticalCounter(int line) {
   if (line < 192) return static_cast<uint16_t>(0x100 + line);
@@ -661,6 +638,7 @@ uint8_t IIgsMemory::interruptStatusRegister() const {
 bool IIgsMemory::interruptPending() const {
   if (adb_.interruptPending()) return true;
   if (sound_.interruptPending()) return true;
+  if (scc_.interruptPending()) return true;
   if (vgcInterruptRegister() & VGC_ANY_PENDING) return true;
   if (vblPending_ && (interruptEnable_ & INT_VBL)) return true;
   if (quarterSecondPending_ && (interruptEnable_ & INT_QUARTER_SECOND)) return true;

@@ -62,9 +62,37 @@ Diagnostic writes `$FFFFFFFF` to the clock and waits for it to roll over; a
 chip that read the host's time would never show that to a machine running
 faster than real time, and a native test runs at whatever speed the host has.
 
-With the clock right, the Diagnostic's sequence gets past it to the **Serial
-Internal Test**, which fails: the SCC is still the quiet Z8530 stub that keeps
-the ROM's interrupt manager happy, not a serial controller.
+With the clock right, the Diagnostic's sequence gets past it to the Serial
+Internal Test.
+
+## The SCC
+
+`$C038-$C03B` is a Zilog Z8530: a command register and a data register for
+each of two channels, the command register a pointer into sixteen write and
+sixteen read registers. Nothing is plugged into either port, and `IIgsSCC`
+(`core/iigs/iigs_scc.*`) is not a link to the outside world. It is the chip:
+the register file, the transmitter and receiver with their timing, local
+loopback and auto echo, the baud rate generator, and the interrupt logic —
+because software exercises all of that with no cable attached. It replaced a
+stub that answered RR3 with nothing pending and RR0 with an empty transmit
+buffer, which was enough for the ROM's interrupt manager and nothing else.
+
+The Diagnostic's **Serial Internal Test** is the specification. It resets the
+chip through WR9 and writes every register from `$FF` down, reading each back.
+Then it arms the zero-count interrupt: MIE, the slowest time constant, WR15's
+zero-count enable, WR1's ext/status enable, and the generator on — and
+measures the interval between two interrupts against a window either side of
+17.8ms. **The zero count comes every `TC + 2` clocks of 3.6864MHz, not twice
+that.** The counter's output toggles at each zero, which is where the baud
+rate's divide-by-two comes from; a generator counting the output's period was
+twice too slow and fell outside the window. And the counter loads a whole
+period when it is switched on rather than firing at once. Then it switches on
+local loopback at 600 baud and sends bytes round it, one at a time, waiting on
+RR1's all-sent and expecting RR0's receive bit and the same byte from the data
+register.
+
+The **External Serial Ports Test** that follows asks for a loopback cable
+between the two ports, which there is no way to supply.
 
 ## The Two Clocks
 
@@ -445,6 +473,7 @@ src/core/
     ├── iigs_sound.*              # Ensoniq 5503 DOC (done)
     ├── iigs_adb.*                # keyboard and mouse microcontroller (keyboard done)
     ├── iigs_clock.*              # battery-backed clock and 256 bytes of settings (done)
+    ├── iigs_scc.*                # Z8530 behind the serial ports, nothing plugged in (done)
     ├── iigs_battery_ram.*        # settings and the clock chip
     └── iigs_machine.*            # the coordinator, as Emulator is for the rest (done)
 ```

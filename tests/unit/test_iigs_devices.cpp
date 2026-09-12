@@ -10,6 +10,7 @@
 
 #include "iigs_adb.hpp"
 #include "iigs_clock.hpp"
+#include "iigs_scc.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -833,4 +834,168 @@ TEST_CASE("The Ensoniq's interrupt register says no oscillator is asking",
   sound.readData();                // the window is one behind
   REQUIRE((sound.readData() & 0x80) != 0);
   REQUIRE_FALSE(sound.interruptPending());
+}
+
+// ---------------------------------------------------------------------------
+// The SCC
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr uint8_t SCC_CMD_B = 0, SCC_CMD_A = 1, SCC_DATA_B = 2, SCC_DATA_A = 3;
+
+// The chip's own convention: a write to the command register with the
+// pointer at zero picks a register, and the next access reaches it.
+void sccWrite(IIgsSCC &scc, uint8_t command, int reg, uint8_t value) {
+  scc.write(command, static_cast<uint8_t>(reg & 0x0F) | (reg >= 8 ? 0x08 : 0x00));
+  scc.write(command, value);
+}
+
+uint8_t sccRead(IIgsSCC &scc, uint8_t command, int reg) {
+  scc.write(command, static_cast<uint8_t>(reg & 0x0F) | (reg >= 8 ? 0x08 : 0x00));
+  return scc.read(command);
+}
+
+// The Diagnostic's set-up for its loop test: 600 baud, x16 clock, eight bits,
+// receiver and transmitter on, local loopback with the generator running.
+void sccLoopback(IIgsSCC &scc, uint8_t command) {
+  sccWrite(scc, command, 4, 0x4C);
+  sccWrite(scc, command, 11, 0xD0);
+  sccWrite(scc, command, 12, 0xBE);
+  sccWrite(scc, command, 13, 0x00);
+  sccWrite(scc, command, 14, 0x13);
+  sccWrite(scc, command, 3, 0xC1);
+  sccWrite(scc, command, 5, 0x6A);
+}
+
+} // namespace
+
+TEST_CASE("The SCC's command register is a pointer into a register file",
+          "[iigs][scc]") {
+  IIgsSCC scc;
+  // The interrupt vector reads back as written, on either channel: the
+  // Diagnostic writes every value from $00 down and reads each one back.
+  sccWrite(scc, SCC_CMD_A, 2, 0xFE);
+  REQUIRE(sccRead(scc, SCC_CMD_A, 2) == 0xFE);
+  sccWrite(scc, SCC_CMD_B, 12, 0x5A);
+  REQUIRE(sccRead(scc, SCC_CMD_B, 12) == 0x5A);
+  REQUIRE(sccRead(scc, SCC_CMD_A, 12) != 0x5A); // its own register per channel
+
+  SECTION("the pointer goes back to zero after one access") {
+    scc.write(SCC_CMD_A, 0x0F);
+    scc.read(SCC_CMD_A); // RR15
+    REQUIRE((scc.read(SCC_CMD_A) & IIgsSCC::RR0_TX_EMPTY) != 0); // RR0 again
+  }
+
+  SECTION("a hardware reset through WR9 puts the file back") {
+    sccWrite(scc, SCC_CMD_A, 9, 0xC0);
+    REQUIRE(sccRead(scc, SCC_CMD_A, 2) == 0x00);
+    REQUIRE(sccRead(scc, SCC_CMD_A, 15) == 0xF8);
+  }
+}
+
+TEST_CASE("The SCC is quiet until something is asked of it", "[iigs][scc]") {
+  // The ROM's interrupt manager asks RR3 first on every interrupt and takes
+  // any set bit as a serial interrupt; a fresh chip must have none.
+  IIgsSCC scc;
+  REQUIRE(sccRead(scc, SCC_CMD_A, 3) == 0x00);
+  REQUIRE_FALSE(scc.interruptPending());
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_TX_EMPTY) != 0);
+  REQUIRE(scc.read(SCC_DATA_A) == 0x00);
+}
+
+TEST_CASE("The SCC's baud rate generator counts to zero, and that interrupts",
+          "[iigs][scc]") {
+  // The Diagnostic's internal test, step for step: reset, MIE, the slowest
+  // time constant there is, the zero count enabled in WR15 and ext/status
+  // interrupts in WR1, then the generator switched on. It then measures the
+  // interval between two interrupts against a window a little either side
+  // of 17.8ms — (TC + 2) clocks of 3.6864MHz, not twice that: the counter's
+  // output toggles at each zero, so the baud rate is half the zero count.
+  IIgsSCC scc;
+  sccWrite(scc, SCC_CMD_A, 9, 0xC0);
+  sccWrite(scc, SCC_CMD_A, 9, 0x0A);
+  sccWrite(scc, SCC_CMD_A, 12, 0xFF);
+  sccWrite(scc, SCC_CMD_A, 13, 0xFF);
+  sccWrite(scc, SCC_CMD_A, 15, 0x02);
+  scc.write(SCC_CMD_A, 0x10); // reset ext/status
+  sccWrite(scc, SCC_CMD_A, 1, 0x01);
+  sccWrite(scc, SCC_CMD_A, 14, 0x03);
+
+  auto cyclesToInterrupt = [&]() {
+    uint32_t cycles = 0;
+    while (!scc.interruptPending() && cycles < 100000) {
+      scc.advance(10);
+      cycles += 10;
+    }
+    return cycles;
+  };
+  const uint32_t first = cyclesToInterrupt();
+  INFO("first zero count after " << first << " cycles");
+  REQUIRE(first > 17000);
+  REQUIRE(first < 19500);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 3) & IIgsSCC::RR3_A_EXT) != 0);
+  // RR0 is frozen with the zero count up until the CPU acknowledges.
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_ZERO_COUNT) != 0);
+
+  scc.write(SCC_CMD_A, 0x10);
+  REQUIRE_FALSE(scc.interruptPending());
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_ZERO_COUNT) == 0);
+
+  const uint32_t second = cyclesToInterrupt();
+  INFO("next zero count after " << second << " cycles");
+  REQUIRE(second > 17000);
+  REQUIRE(second < 19500);
+
+  SECTION("and master interrupt enable is what puts it on the line") {
+    sccWrite(scc, SCC_CMD_A, 9, 0x02);
+    REQUIRE_FALSE(scc.interruptPending());
+    REQUIRE((sccRead(scc, SCC_CMD_A, 3) & IIgsSCC::RR3_A_EXT) != 0); // still asking
+  }
+}
+
+TEST_CASE("A byte sent round the SCC's local loop comes back", "[iigs][scc]") {
+  // The second half of the Diagnostic's internal test: with local loopback
+  // on it writes a byte, waits for RR1's all-sent, and expects RR0 to say a
+  // byte is waiting and the data register to give the same byte back.
+  IIgsSCC scc;
+  sccWrite(scc, SCC_CMD_A, 9, 0xC0);
+  sccLoopback(scc, SCC_CMD_A);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
+
+  scc.write(SCC_DATA_A, 0xA5);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 1) & 0x01) == 0); // not all sent yet
+  uint32_t cycles = 0;
+  while ((sccRead(scc, SCC_CMD_A, 1) & 0x01) == 0 && cycles < 100000) {
+    scc.advance(100);
+    cycles += 100;
+  }
+  // Ten bits at 600 baud is 16.7ms.
+  INFO("all sent after " << cycles << " cycles");
+  REQUIRE(cycles > 15000);
+  REQUIRE(cycles < 19000);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_RX_AVAILABLE) != 0);
+  REQUIRE(scc.read(SCC_DATA_A) == 0xA5);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
+
+  SECTION("channel B has its own loop") {
+    sccLoopback(scc, SCC_CMD_B);
+    scc.write(SCC_DATA_B, 0x3C);
+    for (int i = 0; i < 200; i++) scc.advance(100);
+    REQUIRE(scc.read(SCC_DATA_B) == 0x3C);
+    REQUIRE(scc.read(SCC_DATA_A) != 0x3C);
+  }
+
+  SECTION("a receive interrupt is raised and cleared with the byte") {
+    sccWrite(scc, SCC_CMD_A, 9, 0x0A);
+    sccWrite(scc, SCC_CMD_A, 1, 0x10); // interrupt on every character
+    scc.write(SCC_DATA_A, 0x42);
+    for (int i = 0; i < 200; i++) scc.advance(100);
+    REQUIRE(scc.interruptPending());
+    REQUIRE((sccRead(scc, SCC_CMD_A, 3) & IIgsSCC::RR3_A_RX) != 0);
+    // RR2 as channel B reads it names the source: channel A receive, 110.
+    REQUIRE((sccRead(scc, SCC_CMD_B, 2) & 0x0E) == 0x0C);
+    REQUIRE(scc.read(SCC_DATA_A) == 0x42);
+    REQUIRE_FALSE(scc.interruptPending());
+  }
 }
