@@ -209,6 +209,17 @@ Three things in it are worth knowing:
 - **`$C035` bit 6 changes what an address is**, rather than where a write also
   goes: with I/O and language card shadowing inhibited, banks `$00`/`$01` are
   plain RAM from `$C000` up, which is how a program gets a contiguous 128KB.
+- **Bank `$00` still obeys the //e's memory switches, and they send it into
+  bank `$01`.** A IIgs is a //e whose main RAM is bank `$00` and whose
+  auxiliary RAM is bank `$01`, so RAMRD and RAMWRT move `$0200-$BFFF`, ALTZP
+  the zero page, stack and language card, and 80STORE with PAGE2 (and HIRES)
+  the text and first hi-res pages — overriding RAMRD/RAMWRT there.
+  `IIgsMemory::effectiveBank` is the rule, applied before the write lands and
+  before it shadows, so a bank `$00` write that belongs in `$01` reaches `$E1`.
+  The 80-column firmware depends on it: a line's even columns go to the text
+  page with 80STORE and PAGE2 on, and a machine that left them in bank `$00`
+  drew every other column blank. Bank `$01` is never redirected. This is the
+  same rule GSSquared applies in `calc_aux_read`/`calc_aux_write`.
 - **`$C068` (STATEREG) is eight of the //e's soft switches in one byte**, and
   writing it drives those switches through their own addresses so everything
   watching them sees the change the usual way. It has no bit for the language

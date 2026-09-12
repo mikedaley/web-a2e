@@ -478,6 +478,23 @@ private:
   void shadowWrite(uint8_t bank, uint16_t offset, uint8_t value);
   bool isShadowed(uint8_t bank, uint16_t offset) const;
 
+  /**
+   * Which bank a bank $00 access really lands in.
+   *
+   * A IIgs is a //e whose main RAM is bank $00 and whose auxiliary RAM is
+   * bank $01, and the //e's memory switches still say which one an address
+   * in bank $00 reaches: RAMRD and RAMWRT for $0200-$BFFF, ALTZP for the
+   * zero page, the stack and the language card, and 80STORE with PAGE2 (and
+   * HIRES) for the text and hi-res pages, overriding RAMRD and RAMWRT there.
+   * That is how the 80-column firmware writes a line's even columns "to
+   * auxiliary memory": it writes bank $00's text page with 80STORE and PAGE2
+   * on, and the FPI puts them in bank $01, from where they shadow into $E1.
+   * A machine that left them in bank $00 drew every other column blank.
+   *
+   * Bank $01 is never redirected — there is nowhere further to go.
+   */
+  uint8_t effectiveBank(uint8_t bank, uint16_t offset, bool write) const;
+
   IIgsADB adb_;
   IIgsClock clock_;
   IIgsSound sound_;

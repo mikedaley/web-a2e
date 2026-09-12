@@ -195,6 +195,25 @@ std::string screenText(IIgsMachine &machine) {
   }
   return text;
 }
+// The 80-column screen: even columns from the auxiliary text page, odd from
+// the main one, which is how the //e's 80-column firmware lays a line out.
+std::string screenText80(IIgsMachine &machine) {
+  static const uint16_t rowBase[24] = {
+      0x400, 0x480, 0x500, 0x580, 0x600, 0x680, 0x700, 0x780,
+      0x428, 0x4A8, 0x528, 0x5A8, 0x628, 0x6A8, 0x728, 0x7A8,
+      0x450, 0x4D0, 0x550, 0x5D0, 0x650, 0x6D0, 0x750, 0x7D0};
+  std::string text;
+  for (int row = 0; row < 24; row++) {
+    for (int column = 0; column < 80; column++) {
+      const uint8_t cell = machine.memory().megaII().readRAM(
+          rowBase[row] + column / 2, (column % 2) == 0);
+      const char ch = static_cast<char>(cell & 0x7F);
+      text += (ch >= 0x20 && ch <= 0x7E) ? ch : ' ';
+    }
+    text += '\n';
+  }
+  return text;
+}
 } // namespace
 
 TEST_CASE("A IIgs boots DOS 3.3 through its own IWM", "[iigs][boot][disk]") {
@@ -403,9 +422,14 @@ TEST_CASE("A IIgs boots ProDOS from its own SmartPort", "[iigs][boot][smartport]
     machine.step();
   }
 
+  // All the way to Bitsy Bye's catalog. It used to stop at the splash with
+  // "Unable to load ATInit file", because the loader keeps that file in
+  // auxiliary memory and bank $00 did not yet follow the //e's switches into
+  // bank $01.
   const std::string text = screenText(machine);
   INFO("screen:\n" << text);
-  REQUIRE(text.find("ProDOS 8") != std::string::npos);
+  REQUIRE(text.find("PRODOS.2.4.3") != std::string::npos);
+  REQUIRE(text.find("BITSY.BOOT") != std::string::npos);
 
   // The Control Panel was not touched to make that happen.
   REQUIRE(machine.memory().peek(0x00C02D) == 0x00);
@@ -622,4 +646,42 @@ TEST_CASE("The VGC interrupts once the beam has drawn a marked Super Hi-Res line
   // A line that no longer asks is left alone.
   memory.write(0x00E19D00 + 100, 0x00);
   REQUIRE(countRaises() == 0);
+}
+
+TEST_CASE("A IIgs's 80-column text puts its even columns in the auxiliary bank",
+          "[iigs][boot][memory]") {
+  // The //e's 80-column firmware writes a line's even columns to the auxiliary
+  // text page through 80STORE and PAGE2, and on a IIgs "auxiliary" is bank
+  // $01, shadowed into $E1. A machine that left those writes in bank $00 drew
+  // every other column blank.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the 80-column test");
+    return;
+  }
+  const std::vector<uint8_t> image = loadSystemMaster();
+  if (image.empty()) {
+    WARN("DOS 3.3 System Master not found; skipping the 80-column test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  REQUIRE(machine.insertDisk(0, image.data(), image.size(), "dos33.dsk"));
+  for (int i = 0; i < 40000000 && !machine.cpu().isStopped(); i++) machine.step();
+  REQUIRE(screenText(machine).find(']') != std::string::npos);
+
+  auto type = [&](const char *line) {
+    for (const char *c = line; *c; c++) {
+      machine.keyDown(*c);
+      for (int i = 0; i < 60000; i++) machine.step();
+    }
+    machine.keyDown(0x0D);
+    for (int i = 0; i < 1500000; i++) machine.step();
+  };
+  type("PR#3");
+  type("PRINT \"ABCDEFGH\"");
+
+  const std::string text = screenText80(machine);
+  INFO("80-column screen:\n" << text);
+  REQUIRE(text.find("ABCDEFGH") != std::string::npos);
 }

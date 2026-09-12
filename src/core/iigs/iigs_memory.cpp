@@ -180,8 +180,9 @@ uint8_t IIgsMemory::read(uint32_t address) {
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
 
-  case Region::FastRAM:
-    if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
+  case Region::FastRAM: {
+    const uint8_t at = effectiveBank(bank, offset, false);
+    if (offset >= LANGUAGE_CARD_BASE && (at == 0x00 || at == 0x01) &&
         ioAndLanguageCardVisible()) {
       // The language card a //e program finds in these banks is made of the
       // bank's own RAM — see fastLanguageCardAddress — and reads ROM when the
@@ -189,9 +190,10 @@ uint8_t IIgsMemory::read(uint32_t address) {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return fastRam_[fastLanguageCardAddress(bank, offset)];
+      return fastRam_[fastLanguageCardAddress(at, offset)];
     }
-    return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
+    return fastRam_[static_cast<size_t>(at) * BANK_SIZE + offset];
+  }
 
   case Region::ROM:
     return readROM(address);
@@ -229,19 +231,21 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
     megaII_->writeRAM(offset, value, bank == SLOW_BANK_AUX);
     return;
 
-  case Region::FastRAM:
-    if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
+  case Region::FastRAM: {
+    const uint8_t at = effectiveBank(bank, offset, true);
+    if (offset >= LANGUAGE_CARD_BASE && (at == 0x00 || at == 0x01) &&
         ioAndLanguageCardVisible()) {
       // The card's write enable is the //e's switch, and it still decides.
       if (!megaII_->getSoftSwitches().lcwrite) return;
-      fastRam_[fastLanguageCardAddress(bank, offset)] = value;
+      fastRam_[fastLanguageCardAddress(at, offset)] = value;
       return;
     }
-    fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset] = value;
+    fastRam_[static_cast<size_t>(at) * BANK_SIZE + offset] = value;
     // ...and then again on the other side of the machine, if anything is
-    // watching that address.
-    shadowWrite(bank, offset, value);
+    // watching that address — the side being the bank the write landed in.
+    shadowWrite(at, offset, value);
     return;
+  }
 
   case Region::ROM:
   case Region::Unpopulated:
@@ -266,21 +270,41 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
-  case Region::FastRAM:
-    if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
+  case Region::FastRAM: {
+    const uint8_t at = effectiveBank(bank, offset, false);
+    if (offset >= LANGUAGE_CARD_BASE && (at == 0x00 || at == 0x01) &&
         ioAndLanguageCardVisible()) {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return fastRam_[fastLanguageCardAddress(bank, offset)];
+      return fastRam_[fastLanguageCardAddress(at, offset)];
     }
-    return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
+    return fastRam_[static_cast<size_t>(at) * BANK_SIZE + offset];
+  }
   case Region::ROM:
     return readROM(address);
   case Region::Unpopulated:
     return 0x00;
   }
   return 0x00;
+}
+
+uint8_t IIgsMemory::effectiveBank(uint8_t bank, uint16_t offset,
+                                  bool write) const {
+  if (bank != 0x00) return bank;
+  const SoftSwitches &sw = megaII_->getSoftSwitches();
+  const uint8_t page = static_cast<uint8_t>(offset >> 8);
+
+  // 80STORE hands the text page, and with HIRES the first hi-res page, to
+  // PAGE2 — and takes them away from RAMRD and RAMWRT, whatever those say.
+  if (sw.store80 && page >= 0x04 && page <= 0x07) return sw.page2 ? 0x01 : 0x00;
+  if (sw.store80 && sw.hires && page >= 0x20 && page <= 0x3F) {
+    return sw.page2 ? 0x01 : 0x00;
+  }
+  // Zero page, the stack and everything from $C000 up follow ALTZP.
+  if (page <= 0x01 || page >= 0xC0) return sw.altzp ? 0x01 : 0x00;
+  // The rest is RAMRD's on a read and RAMWRT's on a write.
+  return (write ? sw.ramwrt : sw.ramrd) ? 0x01 : 0x00;
 }
 
 // ============================================================================
@@ -708,12 +732,12 @@ bool IIgsMemory::isShadowed(uint8_t bank, uint16_t offset) const {
   if (offset >= TEXT_PAGE1_BASE && offset < TEXT_PAGE1_END) {
     return (shadow_ & SHADOW_TEXT_PAGE1) == 0;
   }
-  if (offset >= HIRES_PAGE1_BASE && offset < HIRES_PAGE1_END) {
-    if (bank == 0x01 && (shadow_ & SHADOW_AUX_HIRES) != 0) return false;
-    return (shadow_ & SHADOW_HIRES_PAGE1) == 0;
-  }
-  if (offset >= HIRES_PAGE2_BASE && offset < HIRES_PAGE2_END) {
-    if (bank == 0x01 && (shadow_ & SHADOW_AUX_HIRES) != 0) return false;
+  if (offset >= HIRES_PAGE1_BASE && offset < HIRES_PAGE2_END) {
+    // Bank $01's hi-res pages answer to their own bit, and — asked above —
+    // to Super Hi-Res, which covers the same addresses: they are shadowed
+    // unless both say not to. The two per-page bits are bank $00's.
+    if (bank == 0x01) return (shadow_ & SHADOW_AUX_HIRES) == 0;
+    if (offset < HIRES_PAGE1_END) return (shadow_ & SHADOW_HIRES_PAGE1) == 0;
     return (shadow_ & SHADOW_HIRES_PAGE2) == 0;
   }
   return false;

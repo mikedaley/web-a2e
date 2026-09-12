@@ -183,6 +183,83 @@ TEST_CASE("Shadowing copies a write to the side the video is looking at",
   }
 }
 
+TEST_CASE("Bank $00 follows the //e's memory switches into bank $01",
+          "[iigs][memory]") {
+  // A IIgs is a //e whose main RAM is bank $00 and whose auxiliary RAM is
+  // bank $01, and RAMRD, RAMWRT, ALTZP, 80STORE and PAGE2 still decide which
+  // of them an address in bank $00 reaches. The 80-column firmware depends on
+  // it: a line's even columns are written to the text page with 80STORE and
+  // PAGE2 on, meant for auxiliary memory. Left in bank $00 they shadowed into
+  // $E0 on top of the odd columns, and every other column drew blank.
+  IIgsMemory memory;
+  MMU &megaII = memory.megaII();
+
+  SECTION("RAMWRT and RAMRD move $0200-$BFFF") {
+    memory.write(0x00C005, 0); // RAMWRT on
+    memory.write(0x003000, 0x5A);
+    REQUIRE(memory.peek(0x013000) == 0x5A);
+    REQUIRE(memory.fastRamByte(0x003000) == 0x00); // bank $00 untouched
+    memory.write(0x00C004, 0); // RAMWRT off
+    memory.write(0x003000, 0xA5);
+    REQUIRE(memory.fastRamByte(0x003000) == 0xA5);
+    REQUIRE(memory.peek(0x013000) == 0x5A);
+
+    REQUIRE(memory.read(0x003000) == 0xA5); // RAMRD off: bank $00's
+    memory.write(0x00C003, 0); // RAMRD on
+    REQUIRE(memory.read(0x003000) == 0x5A); // bank $01's
+    memory.write(0x00C002, 0);
+
+    // Bank $01 itself is never redirected.
+    memory.write(0x00C005, 0);
+    memory.write(0x013000, 0x33);
+    REQUIRE(memory.peek(0x013000) == 0x33);
+  }
+
+  SECTION("80STORE and PAGE2 hand the text page to bank $01, and shadow it into $E1") {
+    memory.write(0x00C001, 0); // 80STORE on
+    memory.write(0x00C055, 0); // PAGE2 on
+    memory.write(0x000400, 0xC1); // an 'A' in an even column
+    REQUIRE(memory.peek(0x010400) == 0xC1);
+    REQUIRE(memory.fastRamByte(0x000400) == 0x00);
+    REQUIRE(megaII.readRAM(0x0400, true) == 0xC1);  // the aux text page
+    REQUIRE(megaII.readRAM(0x0400, false) == 0x00); // not the main one
+
+    memory.write(0x00C054, 0); // PAGE2 off: the main text page, whatever RAMWRT says
+    memory.write(0x00C005, 0); // RAMWRT on
+    memory.write(0x000401, 0xC2);
+    REQUIRE(memory.fastRamByte(0x000401) == 0xC2);
+    REQUIRE(memory.peek(0x010401) == 0x00);
+    REQUIRE(megaII.readRAM(0x0401, false) == 0xC2);
+    // ...while an address outside the text page still follows RAMWRT.
+    memory.write(0x000800, 0x77);
+    REQUIRE(memory.peek(0x010800) == 0x77);
+  }
+
+  SECTION("80STORE with HIRES hands the first hi-res page to PAGE2 too") {
+    memory.write(0x00C001, 0); // 80STORE
+    memory.write(0x00C057, 0); // HIRES
+    memory.write(0x00C055, 0); // PAGE2
+    memory.write(0x002000, 0x11);
+    REQUIRE(memory.peek(0x012000) == 0x11);
+    REQUIRE(memory.fastRamByte(0x002000) == 0x00);
+    memory.write(0x00C056, 0); // LORES: the hi-res page is RAMWRT's again
+    memory.write(0x002001, 0x22);
+    REQUIRE(memory.fastRamByte(0x002001) == 0x22);
+  }
+
+  SECTION("ALTZP moves the zero page and the stack") {
+    memory.write(0x00C009, 0); // ALTZP on
+    memory.write(0x000080, 0x42);
+    memory.write(0x0001FF, 0x43);
+    REQUIRE(memory.peek(0x010080) == 0x42);
+    REQUIRE(memory.peek(0x0101FF) == 0x43);
+    REQUIRE(memory.fastRamByte(0x000080) == 0x00);
+    REQUIRE(memory.read(0x000080) == 0x42);
+    memory.write(0x00C008, 0);
+    REQUIRE(memory.read(0x000080) == 0x00);
+  }
+}
+
 TEST_CASE("The state register is eight soft switches in one byte",
           "[iigs][state]") {
   // A //e sets its memory map with eight separate addresses. A IIgs program
