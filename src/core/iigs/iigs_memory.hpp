@@ -158,6 +158,11 @@ public:
 
   size_t fastRamSize() const { return fastRam_.size(); }
 
+  /** A byte of fast RAM as stored, whatever the map says. For tests. */
+  uint8_t fastRamByte(uint32_t address) const {
+    return address < fastRam_.size() ? fastRam_[address] : 0;
+  }
+
   /** Whether a bank has fast RAM in it. Unpopulated banks read as $00. */
   bool bankIsPopulated(uint8_t bank) const {
     return (static_cast<size_t>(bank) + 1) * BANK_SIZE <= fastRam_.size();
@@ -231,6 +236,57 @@ public:
    * it in, and it needs no setting changed before it answers.
    */
   void setInternalCardSlot(uint8_t slot) { internalCardSlot_ = slot; }
+
+  /**
+   * The machine's interrupt sources, and whether any is asking.
+   *
+   * A IIgs has three places an interrupt can come from that a //e has not:
+   * the ADB controller (mouse, keyboard, a command's answer — see IIgsADB),
+   * the VGC ($C023: a one-second tick and a scan-line match), and the Mega
+   * II's own ($C041 enables vertical blanking and a quarter-second tick; $C046
+   * reports them; a write to $C047 clears them). The processor samples the
+   * OR of all of it every instruction.
+   *
+   * GS/OS enables the ADB mouse interrupt and the VGC's one-second tick on
+   * the way up, and a machine without either had a Finder that drew its
+   * desktop and then never noticed the mouse.
+   */
+  bool interruptPending() const;
+
+  /** The frame has ended: what the Mega II calls vertical blanking. */
+  void signalVerticalBlank() { vblPending_ = true; }
+
+  /**
+   * The VGC has finished drawing a Super Hi-Res line whose control byte asks
+   * for an interrupt (bit 6 of the SCB), and $C023 bit 2 lets it.
+   *
+   * QuickDraw II draws the mouse pointer from this interrupt, not from the
+   * vertical blank: it marks the line the pointer sits on and redraws once
+   * the beam is past it, from the handler it installs at $E1:0028.
+   */
+  void signalScanLine() { scanLinePending_ = true; }
+
+  /** The slow clock has moved; raise whichever ticks it has crossed. */
+  void tickClocks();
+
+  /**
+   * The serial chip, as far as it needs to exist: quiet.
+   *
+   * $C038-$C03B is the Z8530 SCC behind a IIgs's two serial ports, and the
+   * interrupt manager asks it *first* on every interrupt — writes 3 to the
+   * command register to select RR3, reads it back, and takes any set bit as
+   * "the SCC is interrupting". A machine with no chip there returned the
+   * bus, which read as an interrupting SCC, so the manager serviced a serial
+   * port that does not exist and never got as far as the vertical-blanking
+   * interrupt that had actually fired — over and over, until it gave up and
+   * called it an unclaimed sound interrupt.
+   *
+   * So the chip answers: a register pointer, no interrupts pending, and a
+   * transmit buffer that is always empty so that anything printing to a port
+   * finishes rather than waits.
+   */
+  uint8_t readSerial(uint16_t offset);
+  void writeSerial(uint16_t offset, uint8_t value);
 
   uint8_t textColourRegister() const { return textColour_; }
   void setTextColourRegister(uint8_t value) {
@@ -312,6 +368,26 @@ public:
 
   static constexpr uint8_t SPEED_FAST = 0x80;
   static constexpr uint8_t BORDER_MASK = 0x0F;
+
+  // $C041 INTEN and $C046 status share bit positions for the two ticks.
+  static constexpr uint8_t INT_QUARTER_SECOND = 0x10;
+  static constexpr uint8_t INT_VBL = 0x08;
+  static constexpr uint8_t INT_STATUS_ANY = 0x80;
+
+  // $C023: the VGC's register — enables in the low bits, pending above them,
+  // each pending bit four places above its enable. The scan line is the
+  // lower pair, bit 1 with bit 5, and the one-second tick the upper, bit 2
+  // with bit 6. The ROM's interrupt manager tests exactly that: `AND #$22 /
+  // LSR / LSR` takes the lower pair and dispatches through $E1:0028, which is
+  // where QuickDraw II installs its scan-line handler — the one that draws
+  // the mouse pointer. With the pairs the other way round, GS/OS's scan-line
+  // enable was read as the one-second's, and the pointer was redrawn once a
+  // second, on the tick that arrived through QuickDraw's vector instead.
+  static constexpr uint8_t VGC_SCANLINE_ENABLE = 0x02;
+  static constexpr uint8_t VGC_ONE_SECOND_ENABLE = 0x04;
+  static constexpr uint8_t VGC_SCANLINE_PENDING = 0x20;
+  static constexpr uint8_t VGC_ONE_SECOND_PENDING = 0x40;
+  static constexpr uint8_t VGC_ANY_PENDING = 0x80;
   static constexpr uint8_t NEW_VIDEO_SHR = 0x80;
   static constexpr uint8_t DISK_SELECT_35 = 0x80;
   static constexpr uint8_t DISK_SELECT_DRIVE2 = 0x40;
@@ -345,20 +421,28 @@ private:
   uint8_t readROM(uint32_t address) const;
 
   /**
-   * Which half of the language card a shadowed bank reaches.
+   * Where a language-card access in bank $00 or $01 actually lands.
    *
-   * Banks $00 and $01 carry the Mega II's language card at $D000-$FFFF, and
-   * they carry a different half of it each: $00 the main card, $01 the
-   * auxiliary one, exactly as $E0 and $E1 do. Addressing bank $01 is the
-   * 65816's way of saying "auxiliary", and it means that whatever the //e's
-   * switches say.
+   * These two banks are 64K of fast RAM each, and their $D000-$FFFF is their
+   * own: the FPI gives a //e program the language card it expects out of the
+   * bank's own memory, with the second $D000 bank being the 4K that the I/O
+   * space otherwise hides at $C000-$CFFF. None of it is the Mega II's card —
+   * that is $E0's and $E1's, a different 32K, and the two must not touch.
    *
-   * ALTZP is how a //e asks for the same thing, having no bank to name it
-   * with, so it still moves bank $00 across: a //e program running on the fast
-   * side has to behave as it would on a //e. What it cannot do is move bank
-   * $01, which is already there.
+   * They did. GS/OS loads its kernel into $00:D000-$FFF9 and $01:D000-$FB48
+   * and then its toolbox glue into $E0:E000 and $E1:D980, and a machine that
+   * routed the first pair through the Mega II's card had the second pair
+   * overwrite them: the kernel's dispatch table sent every call into the
+   * middle of whatever had landed on top of the routine it named.
+   *
+   * ALTZP moves a bank $00 access across to bank $01's card, because that is
+   * how a //e asks for the auxiliary card and //e software on the fast side
+   * has to behave as it would on a //e. Bank $01 is already there.
    */
-  bool languageCardAux(uint8_t bank) const;
+  uint32_t fastLanguageCardAddress(uint8_t bank, uint16_t offset) const;
+
+  uint8_t vgcInterruptRegister() const;
+  uint8_t interruptStatusRegister() const;
 
   /** $C034 as one byte: the clock's nibble over the border's. */
   uint8_t clockControlRegister() const {
@@ -429,6 +513,21 @@ private:
   // white on black until it does is what a machine with no settings shows.
   uint8_t textColour_ = 0xF0;
   uint8_t border_ = 0x00;
+
+  // The SCC's register pointer, one per channel; a write selects, the next
+  // access uses it and puts it back to zero.
+  uint8_t serialPointer_[2] = {0, 0};
+
+  // Interrupt state: what is enabled, and what has happened since it was
+  // last cleared.
+  uint8_t interruptEnable_ = 0; // $C041
+  uint8_t vgcInterrupt_ = 0;    // $C023's enable bits
+  bool vblPending_ = false;
+  bool scanLinePending_ = false;
+  bool quarterSecondPending_ = false;
+  bool oneSecondPending_ = false;
+  uint64_t lastQuarterSecond_ = 0;
+  uint64_t lastSecond_ = 0;
 
   // Which slots have a drive turning, for the motor detect bits above.
   SlotMotorQuery slotMotorQuery_;

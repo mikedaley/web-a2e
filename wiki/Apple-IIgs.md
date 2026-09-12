@@ -1,6 +1,6 @@
 # Apple IIgs
 
-**Status: it boots, reads both its drives, and gets as far as the GS/OS startup screen.** The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
+**Status: it boots GS/OS.** System 6.0.4 comes up to the Finder, with the hard drive on the desktop and a pointer that follows the mouse. The real ROM runs, passes its power-on diagnostics, draws the Apple IIgs splash screen through the Mega II, and then reads track zero through its own IWM and comes up at the DOS 3.3 prompt — white on blue, in a blue border, with the drive panel and the drive sounds following the head the way they do on every other machine here. With no disk in it the machine stops at **Check startup device!**, which is what a real one says. You can type at it, and it has a speaker as well as an Ensoniq. Super Hi-Res is drawn, but nothing in the firmware turns it on, so it appears when a program does.
 
 It takes about ten seconds of emulated time to get through the diagnostics, so the screen is black for a while before the splash appears. This page is the plan — what a IIgs is, why it cannot be another profile, where its code goes, and the order the parts arrive in.
 
@@ -133,45 +133,105 @@ whose unpopulated banks answered would report memory it has not got.
 draws *Welcome to the IIgs — System 6.0.4* in the box with the progress bar. It
 does not finish booting; where it stops is written down below.
 
-Two memory-map bugs stood in the way, and both were the same mistake a bank
-apart: **a bank names which half of the language card it reaches, and this asked
-ALTZP instead.**
+Three memory-map bugs stood in the way, and none of them looked like a memory map.
 
-The Mega II's 128K is banks `$E0` (main) and `$E1` (auxiliary), and banks `$00`
-and `$01` carry the same language card at `$D000-$FFFF`, a half each. A //e has
-only ALTZP to ask with, because a //e has no bank to name — so the //e's own
-read path takes ALTZP, and using it for a IIgs makes each pair one 48K instead
-of two. `IIgsMemory::languageCardAux` is the rule in one place: bank `$01` and
-bank `$E1` are the auxiliary half whatever the switches say, and ALTZP still
-moves bank `$00` across, because //e software on the fast side has to behave as
-it would on a //e.
+**Banks `$00` and `$01` are 64K of fast RAM each, language card included.** Their
+`$D000-$FFFF` is their own: the FPI gives a //e program the card it expects out
+of the bank's own memory, with the second `$D000` bank being the 4K that the I/O
+space otherwise hides at `$C000-$CFFF`. None of it is the Mega II's card — that
+belongs to `$E0` and `$E1`, a different 32K. GS/OS puts its kernel at
+`$00:D000-$FFF9` and `$01:D000-$FB48` and its toolbox glue at `$E0:E000` and
+`$E1:D980`, and a machine that routed the first pair through the Mega II's card
+had the second pair land on top of them. `IIgsMemory::fastLanguageCardAddress`
+is the rule, and the segment map in `GS.OS` is how it was found: each segment
+carries its load address, and comparing every one against memory showed exactly
+which had been overwritten, from what.
 
-What each looked like is worth knowing, because neither looked like a memory map:
+What each looked like is worth knowing:
 
-- **`$E0`/`$E1`** presented as a *memory* fault. System 6 stopped at *Error
-  allocating memory for GS/OS. Error =$0201* — Memory Manager error 1 — with the
-  same message at 256K, 1M, 2M and 4M, and with the firmware's own bank count
-  correctly following the RAM (`$E1:1624` goes `$04` → `$10` at 1M). The Memory
-  Manager was not miscounting memory. Its tables live in `$E1`'s language card,
-  and bank `$E0` had been writing over them.
-- **`$00`/`$01`** presented as a *video* fault: a screen of repeating green and
-  lavender, which is the Mega II's hi-res page showing what was never written to
-  it. GS/OS runs code out of `$01:D000` upward; it got bank `$00`'s card, which
-  held data — four `CMP (dp,S),Y` in a row at `$01:D06F` — and walked up through
-  bank `$00` executing whatever it found until it ran off `$00:FFFF` and fell to
-  `$00:0000`, where every vector was zero and it sat in a BRK storm.
+- **`$E0`/`$E1` sharing one card** presented as a *memory* fault: *Error
+  allocating memory for GS/OS. Error =$0201* — the Memory Manager's tables live
+  in `$E1`'s card, and bank `$E0` had been writing over them. Same message at
+  256K and 4M, with the firmware's own bank count correctly following the RAM.
+- **`$00`/`$01` sharing the Mega II's card** presented as a *video* fault: a
+  screen of repeating green and lavender, which is the Mega II's hi-res page
+  showing what was never written to it. GS/OS runs code out of `$01:D000`; it
+  got something else, executed data, walked off `$00:FFFF` into page zero, and
+  sat in a BRK storm.
+- **`$00`/`$01` sharing *each other's* card** (the first fix's mistake)
+  presented as a *dispatch* fault: the kernel's jump table sent every call into
+  the middle of whatever segment had landed on the routine it named.
 
-**Where it stops now**, so that whoever picks this up does not re-derive it. At
-about 2.54 million instructions, `$00:AE15` executes an `RTS` to `$0000`. The
-address it returns through was pushed at `$00:AE02` from direct page `$28` — the
-machine is running on GS/OS's direct page at `$00:9900` — and that word is zero.
-It is zero legitimately: `$01:B9A5` calls `$01:D06F`, which allocates the direct
-page through the Tool Locator (490 instructions, returning `A=$9900`, carry
-clear — a success), and the caller then clears all 256 bytes of it at `$01:B9AF`.
-Nothing writes `$28` between that clear and the `RTS` twenty thousand
-instructions later. So the question to answer next is what was supposed to fill
-it, and it is **not** a question about how much RAM is fitted: the run is
-identical at 1M, 4M and 8M.
+**Vectors are pulled from ROM, whatever the language card holds.** The 65816
+says on its VPB line when it is fetching a vector, and the FPI answers from ROM
+regardless of the map. Nothing on a IIgs writes a vector into bank zero's RAM —
+the kernel image ends before `$FFFA` and holds nothing at `$FFEE` — and GS/OS
+copies that kernel over `$D000-$FFFF` with interrupts enabled. A machine that
+read the vector out of the RAM took the first interrupt of that copy to `$0000`.
+`CPU65816::setVectorReadCallback` is how the machine has its say.
+
+## Interrupts
+
+A IIgs has three interrupt sources a //e has not, and GS/OS needs all of them:
+
+- **The ADB controller, `$C027`.** Bit 7 says the mouse register is full and
+  bit 6 lets that interrupt; bit 2 says the keyboard register is full and bit 3
+  lets that. The full bits are the controller's, the enables the processor's,
+  and the line is the AND of each pair. GS/OS sets bit 6 and waits, and a
+  machine that never raised the interrupt had a Finder whose pointer never
+  moved. Bit 5 — "a byte is in the data register" — must be true only when one
+  is: the interrupt manager reads this register first on every interrupt, and a
+  bit 5 that was always set was an ADB interrupt to service every time, so
+  nothing underneath it was ever acknowledged.
+- **The mouse register, `$C024`, reports what has added up, not what arrived.**
+  The host sends every twitch it gets, hundreds a second on a fast mouse. Queued
+  one behind the other, each cost GS/OS a whole interrupt handler and the
+  pointer fell behind and then leapt. So movement is *summed* until the
+  processor comes to read, and a report carries as much as its seven bits can,
+  the rest waiting for the next. A button change is a report of its own with no
+  movement in it — a Finder that only heard about the button while the pointer
+  was moving could not be clicked on anything held still.
+- **The VGC, `$C023`.** Enables in the low bits, pending flags four above
+  them: the scan-line interrupt is enable bit 1 and flag bit 5, the one-second
+  tick enable bit 2 and flag bit 6, bit 7 says any. `$C032` acknowledges: bit 5
+  low for the scan line, bit 6 low for the second. Which pair is which was
+  settled by the firmware and by QuickDraw II together: the ROM's manager does
+  `LDA $C023 / BPL / AND #$22 / LSR / LSR / BCC / BEQ / JSL $E1:0028`, and the
+  vector at `$E1:0028` is where QuickDraw II installs its scan-line handler —
+  the one that draws the mouse pointer, marking the pointer's line with bit 6
+  of its control byte and redrawing once the beam is past it, then writing
+  `$DF` to `$C032`. `IIgsMachine::raiseScanLineInterrupts` walks the lines each
+  step and reads the control bytes only while Super Hi-Res is on. With the two
+  pairs the other way round, GS/OS's scan-line enable was taken as the
+  one-second's, the tick arrived through QuickDraw's vector, and the pointer
+  was redrawn once a second: it followed the mouse, in jumps. GSSquared's
+  `$C032` handler clears the same way round.
+- **The Mega II, `$C041`/`$C046`/`$C047`.** INTEN enables vertical blanking
+  (bit 3) and the quarter-second tick (bit 4); `$C046` reports them with bit 7
+  for any; any write to `$C047` clears them. The ROM enables VBL itself on the
+  way into GS/OS — `STA $C041` from `$FE:A033`.
+
+Two more things had to be right before the manager would claim any of them:
+
+- **The serial chip has to be quiet.** The manager asks the SCC *first*: writes
+  3 to `$C039` to select RR3, reads it back, and takes any set bit as a serial
+  interrupt. A machine with no chip there returned the bus, which read as an
+  interrupting SCC, and the manager serviced a port that does not exist instead
+  of the vertical blank that had fired — over and over, until it gave up and
+  reported an *Unclaimed Sound Interrupt*. `IIgsMemory::readSerial` is a
+  register pointer, RR3 of zero, and a transmit buffer that is always empty.
+- **The Ensoniq's interrupt register is active low.** Register `$E0` with bit 7
+  clear means an oscillator interrupted, and this chip raises none. Reading the
+  zero it was never written with told the manager the sound chip was asking,
+  and then that no oscillator was — the same *Unclaimed Sound Interrupt*, with
+  the chip having done nothing at all.
+
+And the vectors themselves: `$C071-$C07F` is firmware mapped into the I/O page —
+`SEP #$40 / BVC / JML $E1:0010`, which is how an 8-bit vector reaches a 16-bit
+interrupt manager. A //e reads the bus there; a IIgs that did the same took every
+BRK into a page of zeros and sat executing BRK after BRK where its handler should
+be. With it mapped, a crash drops into the IIgs Monitor with a register dump,
+which is what a real one does.
 
 ## The SmartPort
 
@@ -203,6 +263,24 @@ you would go to the Control Panel and set a slot to "Your Card" before a card in
 it answered. A part the machine *has* is on the internal side of that switch, so
 `IIgsMemory::setInternalCardSlot` names the one slot that answers either way.
 `$C02D` is left reading exactly what the firmware wrote.
+
+**GS/OS asks a card four things a //e never does, and the card must answer
+all of them.** It reads `$CnFB` before it will build a driver for the slot, and
+wants bit 7 — "extended calls supported" — set. It asks `STATUS` code 3, the
+Device Information Block: status byte, three-byte block count, a name, a type,
+a subtype and a version, 25 bytes; a card that only filled code 0 handed it
+garbage and GS/OS built no device. It then issues *extended* calls — command bit
+6 — whose inline pointer is four bytes, not two, so the return is stepped over
+five bytes rather than three; a card that stepped three returned into the
+middle of the pointer and executed a `$00`. And it uses those calls to read
+straight into bank `$0E`, so the card needs the whole address space:
+`setMemRead24Callback`/`setMemWrite24Callback`, which a //e leaves unset. The
+stack pointer it hands the card is the full address in bank zero — `$01xx` on a
+6502, or in emulation mode — so one shape serves both processors.
+
+A debugger's view of the card must be free of side effects: the entry points
+are traps, and a memory viewer parked on `$C513` was making a SmartPort call
+every repaint. `ExpansionCard::peekROM` is the answer.
 
 **A trap card must be told when the CPU is executing, not guess.** The card's
 entry points are traps: a read of `$C510` during a fetch is a driver call to

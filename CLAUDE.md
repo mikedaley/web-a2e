@@ -258,22 +258,43 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
-**A bank names which half of the language card it reaches**, and asking ALTZP
-instead is how `$E0`/`$E1` and `$00`/`$01` each became one 48K rather than two.
-`IIgsMemory::languageCardAux` is that rule; `MMU::readLanguageCardRAM`/
-`writeLanguageCardRAM` take the half as an argument, and the //e's own
-`readLanguageCard`/`writeLanguageCard` are those with ALTZP passed in, so
-nothing about a //e changes. Both bugs presented as something else entirely —
-see `wiki/Apple-IIgs.md`.
+**Banks `$00` and `$01` are 64K of fast RAM each, language card included.**
+Their `$D000-$FFFF` is the bank's own memory in the shape of a //e's card, with
+the second `$D000` bank being the 4K hidden under `$C000`; the Mega II's card
+belongs to `$E0`/`$E1` alone, and `MMU::readLanguageCardRAM`/`writeLanguageCardRAM`
+take main-or-aux as an argument for it. `IIgsMemory::fastLanguageCardAddress` is
+the rule for the fast side. Three earlier models of this each broke GS/OS in a
+way that looked like something else — see `wiki/Apple-IIgs.md`.
+
+**Vectors are pulled from ROM whatever the map shows** — the FPI answering the
+65816's VPB line. `CPU65816::setVectorReadCallback` is the hook; nothing on a
+IIgs writes a vector into RAM, and GS/OS copies its kernel over `$D000-$FFFF`
+with interrupts enabled.
+
+**Interrupts.** `IIgsMemory::interruptPending()` is the OR of the ADB
+(`$C027`, full/enable pairs), the VGC (`$C023`: the scan line is enable bit 1
+with flag bit 5, the one-second tick enable bit 2 with flag bit 6; both
+acknowledged through `$C032`, bit 5 low for the scan line and bit 6 low for
+the second), and the Mega II (`$C041`/`$C046`/`$C047`, VBL and quarter-second);
+the CPU samples it every instruction. The scan-line interrupt is asked for by
+bit 6 of a Super Hi-Res line's control byte and raised by
+`IIgsMachine::raiseScanLineInterrupts` as the beam finishes that line.
+QuickDraw II draws the mouse pointer from it, through the handler it installs
+at `$E1:0028` — the vector the ROM's `AND #$22 / LSR / LSR` dispatch reaches —
+so with the two VGC pairs swapped the pointer was redrawn once a second, on the
+tick that arrived through QuickDraw's vector instead. The ROM's manager asks the SCC *first*
+and the Ensoniq's `$E0` *last*, so `$C038-$C03B` answer as a quiet Z8530 and
+register `$E0` reads active-low "none" — either one wrong is *Unclaimed Sound
+Interrupt*. `$C071-$C07F` map the ROM's vector firmware into the I/O page.
 
 **How much fast RAM a IIgs has is a user choice**, from 256K to 8M, in the
 Machine menu and remembered in localStorage. `_setIIgsMemoryKB` rebuilds the
 machine, as switching machines does, and `main.js` applies the remembered size
 *before* the machine is built rather than after. `clampFastRamSize` rounds to
 whole 64K banks; banks above what is fitted must not answer, because the
-firmware sizes memory by writing to one and reading it back. GS/OS reaches its startup screen but
-does not finish booting, and the run is identical at 1M, 4M and 8M — see
-`wiki/Apple-IIgs.md` for exactly where it stops.
+firmware sizes memory by writing to one and reading it back. System 6.0.4 boots to the Finder
+with a working mouse; the built-in SmartPort in slot 5 serves it hard drive images
+through GS/OS's extended calls.
 
 **Slot 5 is the IIgs's SmartPort, and it is part of the machine** — no card to
 fit, no Control Panel setting. `IIgsMemory::setInternalCardSlot` names the slot

@@ -55,8 +55,25 @@ public:
   uint8_t readData();
   void writeCommand(uint8_t value);
 
-  /** $C027: whose turn it is. */
+  /**
+   * $C027: whose turn it is, and which of them may interrupt.
+   *
+   * Bit 7 says the mouse register is full and bit 6 lets that interrupt;
+   * bit 2 says the keyboard register is full and bit 3 lets that interrupt.
+   * The full bits are the controller's and the enables the processor's, and
+   * the interrupt line is the AND of each pair, ORed together. Bit 5 says the
+   * data register has an answer, bit 4 that a command is still being taken,
+   * and bit 1 whether the next mouse byte is X or Y.
+   *
+   * GS/OS runs its mouse on this: it sets bit 6 and waits for the interrupt,
+   * and a machine that never raised one had a Finder whose pointer never
+   * moved however much the mouse did.
+   */
   uint8_t readStatus() const;
+  void writeStatus(uint8_t value);
+
+  /** Whether the controller is holding the interrupt line down. */
+  bool interruptPending() const;
 
   // ===== Input, for when there is somebody typing =====
 
@@ -88,15 +105,28 @@ public:
   void setAnyKeyDown(bool down) { anyKeyDown_ = down; }
   bool isAnyKeyDown() const { return anyKeyDown_; }
   /**
-   * Mouse movement, as the controller reports it.
+   * Mouse movement, as the host sees it.
    *
-   * Two bytes: X then Y, each a seven-bit signed delta with the button's state
-   * in the top bit — which is why a IIgs mouse cannot move more than 63 units
-   * between reports, and why the button is read twice for every movement.
+   * The host sends every twitch it gets, hundreds a second on a fast mouse,
+   * and each one is *added* to what is waiting rather than queued behind it.
+   * The controller makes a report only when the processor comes to read one,
+   * and that report carries as much of the movement as its seven bits will —
+   * so a pointer that has fallen behind catches up in one report rather than
+   * crawling through a queue of tiny ones, which is what "choppy" was.
    */
   void queueMouse(int deltaX, int deltaY);
-  void setMouseButton(bool pressed) { mouseButton_ = pressed; }
+
+  /**
+   * The button. A change is a report of its own, with no movement in it: a
+   * real mouse says so when it is clicked without being moved, and a Finder
+   * that only heard about the button when the pointer happened to be moving
+   * could not be clicked on anything.
+   */
+  void setMouseButton(bool pressed);
   bool isMouseButtonPressed() const { return mouseButton_; }
+
+  /** Whether there is a mouse report waiting or in the middle of being read. */
+  bool hasMouseData() const;
   void setModifiers(uint8_t modifiers) { modifiers_ = modifiers; }
 
   // ===== State, for tests =====
@@ -105,12 +135,17 @@ public:
   size_t responseCount() const { return response_.size(); }
   uint8_t lastCommand() const { return lastCommand_; }
 
+  // The layout the ROM's own diagnostic checks: get bit 4 wrong and the
+  // machine stops at "Fatal system error-> 0911" before drawing anything.
   static constexpr uint8_t STATUS_MOUSE_DATA = 0x80;
   static constexpr uint8_t STATUS_MOUSE_INTERRUPT = 0x40;
   static constexpr uint8_t STATUS_DATA_AVAILABLE = 0x20;
   static constexpr uint8_t STATUS_COMMAND_FULL = 0x10;
   static constexpr uint8_t STATUS_KEYBOARD_INTERRUPT = 0x08;
   static constexpr uint8_t STATUS_KEYBOARD_DATA = 0x04;
+  static constexpr uint8_t STATUS_MOUSE_Y_NEXT = 0x02;
+  static constexpr uint8_t STATUS_INTERRUPT_ENABLES =
+      STATUS_MOUSE_INTERRUPT | STATUS_KEYBOARD_INTERRUPT;
 
 private:
   // How many argument bytes a command takes, and what it sends back. The
@@ -127,7 +162,15 @@ private:
 
   std::deque<uint8_t> response_;
   std::deque<uint8_t> keyboard_;
-  std::deque<uint8_t> mouse_;
+
+  // The mouse: movement not yet reported, whether the button has changed
+  // since it was, and the report in progress. A report is two bytes, X then
+  // Y, made when the X is read and finished when the Y is.
+  int pendingX_ = 0;
+  int pendingY_ = 0;
+  bool buttonChanged_ = false;
+  bool reportInProgress_ = false;
+  uint8_t reportY_ = 0;
 
   std::array<uint8_t, 256> controllerMemory_{};
   std::array<uint8_t, 8> arguments_{};
@@ -140,6 +183,7 @@ private:
   bool mouseButton_ = false;
   bool anyKeyDown_ = false;
   uint8_t modes_ = 0;
+  uint8_t interruptEnables_ = 0;
   std::array<uint8_t, 3> configuration_{};
 };
 

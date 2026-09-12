@@ -24,6 +24,15 @@ constexpr uint16_t REG_CLOCK_DATA = 0xC033;
 constexpr uint16_t REG_CLOCK_CONTROL = 0xC034;
 constexpr uint16_t REG_NEW_VIDEO = 0xC029;
 constexpr uint16_t REG_TEXT_COLOUR = 0xC022;
+constexpr uint16_t REG_VGC_INTERRUPT = 0xC023;
+constexpr uint16_t REG_VGC_INTERRUPT_CLEAR = 0xC032;
+constexpr uint16_t REG_INTERRUPT_ENABLE = 0xC041;
+constexpr uint16_t REG_INTERRUPT_STATUS = 0xC046;
+constexpr uint16_t REG_INTERRUPT_CLEAR = 0xC047;
+constexpr uint16_t REG_SCC_COMMAND_B = 0xC038;
+constexpr uint16_t REG_SCC_COMMAND_A = 0xC039;
+constexpr uint16_t REG_SCC_DATA_B = 0xC03A;
+constexpr uint16_t REG_SCC_DATA_A = 0xC03B;
 constexpr uint16_t REG_SHADOW = 0xC035;
 constexpr uint16_t REG_SPEED = 0xC036;
 constexpr uint16_t REG_STATE = 0xC068;
@@ -93,6 +102,12 @@ void IIgsMemory::reset() {
   resetClock();
   shadow_ = 0;
   speed_ = 0;
+  interruptEnable_ = 0;
+  vgcInterrupt_ = 0;
+  serialPointer_[0] = serialPointer_[1] = 0;
+  vblPending_ = quarterSecondPending_ = oneSecondPending_ = false;
+  scanLinePending_ = false;
+  lastQuarterSecond_ = lastSecond_ = 0;
   newVideo_ = 0;
   slotSelect_ = 0;
   diskSelect_ = 0;
@@ -161,22 +176,20 @@ uint8_t IIgsMemory::read(uint32_t address) {
       // half of the RAM below it. Going through the //e's map here would ask
       // ALTZP instead, and then $E0 and $E1 would be the same 48K — with the
       // toolbox and GS/OS living in $E1's.
-      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
+      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
 
   case Region::FastRAM:
     if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
         ioAndLanguageCardVisible()) {
-      // Banks $00 and $01 share the Mega II's language card, which is what
-      // makes //e software work unchanged on the fast side — and they share it
-      // a half each, $00 the main card and $01 the auxiliary one. GS/OS runs
-      // code out of $01:D000 upward, and a machine that gave it bank $00's
-      // card instead executed whatever was there.
+      // The language card a //e program finds in these banks is made of the
+      // bank's own RAM — see fastLanguageCardAddress — and reads ROM when the
+      // switches say so, exactly as a //e's does.
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
+      return fastRam_[fastLanguageCardAddress(bank, offset)];
     }
     return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
 
@@ -210,7 +223,7 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
     if (offset >= LANGUAGE_CARD_BASE) {
       // The card's write enable still decides whether this lands; which of its
       // two halves it lands in is the bank's business, not ALTZP's.
-      megaII_->writeLanguageCardRAM(offset, value, languageCardAux(bank));
+      megaII_->writeLanguageCardRAM(offset, value, bank == SLOW_BANK_AUX);
       return;
     }
     megaII_->writeRAM(offset, value, bank == SLOW_BANK_AUX);
@@ -219,7 +232,9 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
   case Region::FastRAM:
     if (offset >= LANGUAGE_CARD_BASE && (bank == 0x00 || bank == 0x01) &&
         ioAndLanguageCardVisible()) {
-      megaII_->writeLanguageCardRAM(offset, value, languageCardAux(bank));
+      // The card's write enable is the //e's switch, and it still decides.
+      if (!megaII_->getSoftSwitches().lcwrite) return;
+      fastRam_[fastLanguageCardAddress(bank, offset)] = value;
       return;
     }
     fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset] = value;
@@ -248,7 +263,7 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       }
       // As in read(): the bank names the half, so a debugger looking at $E1
       // sees $E1 rather than whichever half ALTZP happens to point at.
-      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
+      return megaII_->readLanguageCardRAM(offset, bank == SLOW_BANK_AUX);
     }
     return megaII_->readRAM(offset, bank == SLOW_BANK_AUX);
   case Region::FastRAM:
@@ -257,7 +272,7 @@ uint8_t IIgsMemory::peek(uint32_t address) const {
       if ((stateRegister() & STATE_RDROM) != 0) {
         return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
       }
-      return megaII_->readLanguageCardRAM(offset, languageCardAux(bank));
+      return fastRam_[fastLanguageCardAddress(bank, offset)];
     }
     return fastRam_[static_cast<size_t>(bank) * BANK_SIZE + offset];
   case Region::ROM:
@@ -303,6 +318,17 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return clockControlRegister();
   case REG_TEXT_COLOUR:
     return textColour_;
+  case REG_VGC_INTERRUPT:
+    return vgcInterruptRegister();
+  case REG_INTERRUPT_ENABLE:
+    return interruptEnable_;
+  case REG_INTERRUPT_STATUS:
+    return interruptStatusRegister();
+  case REG_SCC_COMMAND_B:
+  case REG_SCC_COMMAND_A:
+  case REG_SCC_DATA_B:
+  case REG_SCC_DATA_A:
+    return readSerial(offset);
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -326,6 +352,17 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
 
+  // $C071-$C07F is firmware, not I/O. It is where the machine's IRQ and BRK
+  // vectors point — $C071 for BRK, $C074 for IRQ — and it holds a few bytes
+  // of 8-bit code whose whole job is to reach the 16-bit interrupt manager:
+  // set V or not to say which it was, then JML into bank $E1. A //e has
+  // nothing here and reads the bus; a IIgs that did the same would take
+  // every interrupt and every BRK straight into a page of zeros, and sit
+  // executing BRK after BRK on the spot where its handler should be.
+  if (offset > 0xC070 && offset < 0xC080) {
+    return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
+  }
+
   return megaII_->read(offset);
 }
 
@@ -334,10 +371,37 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   case REG_ADB_DATA:
     adb_.writeCommand(value);
     return;
+  case REG_ADB_STATUS:
+    adb_.writeStatus(value);
+    return;
   case REG_ADB_MOUSE:
   case REG_ADB_MODIFIERS:
-  case REG_ADB_STATUS:
     return; // Read-only as far as the controller is concerned
+  case REG_VGC_INTERRUPT:
+    vgcInterrupt_ = static_cast<uint8_t>(
+        value & (VGC_ONE_SECOND_ENABLE | VGC_SCANLINE_ENABLE));
+    return;
+  case REG_VGC_INTERRUPT_CLEAR:
+    // A clear bit clears: writing $C032 with bit 5 low acknowledges the
+    // scan-line match, and with bit 6 low the one-second tick — the same
+    // positions the flags have in $C023. QuickDraw II's scan-line handler
+    // writes $DF, and so does the ROM's.
+    if ((value & VGC_ONE_SECOND_PENDING) == 0) oneSecondPending_ = false;
+    if ((value & VGC_SCANLINE_PENDING) == 0) scanLinePending_ = false;
+    return;
+  case REG_INTERRUPT_ENABLE:
+    interruptEnable_ = value;
+    return;
+  case REG_INTERRUPT_CLEAR:
+    vblPending_ = false;
+    quarterSecondPending_ = false;
+    return;
+  case REG_SCC_COMMAND_B:
+  case REG_SCC_COMMAND_A:
+  case REG_SCC_DATA_B:
+  case REG_SCC_DATA_A:
+    writeSerial(offset, value);
+    return;
   case REG_SOUND_CONTROL:
     sound_.writeControl(value);
     return;
@@ -413,6 +477,17 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     return clockControlRegister();
   case REG_TEXT_COLOUR:
     return textColour_;
+  case REG_VGC_INTERRUPT:
+    return vgcInterruptRegister();
+  case REG_INTERRUPT_ENABLE:
+    return interruptEnable_;
+  case REG_INTERRUPT_STATUS:
+    return interruptStatusRegister();
+  case REG_SCC_COMMAND_B:
+  case REG_SCC_COMMAND_A:
+  case REG_SCC_DATA_B:
+  case REG_SCC_DATA_A:
+    return 0x00; // Reading the chip moves its pointer; a debugger does not
   case REG_NEW_VIDEO:
     return newVideo_;
   case REG_SHADOW:
@@ -425,6 +500,14 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     break;
   }
   if (offset >= 0xC100) {
+    if (ExpansionCard *card = cardForSlotRom(offset)) {
+      return card->peekROM(static_cast<uint8_t>(offset & 0xFF));
+    }
+    return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
+  }
+  // The vectors' firmware, as in readIO — so a debugger looking at $C074
+  // sees what the processor will execute there.
+  if (offset > 0xC070 && offset < 0xC080) {
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
   return megaII_->peek(offset);
@@ -453,9 +536,82 @@ ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
   return (slotSelect_ & (1u << slot)) ? card : nullptr;
 }
 
-bool IIgsMemory::languageCardAux(uint8_t bank) const {
-  if (bank == 0x01 || bank == SLOW_BANK_AUX) return true;
-  return megaII_->getSoftSwitches().altzp;
+uint8_t IIgsMemory::readSerial(uint16_t offset) {
+  const int channel = (offset == REG_SCC_COMMAND_A || offset == REG_SCC_DATA_A) ? 0 : 1;
+  if (offset == REG_SCC_DATA_A || offset == REG_SCC_DATA_B) return 0x00; // nothing received
+  const uint8_t reg = serialPointer_[channel];
+  serialPointer_[channel] = 0;
+  // RR0: transmit buffer empty, and nothing else. RR3, the one the interrupt
+  // manager asks for: no interrupt pending. Every other register: zero.
+  if (reg == 0) return 0x04;
+  return 0x00;
+}
+
+void IIgsMemory::writeSerial(uint16_t offset, uint8_t value) {
+  const int channel = (offset == REG_SCC_COMMAND_A || offset == REG_SCC_DATA_A) ? 0 : 1;
+  if (offset == REG_SCC_DATA_A || offset == REG_SCC_DATA_B) return; // transmitted into nothing
+  // The first write to the command register chooses a register; the second
+  // writes it, and the pointer goes back to zero either way after that.
+  if (serialPointer_[channel] == 0) {
+    serialPointer_[channel] = static_cast<uint8_t>(value & 0x0F);
+  } else {
+    serialPointer_[channel] = 0;
+  }
+}
+
+uint8_t IIgsMemory::vgcInterruptRegister() const {
+  uint8_t value = vgcInterrupt_;
+  if (oneSecondPending_ && (vgcInterrupt_ & VGC_ONE_SECOND_ENABLE)) {
+    value |= VGC_ONE_SECOND_PENDING | VGC_ANY_PENDING;
+  }
+  if (scanLinePending_ && (vgcInterrupt_ & VGC_SCANLINE_ENABLE)) {
+    value |= VGC_SCANLINE_PENDING | VGC_ANY_PENDING;
+  }
+  return value;
+}
+
+uint8_t IIgsMemory::interruptStatusRegister() const {
+  uint8_t value = 0;
+  if (vblPending_ && (interruptEnable_ & INT_VBL)) value |= INT_VBL;
+  if (quarterSecondPending_ && (interruptEnable_ & INT_QUARTER_SECOND)) {
+    value |= INT_QUARTER_SECOND;
+  }
+  if (value) value |= INT_STATUS_ANY;
+  return value;
+}
+
+bool IIgsMemory::interruptPending() const {
+  if (adb_.interruptPending()) return true;
+  if (vgcInterruptRegister() & VGC_ANY_PENDING) return true;
+  if (interruptStatusRegister() & INT_STATUS_ANY) return true;
+  return false;
+}
+
+void IIgsMemory::tickClocks() {
+  // Both ticks are counted in the Mega II's clock, which is what the video
+  // and the drive already run on. A quarter of a second is a quarter of a
+  // second whatever speed the processor is set to.
+  constexpr uint64_t QUARTER_SECOND = 1023000 / 4;
+  constexpr uint64_t SECOND = 1023000;
+  if (slowCycles_ - lastQuarterSecond_ >= QUARTER_SECOND) {
+    lastQuarterSecond_ = slowCycles_;
+    quarterSecondPending_ = true;
+  }
+  if (slowCycles_ - lastSecond_ >= SECOND) {
+    lastSecond_ = slowCycles_;
+    oneSecondPending_ = true;
+  }
+}
+
+uint32_t IIgsMemory::fastLanguageCardAddress(uint8_t bank,
+                                             uint16_t offset) const {
+  const SoftSwitches &sw = megaII_->getSoftSwitches();
+  const uint8_t which = (bank == 0x00 && sw.altzp) ? 0x01 : bank;
+  // Bank 2 of the card is the bank's own $D000-$DFFF; bank 1 is the 4K under
+  // the I/O space. $E000-$FFFF is not switched.
+  uint16_t at = offset;
+  if (offset < 0xE000 && !sw.lcram2) at = static_cast<uint16_t>(offset - 0x1000);
+  return (static_cast<uint32_t>(which) << 16) | at;
 }
 
 uint8_t IIgsMemory::readROM(uint32_t address) const {

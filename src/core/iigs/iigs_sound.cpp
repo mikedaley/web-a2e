@@ -32,8 +32,20 @@ uint8_t IIgsSound::readData() {
   // look like memory that repeats.
   const uint8_t value = latch_;
   advance();
-  latch_ = addressesRam() ? ram_[address_] : doc_[address_ & 0xFF];
+  latch_ = addressesRam() ? ram_[address_] : readDocRegister(address_ & 0xFF);
   return value;
+}
+
+uint8_t IIgsSound::readDocRegister(uint8_t reg) const {
+  // $E0 is the oscillator interrupt register, and it is active low: bit 7
+  // clear means an oscillator has interrupted and bits 5-1 say which. This
+  // chip raises no interrupts, so the register always says none — which is
+  // not what a zeroed byte says. The ROM's interrupt manager reads it on
+  // every interrupt it cannot otherwise place, and a zero here told it the
+  // Ensoniq was asking, and then that no oscillator was: "Unclaimed Sound
+  // Interrupt", on a machine whose sound chip had done nothing at all.
+  if (reg == DOC_INTERRUPT) return 0xFF;
+  return doc_[reg];
 }
 
 void IIgsSound::writeData(uint8_t value) {

@@ -21,6 +21,10 @@ public:
 
     using MemReadCallback = std::function<uint8_t(uint16_t)>;
     using MemWriteCallback = std::function<void(uint16_t, uint8_t)>;
+    // The whole address space, for a machine that has more than one bank. A
+    // machine that does not leave these unset and the card stays in bank zero.
+    using MemRead24Callback = std::function<uint8_t(uint32_t)>;
+    using MemWrite24Callback = std::function<void(uint32_t, uint8_t)>;
     using RegGetCallback8 = std::function<uint8_t()>;
     using RegSetCallback8 = std::function<void(uint8_t)>;
     using RegGetCallback16 = std::function<uint16_t()>;
@@ -35,6 +39,7 @@ public:
     uint8_t peekIO(uint8_t offset) const override { return 0xFF; }
 
     uint8_t readROM(uint8_t offset) override;
+    uint8_t peekROM(uint8_t offset) override;
     bool hasROM() const override { return hasAnyDevice(); }
 
     void reset() override;
@@ -64,12 +69,23 @@ public:
     // Callbacks for memory and CPU access
     void setMemReadCallback(MemReadCallback cb) { memRead_ = cb; }
     void setMemWriteCallback(MemWriteCallback cb) { memWrite_ = cb; }
+    void setMemRead24Callback(MemRead24Callback cb) { memRead24_ = std::move(cb); }
+    void setMemWrite24Callback(MemWrite24Callback cb) { memWrite24_ = std::move(cb); }
     void setGetA(RegGetCallback8 cb) { getA_ = cb; }
     void setSetA(RegSetCallback8 cb) { setA_ = cb; }
     void setGetP(RegGetCallback8 cb) { getP_ = cb; }
     void setSetP(RegSetCallback8 cb) { setP_ = cb; }
-    void setGetSP(RegGetCallback8 cb) { getSP_ = cb; }
-    void setSetSP(RegSetCallback8 cb) { setSP_ = cb; }
+    /**
+     * The stack pointer, as the address in bank zero it points at.
+     *
+     * A 6502's stack is page one and its pointer is one byte, so a 6502 hands
+     * over `$0100 | S` and takes back the low byte. A 65816's pointer is the
+     * whole address, and in emulation mode it happens to be `$01xx` — which is
+     * why one shape serves both: the card reads a return address at `SP+1`
+     * and never has to know which processor pushed it.
+     */
+    void setGetSP(RegGetCallback16 cb) { getSP_ = cb; }
+    void setSetSP(RegSetCallback16 cb) { setSP_ = cb; }
     /**
      * Whether the CPU is *executing* this ROM address, rather than reading it
      * as data. The card's entry points are traps: a read of $Cn10 during a
@@ -105,6 +121,16 @@ private:
     void handleSmartPort();
     void setErrorResult(uint8_t errorCode);
 
+    // Memory anywhere, falling back to bank zero on a machine with only that.
+    uint8_t read24(uint32_t address) const;
+    void write24(uint32_t address, uint8_t value);
+
+    // What a device says about itself: the status byte every STATUS call
+    // starts with, and the ProDOS byte at $CnFE that summarises the slot.
+    uint8_t deviceStatusByte(int device) const;
+    uint8_t prodosStatusByte() const;
+    int deviceCount() const;
+
     uint8_t slotNum_ = 7;
     std::array<uint8_t, 256> rom_;
     std::array<BlockDevice, MAX_DEVICES> devices_;
@@ -122,12 +148,14 @@ private:
     // Callbacks
     MemReadCallback memRead_;
     MemWriteCallback memWrite_;
+    MemRead24Callback memRead24_;
+    MemWrite24Callback memWrite24_;
     RegGetCallback8 getA_;
     RegSetCallback8 setA_;
     RegGetCallback8 getP_;
     RegSetCallback8 setP_;
-    RegGetCallback8 getSP_;
-    RegSetCallback8 setSP_;
+    RegGetCallback16 getSP_;
+    RegSetCallback16 setSP_;
     ExecutingAtCallback executingAt_;
     RegGetCallback16 getPC_;
     RegSetCallback16 setPC_;

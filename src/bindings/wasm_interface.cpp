@@ -1713,8 +1713,13 @@ void mouseButton(bool pressed) {
 // ============================================================================
 
 // Returns whether a mouse card is currently installed
+// Whether there is a mouse for the host to capture. A //e has one when a card
+// is fitted; a IIgs always has one, because its mouse is the ADB controller
+// and not a card — so the name is the host's question ("can I take the
+// pointer?") rather than a claim about a slot.
 EMSCRIPTEN_KEEPALIVE
 bool isMouseCardInstalled() {
+  if (g_iigs) return true;
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->getMouseCard() != nullptr;
 }

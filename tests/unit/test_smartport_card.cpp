@@ -319,3 +319,138 @@ TEST_CASE("SmartPortCard readROM returns valid data when device loaded", "[smart
     }
     REQUIRE_FALSE(allZero);
 }
+
+// ---------------------------------------------------------------------------
+// The SmartPort protocol, as GS/OS speaks it
+// ---------------------------------------------------------------------------
+
+namespace {
+// A machine with two banks of memory, a stack in page one, and a card in
+// slot 5 whose entry point is being executed rather than read.
+struct SmartPortRig {
+    std::vector<uint8_t> memory = std::vector<uint8_t>(0x20000, 0);
+    SmartPortCard card;
+    uint16_t sp = 0x01F0;
+    uint8_t a = 0, x = 0, y = 0, p = 0;
+    uint16_t pc = 0;
+    bool executing = false;
+
+    SmartPortRig() {
+        card.setSlotNumber(5);
+        card.setMemReadCallback([this](uint16_t at) { return memory[at]; });
+        card.setMemWriteCallback([this](uint16_t at, uint8_t v) { memory[at] = v; });
+        card.setMemRead24Callback([this](uint32_t at) { return memory[at & 0x1FFFF]; });
+        card.setMemWrite24Callback([this](uint32_t at, uint8_t v) { memory[at & 0x1FFFF] = v; });
+        card.setGetA([this]() { return a; });
+        card.setSetA([this](uint8_t v) { a = v; });
+        card.setGetP([this]() { return p; });
+        card.setSetP([this](uint8_t v) { p = v; });
+        card.setGetSP([this]() { return sp; });
+        card.setSetSP([this](uint16_t v) { sp = v; });
+        card.setGetPC([this]() { return pc; });
+        card.setSetPC([this](uint16_t v) { pc = v; });
+        card.setSetX([this](uint8_t v) { x = v; });
+        card.setSetY([this](uint8_t v) { y = v; });
+        card.setExecutingAt([this](uint16_t at) { return executing && at == 0xC513; });
+
+        std::vector<uint8_t> image(512 * 64, 0);
+        card.insertImage(0, image.data(), image.size(), "hd.po");
+    }
+
+    // JSR $C513 from `site`, with the inline command and pointer after it,
+    // then the CPU fetching the entry point: which is when the card acts.
+    void call(uint16_t site, uint8_t command, uint32_t paramList, bool extended) {
+        memory[site] = 0x20; memory[site + 1] = 0x13; memory[site + 2] = 0xC5;
+        memory[site + 3] = command;
+        memory[site + 4] = static_cast<uint8_t>(paramList);
+        memory[site + 5] = static_cast<uint8_t>(paramList >> 8);
+        if (extended) {
+            memory[site + 6] = static_cast<uint8_t>(paramList >> 16);
+            memory[site + 7] = 0x00;
+        }
+        // JSR pushes the address of its own last byte.
+        const uint16_t pushed = site + 2;
+        memory[sp] = static_cast<uint8_t>(pushed >> 8);
+        memory[sp - 1] = static_cast<uint8_t>(pushed);
+        sp -= 2;
+        executing = true;
+        const uint8_t opcode = card.readROM(0x13);
+        executing = false;
+        REQUIRE(opcode == 0x60); // RTS, to wherever the card put the return
+    }
+
+    uint16_t returnAddress() const {
+        return static_cast<uint16_t>(memory[sp + 1] | (memory[sp + 2] << 8)) + 1;
+    }
+    bool carry() const { return (p & 0x01) != 0; }
+};
+} // namespace
+
+TEST_CASE("SmartPort STATUS code 3 is the Device Information Block",
+          "[smartport][protocol]") {
+    // This is what GS/OS reads to decide what it has found, and it will not
+    // build a driver for a device that cannot answer it: the status byte, a
+    // three-byte block count, a name, a type and a version — 25 bytes.
+    SmartPortRig rig;
+    const uint16_t list = 0x2000, buffer = 0x3000;
+    rig.memory[list] = 3; rig.memory[list + 1] = 1;          // count, unit 1
+    rig.memory[list + 2] = 0x00; rig.memory[list + 3] = 0x30; // status list
+    rig.memory[list + 4] = 0x03;                              // DIB
+
+    rig.call(0x0800, 0x00, list, false);
+
+    REQUIRE_FALSE(rig.carry());
+    REQUIRE(rig.a == 0);
+    REQUIRE(rig.returnAddress() == 0x0806); // stepped over three inline bytes
+    REQUIRE((rig.memory[buffer] & 0x80) != 0);   // a block device
+    REQUIRE(rig.memory[buffer + 1] == 64);       // 64 blocks, low byte
+    REQUIRE(rig.memory[buffer + 2] == 0);
+    REQUIRE(rig.memory[buffer + 3] == 0);
+    REQUIRE(rig.memory[buffer + 4] == 16);       // name length
+    REQUIRE(rig.memory[buffer + 21] == 0x02);    // hard disk
+    REQUIRE((rig.memory[buffer + 22] & 0x80) != 0); // takes extended calls
+    REQUIRE(rig.x == 25);                        // bytes returned
+    REQUIRE(rig.y == 0);
+}
+
+TEST_CASE("An extended SmartPort call has a four-byte pointer and reads into any bank",
+          "[smartport][protocol]") {
+    // Bit 6 of the command is the extended dialect: the inline pointer is a
+    // long, the parameter list's pointer is a long, and the block number is
+    // four bytes. GS/OS uses it for everything, because a 65816 wants its
+    // buffers in banks other than zero — and a card that stepped over three
+    // inline bytes instead of five returned into the middle of the pointer.
+    SmartPortRig rig;
+    std::vector<uint8_t> image(512 * 64, 0);
+    for (int i = 0; i < 512; i++) image[7 * 512 + i] = static_cast<uint8_t>(i);
+    rig.card.insertImage(0, image.data(), image.size(), "hd.po");
+
+    const uint32_t list = 0x14000, buffer = 0x18000; // both in bank 1
+    rig.memory[list] = 3; rig.memory[list + 1] = 1;
+    rig.memory[list + 2] = 0x00; rig.memory[list + 3] = 0x80; rig.memory[list + 4] = 0x01; rig.memory[list + 5] = 0x00;
+    rig.memory[list + 6] = 7; rig.memory[list + 7] = 0; rig.memory[list + 8] = 0; rig.memory[list + 9] = 0; // block 7
+
+    rig.call(0x0800, 0x41, list, true);
+
+    REQUIRE_FALSE(rig.carry());
+    REQUIRE(rig.returnAddress() == 0x0808); // five inline bytes this time
+    for (int i = 0; i < 512; i++) {
+        INFO("byte " << i);
+        REQUIRE(rig.memory[buffer + i] == static_cast<uint8_t>(i));
+    }
+}
+
+TEST_CASE("A SmartPort card says it takes extended calls", "[smartport][protocol]") {
+    // $CnFB is the SmartPort ID type byte and bit 7 is the promise. GS/OS
+    // reads it before it will build a driver for the slot, and passes over a
+    // card that says no.
+    SmartPortCard card;
+    std::vector<uint8_t> image(512 * 8, 0);
+    card.insertImage(0, image.data(), image.size(), "hd.po");
+    REQUIRE((card.readROM(0xFB) & 0x80) != 0);
+    REQUIRE(card.readROM(0xFF) == 0x10);
+    // ...and $CnFE counts its volumes: one device fitted, so bits 5-4 are zero.
+    REQUIRE((card.readROM(0xFE) & 0x30) == 0x00);
+    card.insertImage(1, image.data(), image.size(), "hd2.po");
+    REQUIRE((card.readROM(0xFE) & 0x30) == 0x10);
+}

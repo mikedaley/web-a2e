@@ -70,6 +70,22 @@ public:
   using WriteCallback = std::function<void(uint32_t, uint8_t)>;
   using IRQStatusCallback = std::function<bool()>;
 
+  /**
+   * How a vector is fetched, when the machine wants a say.
+   *
+   * A 65816 pulls its vectors from bank zero at $FFE4-$FFFF and says so on
+   * its VPB pin while it does. A IIgs listens: the FPI serves those two
+   * bytes from ROM whatever the language card is showing, which is why
+   * nothing on that machine — not the firmware, not ProDOS 8, not GS/OS —
+   * ever writes a vector into bank zero's RAM, and why GS/OS can copy its
+   * kernel over $D000-$FFFF with interrupts enabled. A machine that gives
+   * the CPU nothing here gets the plain memory read a bare 65816 would do.
+   */
+  using VectorReadCallback = std::function<uint16_t(uint16_t)>;
+  void setVectorReadCallback(VectorReadCallback cb) {
+    vectorRead_ = std::move(cb);
+  }
+
   CPU65816(ReadCallback read, WriteCallback write);
 
   // ===== Execution =====
@@ -288,6 +304,10 @@ private:
   uint64_t totalCycles_ = 0;
 
   bool irqPending_ = false;
+  VectorReadCallback vectorRead_;
+  uint16_t readVector(uint16_t vector) {
+    return vectorRead_ ? vectorRead_(vector) : read16Wrapped(vector);
+  }
   bool nmiPending_ = false;
 
   ReadCallback read_;

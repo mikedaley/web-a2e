@@ -557,8 +557,8 @@ bool Emulator::importState(const uint8_t *data, size_t size) {
               card->setSetA([this](uint8_t v) { cpu_->setA(v); });
               card->setGetP([this]() { return cpu_->getP(); });
               card->setSetP([this](uint8_t v) { cpu_->setP(v); });
-              card->setGetSP([this]() { return cpu_->getSP(); });
-              card->setSetSP([this](uint8_t v) { cpu_->setSP(v); });
+              card->setGetSP([this]() { return static_cast<uint16_t>(0x0100 | cpu_->getSP()); });
+              card->setSetSP([this](uint16_t v) { cpu_->setSP(static_cast<uint8_t>(v)); });
               card->setGetPC([this]() { return cpu_->getPC(); });
               card->setSetPC([this](uint16_t v) { cpu_->setPC(v); });
               card->setSetX([this](uint8_t v) { cpu_->setX(v); });

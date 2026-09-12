@@ -49,7 +49,7 @@ void CPU65816::reset() {
   irqPending_ = false;
   nmiPending_ = false;
 
-  pc_ = read16Wrapped(VEC_E_RESET);
+  pc_ = readVector(VEC_E_RESET);
 
   cycleCount_ = 7;
   totalCycles_ += 7;
@@ -809,7 +809,7 @@ void CPU65816::interrupt(uint16_t nativeVector, uint16_t emulationVector,
   setFlag(FLAG816_I, true);
   setFlag(FLAG816_D, false); // Never decimal inside a handler
   pbr_ = 0;
-  pc_ = read16Wrapped(e_ ? emulationVector : nativeVector);
+  pc_ = readVector(e_ ? emulationVector : nativeVector);
   waiting_ = false;
 }
 

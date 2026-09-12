@@ -107,6 +107,7 @@ public:
   static constexpr uint8_t DOC_CONTROL = 0xA0;
   static constexpr uint8_t DOC_WAVE_SIZE = 0xC0;
   static constexpr uint8_t DOC_OSCILLATOR_ENABLE = 0xE1;
+  static constexpr uint8_t DOC_INTERRUPT = 0xE0; // the oscillator interrupt register
 
   // Control register bits.
   static constexpr uint8_t OSC_HALT = 0x01;
@@ -124,6 +125,9 @@ public:
   static constexpr uint8_t CONTROL_VOLUME_MASK = 0x0F;
 
 private:
+  // A register as the processor reads it, which for one of them is not what
+  // was written: see readDocRegister.
+  uint8_t readDocRegister(uint8_t reg) const;
   void advance();
 
   // Where each oscillator has got to, in the same fixed-point the chip uses:

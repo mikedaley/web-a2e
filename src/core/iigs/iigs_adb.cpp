@@ -39,7 +39,11 @@ constexpr uint8_t CONTROLLER_VERSION = 0x06;
 void IIgsADB::reset() {
   response_.clear();
   keyboard_.clear();
-  mouse_.clear();
+  pendingX_ = 0;
+  pendingY_ = 0;
+  buttonChanged_ = false;
+  reportInProgress_ = false;
+  reportY_ = 0;
   controllerMemory_.fill(0);
   arguments_.fill(0);
   lastCommand_ = 0;
@@ -50,28 +54,49 @@ void IIgsADB::reset() {
   mouseButton_ = false;
   anyKeyDown_ = false;
   modes_ = 0;
+  interruptEnables_ = 0;
   configuration_.fill(0);
 }
 
 uint8_t IIgsADB::readStatus() const {
   uint8_t status = 0;
 
-  // Bit 5 is what the firmware polls for before every read, and it means the
-  // controller has a byte waiting. It is also set when there is nothing in
-  // particular to say: a controller that never raised it would hang the
-  // machine on the first command that expects no answer, and a real one is
-  // ready to be read at any time — what comes back is then whatever it last
-  // had, which is what an empty queue returns here.
-  status |= STATUS_DATA_AVAILABLE;
+  // Bit 5 means the controller has put a byte in the data register. It has
+  // to be true only when that is so: the interrupt manager reads this
+  // register first, and a bit 5 that was always set looked to it like an ADB
+  // interrupt to service every time — so the vertical-blanking interrupt
+  // underneath it was never acknowledged, and the machine took three million
+  // interrupts without getting anywhere.
+  if (!response_.empty()) status |= STATUS_DATA_AVAILABLE;
 
   if (!keyboard_.empty()) status |= STATUS_KEYBOARD_DATA;
-  if (!mouse_.empty()) status |= STATUS_MOUSE_DATA;
+  if (hasMouseData()) status |= STATUS_MOUSE_DATA;
+
+  // A report is two bytes, X then Y, and the flag says which is next.
+  if (reportInProgress_) status |= STATUS_MOUSE_Y_NEXT;
 
   // Bit 4 says a command is still being taken. This controller finishes
   // instantly, so it is only set between the command byte and its arguments.
   if (argumentsSeen_ < argumentsExpected_) status |= STATUS_COMMAND_FULL;
 
-  return status;
+  return status | interruptEnables_;
+}
+
+void IIgsADB::writeStatus(uint8_t value) {
+  // Only the enables are the processor's to write; the rest is what the
+  // controller has, and a write cannot change that.
+  interruptEnables_ = static_cast<uint8_t>(value & STATUS_INTERRUPT_ENABLES);
+}
+
+bool IIgsADB::interruptPending() const {
+  // Bit 5 reads as set whether or not a byte is really waiting, because the
+  // firmware polls it before every read and a real controller is always
+  // ready to be read. An *interrupt* is another matter: that is raised only
+  // for a byte that is actually there, or a handler would be re-entered for
+  // ever.
+  if ((interruptEnables_ & STATUS_MOUSE_INTERRUPT) && hasMouseData()) return true;
+  if ((interruptEnables_ & STATUS_KEYBOARD_INTERRUPT) && !keyboard_.empty()) return true;
+  return false;
 }
 
 uint8_t IIgsADB::readData() {
@@ -81,27 +106,47 @@ uint8_t IIgsADB::readData() {
   return value;
 }
 
-uint8_t IIgsADB::readMouseData() {
-  if (mouse_.empty()) return 0x00;
-  const uint8_t value = mouse_.front();
-  mouse_.pop_front();
-  return value;
+bool IIgsADB::hasMouseData() const {
+  return reportInProgress_ || pendingX_ != 0 || pendingY_ != 0 || buttonChanged_;
 }
 
-void IIgsADB::queueMouse(int deltaX, int deltaY) {
+uint8_t IIgsADB::readMouseData() {
+  if (reportInProgress_) {
+    reportInProgress_ = false;
+    return reportY_;
+  }
+  if (!hasMouseData()) return 0x00;
+
   // Seven bits of signed movement with the button in the top bit, X first.
   // The button travels with the movement rather than separately, which is why
-  // it is in both bytes: the firmware takes whichever it reads.
-  auto pack = [this](int delta) {
-    const int clamped = delta < -63 ? -63 : (delta > 63 ? 63 : delta);
+  // it is in both bytes: the firmware takes whichever it reads. What the
+  // seven bits cannot carry stays pending for the next report, so a fast
+  // shove arrives in a few reports rather than being cut short.
+  auto take = [this](int &pending) {
+    const int clamped = pending < -63 ? -63 : (pending > 63 ? 63 : pending);
+    pending -= clamped;
     uint8_t byte = static_cast<uint8_t>(clamped & 0x7F);
     // A pressed button reads as zero in the top bit, as it does everywhere
     // else on this machine.
     if (!mouseButton_) byte |= 0x80;
     return byte;
   };
-  mouse_.push_back(pack(deltaX));
-  mouse_.push_back(pack(deltaY));
+  const uint8_t x = take(pendingX_);
+  reportY_ = take(pendingY_);
+  buttonChanged_ = false;
+  reportInProgress_ = true;
+  return x;
+}
+
+void IIgsADB::queueMouse(int deltaX, int deltaY) {
+  pendingX_ += deltaX;
+  pendingY_ += deltaY;
+}
+
+void IIgsADB::setMouseButton(bool pressed) {
+  if (pressed == mouseButton_) return;
+  mouseButton_ = pressed;
+  buttonChanged_ = true;
 }
 
 void IIgsADB::writeCommand(uint8_t value) {
@@ -195,8 +240,11 @@ void IIgsADB::completeCommand() {
   case CMD_RESET_KEYBOARD:
   case CMD_FLUSH_KEYBOARD:
     keyboard_.clear();
-    mouse_.clear();
     response_.clear();
+    pendingX_ = 0;
+    pendingY_ = 0;
+    buttonChanged_ = false;
+    reportInProgress_ = false;
     break;
 
   default:

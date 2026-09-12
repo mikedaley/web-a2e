@@ -250,7 +250,12 @@ private:
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;
   bool frameReady_ = false;
+  // How many of this frame's lines the beam has finished, for the VGC's
+  // scan-line interrupt (see raiseScanLineInterrupts).
+  int linesFinished_ = 0;
   std::vector<uint8_t> frame_;
+
+  void raiseScanLineInterrupts();
 };
 
 } // namespace a2e::iigs

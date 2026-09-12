@@ -58,6 +58,20 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
         IIgsVideo::vgcColourARGB(static_cast<uint8_t>(value & 0x0F)));
   });
 
+  // The interrupt line is a level the processor samples every instruction,
+  // and it is the OR of everything in the machine that can hold it down.
+  cpu_->setIRQStatusCallback([this]() { return memory_->interruptPending(); });
+
+  // Vector pulls come from ROM, whatever bank zero's language card is showing.
+  // That is the FPI answering the processor's VPB line, and it is the reason
+  // GS/OS can copy its kernel over $D000-$FFFF with interrupts enabled: the
+  // vector it takes mid-copy is the firmware's, not whatever half-written
+  // byte happens to be at $FFEE.
+  cpu_->setVectorReadCallback([this](uint16_t vector) {
+    const uint32_t at = (static_cast<uint32_t>(ROM_TOP_BANK) << 16) | vector;
+    return static_cast<uint16_t>(memory_->read(at) | (memory_->read(at + 1) << 8));
+  });
+
   memory_->setSlotMotorQuery([this](int slot) {
     return slot == 6 && disk_ && disk_->isMotorOn();
   });
@@ -96,15 +110,18 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
     });
     smartPort->setGetP([this]() { return cpu_->getP(); });
     smartPort->setSetP([this](uint8_t value) { cpu_->setP(value); });
-    smartPort->setGetSP(
-        [this]() { return static_cast<uint8_t>(cpu_->getSP()); });
-    smartPort->setSetSP([this](uint8_t value) {
-      cpu_->setSP(static_cast<uint16_t>((cpu_->getSP() & 0xFF00) | value));
-    });
+    smartPort->setGetSP([this]() { return cpu_->getSP(); });
+    smartPort->setSetSP([this](uint16_t value) { cpu_->setSP(value); });
     // A 65816 reads the opcode and *then* advances, where a 6502 has already
     // advanced by the time the read arrives. The card must not guess at that.
     smartPort->setExecutingAt([this](uint16_t address) {
       return cpu_->getPBR() == 0x00 && cpu_->getPC() == address;
+    });
+    // Extended calls carry a bank, and this machine has banks to carry.
+    smartPort->setMemRead24Callback(
+        [this](uint32_t address) { return memory_->read(address); });
+    smartPort->setMemWrite24Callback([this](uint32_t address, uint8_t value) {
+      memory_->write(address, value);
     });
     smartPort->setGetPC([this]() { return cpu_->getPC(); });
     smartPort->setSetPC([this](uint16_t value) { cpu_->setPC(value); });
@@ -163,6 +180,7 @@ void IIgsMachine::reset() {
   memory_->reset();
   audio_->reset();
   lastFrameCycle_ = 0;
+  linesFinished_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
 
@@ -201,17 +219,50 @@ int IIgsMachine::step() {
   // cycle, so it cannot drift away from where $C019 thinks vertical blanking
   // is — a program timing itself against the beam would see it wander.
   if (disk_) disk_->update(cycles);
+  memory_->tickClocks();
   video_->renderUpToCycle(memory_->slowCycles());
+  raiseScanLineInterrupts();
 
   const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
   if (memory_->slowCycles() - lastFrameCycle_ >=
       static_cast<uint64_t>(timing.cyclesPerFrame())) {
     lastFrameCycle_ += timing.cyclesPerFrame();
+    linesFinished_ = 0;
     video_->renderFrame();
     video_->beginNewFrame(lastFrameCycle_);
+    memory_->signalVerticalBlank();
     frameReady_ = true;
   }
   return cycles;
+}
+
+void IIgsMachine::raiseScanLineInterrupts() {
+  // Each Super Hi-Res line has a control byte in bank $E1 at $9D00, and bit 6
+  // of it asks the VGC to interrupt once that line has been drawn. QuickDraw II
+  // runs the mouse pointer on this: it sets the bit on the line the pointer
+  // sits on and redraws it in the handler, after the beam has passed, so the
+  // pointer never tears. Without it the pointer was only redrawn from the
+  // one-second tick, which shares the VGC's vector.
+  //
+  // The control bytes mean nothing unless Super Hi-Res is on — the VGC does
+  // not read them in the //e's modes — and a line is checked once, as the
+  // beam finishes it. The picture's 200 lines are counted from the top of the
+  // frame; exactly where line zero falls against the Mega II's 262 is not
+  // something a program can measure from here, and the pointer cares only
+  // that its line is done.
+  if (!memory_->superHiResEnabled()) {
+    linesFinished_ = SHR_LINES;
+    return;
+  }
+  const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
+  const uint64_t elapsed = memory_->slowCycles() - lastFrameCycle_;
+  const int finished = static_cast<int>(
+      std::min<uint64_t>(elapsed / timing.cyclesPerScanline, SHR_LINES));
+  for (; linesFinished_ < finished; linesFinished_++) {
+    const uint8_t control = memory_->peek(
+        0xE10000u + SHR_SCB_BASE + static_cast<uint32_t>(linesFinished_));
+    if (control & IIgsVideo::SCB_INTERRUPT) memory_->signalScanLine();
+  }
 }
 
 void IIgsMachine::runCycles(int slowCyclesToRun) {

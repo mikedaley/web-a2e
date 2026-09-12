@@ -644,16 +644,16 @@ class AppleIIeEmulator {
    */
   async updateMouseHandlerState() {
     if (!this.mouseHandler) return;
+    // The core answers "is there a mouse to capture" for whichever machine is
+    // running: a //e has one when a Mouse card is in a slot, a //c has its
+    // IOU's, and a IIgs always has one because its mouse is the ADB controller
+    // rather than a card. Scanning the slots for a card named "mouse" was the
+    // //e's answer alone, and left a IIgs's Finder with no pointer.
     let mousePresent = false;
-    for (let slot = 1; slot <= 7; slot++) {
-      const ptr = await this.wasmModule._getSlotCard(slot);
-      if (ptr) {
-        const name = await this.wasmModule.UTF8ToString(ptr);
-        if (name === "mouse") {
-          mousePresent = true;
-          break;
-        }
-      }
+    try {
+      mousePresent = !!(await this.wasmModule._isMouseCardInstalled());
+    } catch {
+      mousePresent = false;
     }
     if (mousePresent) {
       this.mouseHandler.enable();

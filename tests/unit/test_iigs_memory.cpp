@@ -438,34 +438,150 @@ TEST_CASE("Banks $E0 and $E1 are two different 64K, language card included",
   REQUIRE(memory.read(0x00E10000u | 0xE000) == 0x22);
 }
 
-TEST_CASE("Banks $00 and $01 carry a half of the language card each",
+TEST_CASE("Banks $00 and $01 have a language card of their own, out of fast RAM",
           "[iigs][memory]") {
-  // The shadowed banks have the Mega II's language card at $D000-$FFFF, and
-  // they have a half of it each — $00 the main card, $01 the auxiliary one,
-  // exactly as $E0 and $E1 do. GS/OS runs code out of $01:D000 upward, and a
-  // machine that handed it bank $00's card instead executed whatever was
-  // there: four CMP (dp,S),Y in a row, and then a fall to $00:0000.
+  // These two banks are 64K of fast RAM each. Their $D000-$FFFF is the bank's
+  // own memory, given the shape of a //e's language card by the FPI, with the
+  // second $D000 bank being the 4K that the I/O space hides at $C000-$CFFF.
+  // None of it is the Mega II's card in $E0 and $E1 — that is a different 32K.
+  //
+  // GS/OS puts its kernel in $00:D000 and $01:D000 and its toolbox glue in
+  // $E0:E000 and $E1:D980, and a machine that made those the same memory had
+  // the second pair land on top of the first: the kernel's dispatch table sent
+  // every call into the middle of whatever had overwritten the routine.
   IIgsMemory memory;
   memory.read(0x00C083);
-  memory.read(0x00C083); // language card RAM, write enabled
+  memory.read(0x00C083); // read/write RAM, bank 2 of $D000
 
-  memory.write(0x00D06F, 0x11);
-  memory.write(0x01D06F, 0x22);
-  REQUIRE(memory.read(0x00D06F) == 0x11);
-  REQUIRE(memory.read(0x01D06F) == 0x22);
+  // Four banks, four different bytes, at the same offset — and every one
+  // reads back its own.
+  memory.write(0x00E123, 0x11);
+  memory.write(0x01E123, 0x22);
+  memory.write(0x00E0E123, 0xE0);
+  memory.write(0x00E1E123, 0xE1);
+  REQUIRE(memory.read(0x00E123) == 0x11);
+  REQUIRE(memory.read(0x01E123) == 0x22);
+  REQUIRE(memory.read(0x00E0E123) == 0xE0);
+  REQUIRE(memory.read(0x00E1E123) == 0xE1);
 
-  // ...and they are the same two halves the Mega II's own banks reach.
-  REQUIRE(memory.read(0x00E0D06F) == 0x11);
-  REQUIRE(memory.read(0x00E1D06F) == 0x22);
+  // The switched $D000 area has two banks, and they are different memory.
+  memory.write(0x00D06F, 0xB2); // bank 2 selected above
+  memory.read(0x00C08B);
+  memory.read(0x00C08B);        // read/write RAM, bank 1
+  REQUIRE(memory.read(0x00D06F) != 0xB2);
+  memory.write(0x00D06F, 0xB1);
+  REQUIRE(memory.read(0x00D06F) == 0xB1);
+  memory.read(0x00C083);
+  memory.read(0x00C083);        // back to bank 2
+  REQUIRE(memory.read(0x00D06F) == 0xB2);
+
+  // Bank 1 of $D000 is the RAM under the I/O space: take the I/O and
+  // language card out of the map and it shows at $C000.
+  memory.setShadowRegister(IIgsMemory::SHADOW_IO_LANGUAGE_CARD);
+  REQUIRE(memory.read(0x00C06F) == 0xB1);
+  memory.setShadowRegister(0);
+
+  // The switches still mean what they mean on a //e.
+  memory.read(0x00C082); // read ROM, write protected
+  REQUIRE(memory.read(0x00E123) == memory.read(0x00FFE123));
+  memory.write(0x00E123, 0x33);
+  memory.read(0x00C083);
+  memory.read(0x00C083);
+  REQUIRE(memory.read(0x00E123) == 0x11); // the protected write was dropped
 
   // ALTZP is how a //e asks for the auxiliary card, having no bank to name it
-  // with, so it still moves bank $00 across — that is a //e behaving like a
-  // //e on the fast side. What it must not do is move bank $01, which is
-  // already there.
+  // with, so it moves bank $00 across to bank $01's. Bank $01 stays put, and
+  // the Mega II's banks are not involved at all.
   memory.write(0x00C009, 0x00); // ALTZP on
-  REQUIRE(memory.read(0x00D06F) == 0x22);
-  REQUIRE(memory.read(0x01D06F) == 0x22);
+  REQUIRE(memory.read(0x00E123) == 0x22);
+  REQUIRE(memory.read(0x01E123) == 0x22);
+  REQUIRE(memory.read(0x00E0E123) == 0xE0);
   memory.write(0x00C008, 0x00); // ALTZP off
-  REQUIRE(memory.read(0x00D06F) == 0x11);
-  REQUIRE(memory.read(0x01D06F) == 0x22);
+  REQUIRE(memory.read(0x00E123) == 0x11);
+
+  // A debugger sees the same memory the processor does.
+  REQUIRE(memory.peek(0x00E123) == 0x11);
+  REQUIRE(memory.peek(0x01E123) == 0x22);
+}
+
+TEST_CASE("The VGC's one-second interrupt is enabled by bit 2, reported in bit 6",
+          "[iigs][memory][interrupt]") {
+  // Four above its enable, and acknowledged by writing $C032 with bit 6 low.
+  IIgsMemory memory;
+  REQUIRE_FALSE(memory.interruptPending());
+
+  memory.write(0x00C023, IIgsMemory::VGC_ONE_SECOND_ENABLE);
+  REQUIRE(memory.read(0x00C023) == IIgsMemory::VGC_ONE_SECOND_ENABLE);
+
+  // A second of the slow clock goes by.
+  memory.addFastCycles(1023000.0);
+  memory.tickClocks();
+  REQUIRE(memory.interruptPending());
+  REQUIRE((memory.read(0x00C023) & 0xC4) == 0xC4); // any, one-second, enabled
+  REQUIRE((memory.read(0x00C023) & 0x20) == 0);    // not the scan line
+
+  memory.write(0x00C032, 0xFF); // nothing acknowledged
+  REQUIRE(memory.interruptPending());
+  memory.write(0x00C032, 0xDF); // bit 5 low is the scan line's, not this
+  REQUIRE(memory.interruptPending());
+  memory.write(0x00C032, 0xBF); // bit 6 low
+  REQUIRE_FALSE(memory.interruptPending());
+  REQUIRE(memory.read(0x00C023) == IIgsMemory::VGC_ONE_SECOND_ENABLE);
+}
+
+TEST_CASE("The VGC's scan-line interrupt is enabled by bit 1, reported in bit 5",
+          "[iigs][memory][interrupt]") {
+  // The lower pair: bit 1 with bit 5, which is what the ROM's manager tests
+  // with `AND #$22 / LSR / LSR` before dispatching through $E1:0028, the
+  // vector QuickDraw II hangs its pointer-drawing handler on. That handler
+  // acknowledges by writing $DF to $C032 — bit 5 low. With the two pairs the
+  // other way round, GS/OS's scan-line enable was taken as the one-second's,
+  // and the pointer was redrawn once a second.
+  IIgsMemory memory;
+  memory.signalScanLine();
+  REQUIRE_FALSE(memory.interruptPending()); // it happened, but it is not enabled
+  REQUIRE((memory.read(0x00C023) & 0xE0) == 0);
+
+  memory.write(0x00C023, 0x02);
+  REQUIRE(memory.read(0x00C023) == (IIgsMemory::VGC_SCANLINE_ENABLE | 0xA0)); // any, scan line, enabled
+  REQUIRE(memory.interruptPending());
+  REQUIRE((memory.read(0x00C023) & 0x40) == 0); // not the second
+
+  memory.write(0x00C032, 0xBF); // bit 6 low acknowledges the second, not this
+  REQUIRE(memory.interruptPending());
+  memory.write(0x00C032, 0xDF); // what QuickDraw II writes
+  REQUIRE_FALSE(memory.interruptPending());
+  REQUIRE(memory.read(0x00C023) == IIgsMemory::VGC_SCANLINE_ENABLE);
+}
+
+TEST_CASE("Vertical blanking interrupts through $C041, $C046 and $C047",
+          "[iigs][memory][interrupt]") {
+  IIgsMemory memory;
+  memory.signalVerticalBlank();
+  REQUIRE_FALSE(memory.interruptPending()); // it happened, but it is not enabled
+  REQUIRE(memory.read(0x00C046) == 0x00);
+
+  memory.write(0x00C041, IIgsMemory::INT_VBL);
+  REQUIRE(memory.read(0x00C041) == IIgsMemory::INT_VBL);
+  REQUIRE(memory.interruptPending());
+  REQUIRE(memory.read(0x00C046) == (IIgsMemory::INT_STATUS_ANY | IIgsMemory::INT_VBL));
+
+  memory.write(0x00C047, 0x08); // any write acknowledges
+  REQUIRE_FALSE(memory.interruptPending());
+  REQUIRE(memory.read(0x00C046) == 0x00);
+}
+
+TEST_CASE("The serial chip is quiet", "[iigs][memory][interrupt]") {
+  // The interrupt manager asks the SCC first on every interrupt: writes 3 to
+  // the command register to select RR3 and reads it back, taking any set bit
+  // as a serial interrupt. A machine with no chip there returned the bus,
+  // which read as an interrupting SCC, and the manager serviced a port that
+  // does not exist instead of the vertical blank that had fired.
+  IIgsMemory memory;
+  memory.write(0x00C039, 0x03);
+  REQUIRE(memory.read(0x00C039) == 0x00); // RR3: nothing pending
+  REQUIRE(memory.read(0x00C039) == 0x04); // RR0 after the pointer resets: transmit buffer empty
+  memory.write(0x00C038, 0x03);
+  REQUIRE(memory.read(0x00C038) == 0x00);
+  REQUIRE(memory.read(0x00C03B) == 0x00); // nothing received
 }

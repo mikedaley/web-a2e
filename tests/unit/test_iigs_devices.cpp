@@ -42,10 +42,52 @@ TEST_CASE("The mouse reports movement and its button together", "[iigs][adb]") {
     REQUIRE((adb.readMouseData() & 0x80) == 0);
   }
 
-  SECTION("and a shove further than the report can carry is clamped") {
-    adb.queueMouse(500, -500);
+  SECTION("and a shove further than a report can carry takes several") {
+    adb.queueMouse(100, -100);
     REQUIRE((adb.readMouseData() & 0x7F) == 63);
     REQUIRE(static_cast<int8_t>(adb.readMouseData() << 1) / 2 == -63);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0); // the rest is still owed
+    REQUIRE((adb.readMouseData() & 0x7F) == 37);
+    REQUIRE(static_cast<int8_t>(adb.readMouseData() << 1) / 2 == -37);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+  }
+
+  SECTION("movement that arrives faster than it is read adds up into one report") {
+    // The host sends every twitch, hundreds a second; queued one behind the
+    // other, each cost the firmware an interrupt and the pointer fell behind
+    // and then leapt. Added together, the pointer catches up in one report.
+    for (int i = 0; i < 20; i++) adb.queueMouse(2, -1);
+    REQUIRE((adb.readMouseData() & 0x7F) == 40);
+    REQUIRE(static_cast<int8_t>(adb.readMouseData() << 1) / 2 == -20);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+  }
+
+  SECTION("a click without any movement is a report of its own") {
+    // A Finder that only heard about the button while the pointer was
+    // moving could not be clicked on anything held still.
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+    adb.setMouseButton(true);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0);
+    REQUIRE(adb.readMouseData() == 0x00); // pressed, and no movement
+    REQUIRE(adb.readMouseData() == 0x00);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+
+    adb.setMouseButton(true); // still down: nothing new to say
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+
+    adb.setMouseButton(false);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0);
+    REQUIRE(adb.readMouseData() == 0x80); // released
+    REQUIRE(adb.readMouseData() == 0x80);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+  }
+
+  SECTION("the button is read as it was when the report was made") {
+    adb.queueMouse(3, 3);
+    REQUIRE((adb.readMouseData() & 0x80) != 0); // X, button up
+    adb.setMouseButton(true);                    // pressed between the bytes
+    REQUIRE((adb.readMouseData() & 0x80) != 0); // Y still says up
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) != 0); // and the press is the next report
   }
 }
 
@@ -114,9 +156,16 @@ TEST_CASE("The ADB controller answers the commands the firmware asks",
 TEST_CASE("The ADB status register is what the firmware polls", "[iigs][adb]") {
   IIgsADB adb;
 
-  // Bit 5 is the one it waits for before every exchange, and it is always set:
-  // the controller is ready to be read at any time.
+  // Bit 5 says the controller has put a byte in the data register, and it
+  // must say so only then: the interrupt manager reads this register first
+  // on every interrupt, and a bit 5 that was always set looked like an ADB
+  // interrupt to service every time — so nothing underneath it was ever
+  // acknowledged, and the machine took three million interrupts going nowhere.
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_DATA_AVAILABLE) == 0);
+  adb.writeCommand(0x0A); // a command with an answer
   REQUIRE((adb.readStatus() & IIgsADB::STATUS_DATA_AVAILABLE) != 0);
+  adb.readData();
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_DATA_AVAILABLE) == 0);
 
   SECTION("and the input queues show in it") {
     REQUIRE((adb.readStatus() & IIgsADB::STATUS_KEYBOARD_DATA) == 0);
@@ -471,4 +520,54 @@ TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
     right = std::max(right, std::abs(samples[i]));
   }
   REQUIRE(right > 0.0f);
+}
+
+TEST_CASE("The ADB controller interrupts only when asked to, and only for what it has",
+          "[iigs][adb][interrupt]") {
+  // Bit 6 of $C027 lets the mouse interrupt and bit 3 the keyboard; the full
+  // bits beside them are the controller's. GS/OS sets bit 6 and then waits
+  // for the interrupt, and a machine that never raised one had a Finder that
+  // drew its desktop and never noticed the mouse.
+  IIgsADB adb;
+  REQUIRE_FALSE(adb.interruptPending());
+
+  adb.queueMouse(5, -3);
+  REQUIRE_FALSE(adb.interruptPending()); // data, but nobody asked
+
+  adb.writeStatus(IIgsADB::STATUS_MOUSE_INTERRUPT);
+  REQUIRE(adb.interruptPending());
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_INTERRUPT) != 0); // the enable reads back
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_Y_NEXT) == 0);    // X first
+  adb.readMouseData();
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_Y_NEXT) != 0);    // then Y
+  REQUIRE(adb.interruptPending());                                     // still a byte to go
+  adb.readMouseData();
+  REQUIRE_FALSE(adb.interruptPending());                               // and now it is served
+
+  // Only the enables are the processor's to write: a write cannot invent
+  // data, and the full bits are not disturbed by it.
+  adb.writeStatus(0xFF);
+  REQUIRE((adb.readStatus() & IIgsADB::STATUS_MOUSE_DATA) == 0);
+  REQUIRE_FALSE(adb.interruptPending());
+
+  adb.writeStatus(IIgsADB::STATUS_KEYBOARD_INTERRUPT);
+  adb.queueKeyboard(0x41);
+  REQUIRE(adb.interruptPending());
+  adb.clearKeyboardStrobe();
+  REQUIRE_FALSE(adb.interruptPending());
+}
+
+TEST_CASE("The Ensoniq's interrupt register says no oscillator is asking",
+          "[iigs][sound][interrupt]") {
+  // Register $E0 is active low: bit 7 clear means an oscillator interrupted.
+  // This chip raises none, and it must say so rather than read back the zero
+  // it was never written with — the ROM's interrupt manager asks it on every
+  // interrupt it cannot otherwise place, and a zero here is "Unclaimed Sound
+  // Interrupt" on a machine whose sound chip has done nothing.
+  IIgsSound sound;
+  sound.writeControl(0x00);        // registers, not RAM
+  sound.writeAddressHigh(0x00);
+  sound.writeAddressLow(0xE0);
+  sound.readData();                // the window is one behind
+  REQUIRE((sound.readData() & 0x80) != 0);
 }

@@ -467,3 +467,159 @@ TEST_CASE("A IIgs with no SmartPort image keeps its own slot 5 firmware",
   REQUIRE(machine.memory().read(0x00C507) == 0x00); // SmartPort, not a Disk II
   REQUIRE(machine.memory().read(0x00C500) == 0xA2); // the firmware's own code
 }
+
+TEST_CASE("A IIgs's interrupt vectors point at firmware in the I/O page",
+          "[iigs][boot][interrupt]") {
+  // The ROM's IRQ and BRK vectors name $C071 and $C074, and on a real IIgs
+  // those addresses read firmware — a few bytes of 8-bit code whose whole job
+  // is to set V or not and JML into the 16-bit interrupt manager. A //e reads
+  // the bus there. A IIgs that did the same took every BRK straight into a
+  // page of zeros and sat executing BRK after BRK where its handler should be.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the vector test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+
+  const uint16_t irqVector = static_cast<uint16_t>(
+      machine.memory().read(0xFFFFFE) | (machine.memory().read(0xFFFFFF) << 8));
+  REQUIRE(irqVector >= 0xC071);
+  REQUIRE(irqVector <= 0xC07F);
+
+  for (uint16_t at = 0xC071; at < 0xC080; at++) {
+    const uint8_t fromROM = machine.memory().read(0xFF0000u | at);
+    REQUIRE(machine.memory().read(0x000000u | at) == fromROM);
+    REQUIRE(machine.memory().read(0x00E00000u | at) == fromROM);
+    REQUIRE(machine.memory().peek(0x000000u | at) == fromROM);
+  }
+  // ...and what is there is code that reaches the interrupt manager, not
+  // whatever the bus happened to hold.
+  REQUIRE(machine.memory().read(0x000000u | 0xC075) == 0x5C); // JML
+}
+
+TEST_CASE("A IIgs pulls its interrupt vectors from ROM whatever the language card holds",
+          "[iigs][boot][interrupt]") {
+  // The 65816 says on its VPB line when it is fetching a vector, and the FPI
+  // answers from ROM regardless of the map. Nothing on a IIgs writes a vector
+  // into bank zero's RAM — GS/OS's kernel image ends before $FFFA and holds
+  // nothing at $FFEE — and GS/OS copies that kernel over $D000-$FFFF with
+  // interrupts enabled. A machine that read the vector out of the RAM took the
+  // first interrupt of that copy to $0000.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the vector-pull test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  IIgsMemory &memory = machine.memory();
+
+  // Language card RAM in, and garbage where the emulation-mode IRQ vector
+  // would be read from if the map were consulted.
+  memory.read(0x00C083);
+  memory.read(0x00C083);
+  memory.write(0x00FFFE, 0x00);
+  memory.write(0x00FFFF, 0x00);
+  REQUIRE(memory.read(0x00FFFE) == 0x00); // the RAM really is in the map
+
+  // Now an interrupt: the mouse, with its interrupt enabled.
+  memory.write(0x00C027, IIgsADB::STATUS_MOUSE_INTERRUPT);
+  machine.mouseMove(3, 0);
+  REQUIRE(memory.interruptPending());
+
+  // Whatever the CPU was doing at the prompt, its next instruction after
+  // taking the interrupt is the firmware's vector target in the I/O page,
+  // and not page zero.
+  machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() & ~0x04)); // I clear
+  machine.step();
+  const uint32_t pc = (static_cast<uint32_t>(machine.cpu().getPBR()) << 16) | machine.cpu().getPC();
+  const uint16_t romVector = static_cast<uint16_t>(memory.read(0xFFFFFE) | (memory.read(0xFFFFFF) << 8));
+  REQUIRE(pc == (0x000000u | romVector));
+  REQUIRE(pc >= 0x00C071);
+  REQUIRE(pc <= 0x00C07F);
+}
+
+TEST_CASE("The firmware services a vertical-blanking interrupt and comes back",
+          "[iigs][boot][interrupt]") {
+  // Enable the Mega II's VBL interrupt the way GS/OS does, let a frame end,
+  // and the ROM's interrupt manager must take it, acknowledge it through
+  // $C047, and return to what it was doing — rather than get lost in the
+  // serial check, the sound check, or a vector that was not there.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the VBL service test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  IIgsMemory &memory = machine.memory();
+
+  memory.write(0x00C041, IIgsMemory::INT_VBL);
+  machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() & ~0x04)); // I clear
+  memory.signalVerticalBlank();
+  REQUIRE(memory.interruptPending());
+
+  // Give the manager a few thousand instructions.
+  for (int i = 0; i < 20000; i++) machine.step();
+
+  REQUIRE_FALSE(memory.interruptPending());          // acknowledged
+  REQUIRE((memory.read(0x00C046) & IIgsMemory::INT_VBL) == 0);
+  const uint32_t pc = (static_cast<uint32_t>(machine.cpu().getPBR()) << 16) | machine.cpu().getPC();
+  REQUIRE(pc >= 0x000100);                            // not in page zero
+  REQUIRE(machine.cpu().getPBR() == 0xFF);            // back in the firmware's prompt loop
+}
+
+TEST_CASE("The VGC interrupts once the beam has drawn a marked Super Hi-Res line",
+          "[iigs][boot][interrupt]") {
+  // Bit 6 of a line's control byte asks for an interrupt when that line has
+  // been drawn, which is how QuickDraw II knows it is safe to redraw the
+  // pointer. It has to come every frame, not once a second. The handler is
+  // the program's to install, so the processor is kept masked here and the
+  // test acknowledges each one itself, through $C032, as QuickDraw's would.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the scan-line interrupt test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  IIgsMemory &memory = machine.memory();
+  const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
+  machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() | 0x04)); // I set
+
+  const int frames = 10;
+  auto countRaises = [&]() {
+    const uint64_t start = machine.slowCycles();
+    int raised = 0;
+    while (machine.slowCycles() - start <
+           static_cast<uint64_t>(timing.cyclesPerFrame()) * frames) {
+      machine.step();
+      if (memory.peek(0x00C023) & IIgsMemory::VGC_SCANLINE_PENDING) {
+        raised++;
+        memory.write(0x00C032, 0xDF); // bit 5 low: acknowledged, as QuickDraw does
+      }
+    }
+    return raised;
+  };
+
+  // Mark line 100 and enable the interrupt, but leave Super Hi-Res off: the
+  // control bytes mean nothing to the VGC in the //e's modes.
+  memory.write(0x00E19D00 + 100, IIgsVideo::SCB_INTERRUPT);
+  memory.write(0x00C023, IIgsMemory::VGC_SCANLINE_ENABLE);
+  REQUIRE(countRaises() == 0);
+
+  // With the picture on, once a frame.
+  memory.write(0x00C029, IIgsMemory::NEW_VIDEO_SHR);
+  const int raised = countRaises();
+  REQUIRE(raised >= frames - 1);
+  REQUIRE(raised <= frames + 1);
+
+  // A line that no longer asks is left alone.
+  memory.write(0x00E19D00 + 100, 0x00);
+  REQUIRE(countRaises() == 0);
+}
