@@ -23,9 +23,11 @@ void IIgsSound::reset() {
   control_ = 0;
   latch_ = 0;
   ticks_ = 0.0;
+  heardVolume_ = 0.0f;
   ring_.assign(RING_FRAMES * 2, 0.0f);
   produced_ = 0;
   consumed_ = 0.0;
+  lastLeft_ = lastRight_ = 0.0f;
 }
 
 // ============================================================================
@@ -242,6 +244,8 @@ void IIgsSound::haltOscillator(int index, bool fromEnd, uint8_t newControl) {
 void IIgsSound::scan() {
   float left = 0.0f;
   float right = 0.0f;
+  int heardLeft = 0;
+  int heardRight = 0;
 
   for (int index = 0; index < oscillatorsEnabled_; index++) {
     Voice &v = voices_[index];
@@ -281,20 +285,36 @@ void IIgsSound::scan() {
       // odd channels on the left.
       if ((v.control >> 4) & 1) {
         left += sample * weight;
+        heardLeft++;
       } else {
         right += sample * weight;
+        heardRight++;
       }
     }
 
     if (position >= length - 1) haltOscillator(index, true, v.control);
   }
 
+  // A machine without a stereo card hears everything through one speaker,
+  // and a program written for one puts every voice on the same channel. Only
+  // a program that uses both sides is asking for stereo; give the rest both
+  // speakers, or a mono game plays in one ear.
+  if (heardLeft == 0 && heardRight > 0) left = right;
+  if (heardRight == 0 && heardLeft > 0) right = left;
+
+  // The amplifier follows the volume nibble through an analogue control, so
+  // the steps firmware makes around a transfer are heard as a slope rather
+  // than a chop: about twenty milliseconds to settle.
+  const float alpha = static_cast<float>(8.0 * (oscillatorsEnabled_ + 2) /
+                                         (DOC_CLOCK_HZ * 0.020));
+  heardVolume_ += alpha * (static_cast<float>(volume()) / 15.0f - heardVolume_);
+
   // Eight bits of sample by eight of volume, and the chip's own mixer divides
   // by eight: one full-volume oscillator is an eighth of full scale.
   constexpr float SCALE = 1.0f / (128.0f * 255.0f * 8.0f);
   const size_t slot = static_cast<size_t>(produced_ % RING_FRAMES) * 2;
-  ring_[slot] = left * SCALE;
-  ring_[slot + 1] = right * SCALE;
+  ring_[slot] = left * SCALE * heardVolume_;
+  ring_[slot + 1] = right * SCALE * heardVolume_;
   produced_++;
 }
 
@@ -312,33 +332,42 @@ void IIgsSound::advance(uint32_t slowCycles) {
 void IIgsSound::generateSamples(float *buffer, int frames, int rate) {
   if (!buffer || frames <= 0 || rate <= 0) return;
 
-  // What the chip produced since the last call is what the host is owed, so
-  // the ratio is whatever spreads it over the frames asked for — within a
-  // frame or so of the chip's rate over the host's, and never drifting.
+  // The chip's rate over the host's is the step; the backlog says whether
+  // the two are drifting apart, and the step leans up to half a percent the
+  // other way to hold it near a few milliseconds' worth. A step that was
+  // simply "whatever spreads the backlog over this buffer" warbled by the
+  // rounding of each buffer's share.
+  const double nominal = sampleRate() / rate;
+  const double target = sampleRate() * 0.004;
   const double available = static_cast<double>(produced_) - consumed_;
-  if (available < 2.0) {
-    for (int i = 0; i < frames * 2; i++) buffer[i] = 0.0f;
-    return;
-  }
+  double error = (available - target) / target;
+  if (error > 1.0) error = 1.0;
+  if (error < -1.0) error = -1.0;
+  const double step = nominal * (1.0 + 0.005 * error);
+
   // If the host fell behind by more than the ring holds, the oldest of it is
   // gone; start from what is still there.
   const double oldest = static_cast<double>(produced_) - (RING_FRAMES - 1);
   if (consumed_ < oldest) consumed_ = oldest;
-  const double step = (static_cast<double>(produced_) - 1.0 - consumed_) / frames;
 
-  const float master = static_cast<float>(volume()) / 15.0f;
   for (int frame = 0; frame < frames; frame++) {
-    const double at = consumed_ + step * frame;
-    const uint64_t whole = static_cast<uint64_t>(at);
-    const float fraction = static_cast<float>(at - static_cast<double>(whole));
+    if (consumed_ + 1.0 >= static_cast<double>(produced_)) {
+      // The chip has not got this far yet: hold the last frame rather than
+      // drop to silence, so a short buffer does not click.
+      buffer[frame * 2] = lastLeft_;
+      buffer[frame * 2 + 1] = lastRight_;
+      continue;
+    }
+    const uint64_t whole = static_cast<uint64_t>(consumed_);
+    const float fraction = static_cast<float>(consumed_ - static_cast<double>(whole));
     const size_t a = static_cast<size_t>(whole % RING_FRAMES) * 2;
     const size_t b = static_cast<size_t>((whole + 1) % RING_FRAMES) * 2;
-    buffer[frame * 2] =
-        (ring_[a] + (ring_[b] - ring_[a]) * fraction) * master;
-    buffer[frame * 2 + 1] =
-        (ring_[a + 1] + (ring_[b + 1] - ring_[a + 1]) * fraction) * master;
+    lastLeft_ = ring_[a] + (ring_[b] - ring_[a]) * fraction;
+    lastRight_ = ring_[a + 1] + (ring_[b + 1] - ring_[a + 1]) * fraction;
+    buffer[frame * 2] = lastLeft_;
+    buffer[frame * 2 + 1] = lastRight_;
+    consumed_ += step;
   }
-  consumed_ += step * frames;
 }
 
 IIgsSound::Oscillator IIgsSound::oscillator(int index) const {

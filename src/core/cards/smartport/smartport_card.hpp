@@ -53,6 +53,19 @@ public:
 
     // Slot configuration
     void setSlotNumber(uint8_t slot);
+
+    /**
+     * Where the entry points sit in the slot's 256 bytes.
+     *
+     * A card of its own puts the ProDOS entry at $Cn10 and the SmartPort
+     * entry three past it. A IIgs's own slot 5 firmware has them at $Cn0A
+     * and $Cn0D, and software written for the machine hard-codes that
+     * rather than reading $CnFF — so a card standing in for that firmware
+     * has to answer where the firmware would.
+     */
+    void setProDOSEntry(uint8_t offset);
+    uint8_t prodosEntry() const { return prodosEntry_; }
+    uint8_t smartPortEntry() const { return static_cast<uint8_t>(prodosEntry_ + 3); }
     uint8_t getSlotNumber() const { return slotNum_; }
 
     // Device management
@@ -109,6 +122,14 @@ public:
     void setSetY(RegSetCallback8 cb) { setY_ = cb; }
 
     // Activity tracking for UI
+    /**
+     * Told of every block transfer: the call's operation (0 status, 1 read,
+     * 2 write), the device, the block and the buffer it went to or from.
+     * For a debugger or a trace; the card does nothing with it itself.
+     */
+    using TransferCallback = std::function<void(uint8_t op, int device, uint32_t block, uint32_t buffer)>;
+    void setTransferCallback(TransferCallback cb) { onTransfer_ = std::move(cb); }
+
     bool hasActivity() const { return activity_; }
     bool isActivityWrite() const { return activityWrite_; }
     void clearActivity() { activity_ = false; }
@@ -132,6 +153,7 @@ private:
     int deviceCount() const;
 
     uint8_t slotNum_ = 7;
+    uint8_t prodosEntry_ = 0x10;
     std::array<uint8_t, 256> rom_;
     std::array<BlockDevice, MAX_DEVICES> devices_;
 
@@ -140,6 +162,7 @@ private:
 
     // Activity LED state
     bool activity_ = false;
+    TransferCallback onTransfer_;
     bool activityWrite_ = false;
 
     // Static empty string for when no device is loaded

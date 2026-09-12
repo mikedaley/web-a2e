@@ -260,6 +260,31 @@ TEST_CASE("Bank $00 follows the //e's memory switches into bank $01",
   }
 }
 
+TEST_CASE("A slot given to Your Card with nothing in it reads the bus, not the firmware",
+          "[iigs][memory][slots]") {
+  // $C02D says which slots the internal firmware answers for. A slot the
+  // Control Panel has handed to a card that is not there answers as an empty
+  // slot does on any Apple II — with the bus — rather than with the firmware
+  // the setting was meant to hide. ProDOS 8 2.4.1 finds the AppleTalk
+  // firmware's "ATLK" in slot 7 and calls into it, which ends in a BRK on a
+  // ROM 01; the known way round is to set slot 7 to Your Card, and that only
+  // works if the firmware then goes away.
+  const std::vector<uint8_t> rom = makeRom();
+  IIgsMemory memory;
+  memory.loadROM(rom.data(), rom.size());
+  const uint8_t firmware = memory.peek(0x00C7F9);
+
+  memory.write(0x00C02D, 0x00); // all internal
+  REQUIRE(memory.read(0x00C7F9) == firmware);
+  memory.write(0x00C02D, 0x80); // slot 7: Your Card
+  REQUIRE(memory.peek(0x00C7F9) == 0xFF);
+  // Slot 5 is the machine's own SmartPort and is not switched by $C02D; with
+  // no image in it its firmware still shows through (see setInternalCardSlot).
+  memory.write(0x00C02D, 0xFE);
+  REQUIRE(memory.read(0x00C3F9) == 0xFF);
+  REQUIRE(memory.read(0x00C7F9) == 0xFF);
+}
+
 TEST_CASE("The state register is eight soft switches in one byte",
           "[iigs][state]") {
   // A //e sets its memory map with eight separate addresses. A IIgs program
@@ -631,20 +656,80 @@ TEST_CASE("The VGC's scan-line interrupt is enabled by bit 1, reported in bit 5"
   REQUIRE(memory.read(0x00C023) == IIgsMemory::VGC_SCANLINE_ENABLE);
 }
 
+TEST_CASE("$C02E and $C02F say where the beam is", "[iigs][memory][video]") {
+  // The Mega II's counters, as the IIgs exposes them: the vertical counter
+  // runs $100-$1BF over the picture and $1C0-$1FF then $FA-$FF through
+  // blanking, the horizontal counter is 0 for a line's first cycle and $40-$7F
+  // for the rest; $C02E is the vertical counter's bits 8-1 and $C02F its bit 0
+  // above the horizontal counter. The IIgs Diagnostic measures the processor's
+  // speed against these, and failed at once on a machine that answered nothing.
+  IIgsMemory memory;
+  IIgsMemory::Beam beam{0, 0};
+  memory.setBeamQuery([&beam]() { return beam; });
+
+  REQUIRE(memory.read(0x00C02E) == 0x80); // line 0: $100 >> 1
+  REQUIRE(memory.read(0x00C02F) == 0x00);
+  beam = {101, 10};                       // $165: odd, so bit 0 shows in $C02F
+  REQUIRE(memory.read(0x00C02E) == 0xB2);
+  REQUIRE(memory.read(0x00C02F) == (0x80 | 0x49));
+  beam = {200, 64};                       // blanking: $1C8
+  REQUIRE(memory.read(0x00C02E) == 0xE4);
+  REQUIRE(memory.read(0x00C02F) == 0x7F);
+  beam = {261, 1};                        // the last line: $FF
+  REQUIRE(memory.read(0x00C02E) == 0x7F);
+  REQUIRE(memory.read(0x00C02F) == (0x80 | 0x40));
+
+  // A read clears a pending scan-line interrupt.
+  memory.write(0x00C023, IIgsMemory::VGC_SCANLINE_ENABLE);
+  memory.signalScanLine();
+  REQUIRE(memory.interruptPending());
+  memory.read(0x00C02E);
+  REQUIRE_FALSE(memory.interruptPending());
+}
+
+TEST_CASE("A Mega II access from the fast side waits for the slow clock",
+          "[iigs][memory][timing]") {
+  // The processor stops at the slow clock's next edge and then takes a whole
+  // slow cycle, so an access made part-way through a slow cycle costs the
+  // rest of that cycle and then one. At slow speed nothing is part-way
+  // through anything and an access costs one.
+  IIgsMemory memory;
+  memory.write(0x00C036, 0x80); // fast (an access of its own: one cycle)
+  const uint64_t base = memory.slowCycles();
+  memory.addFastCycles(2.3);    // two whole cycles and a fraction
+  REQUIRE(memory.slowCycles() == base + 2);
+  memory.read(0x00C019);        // a Mega II register
+  REQUIRE(memory.slowCycles() == base + 4); // the rest of the third, then the access
+  memory.read(0x00C019);        // now on the edge: just the access
+  REQUIRE(memory.slowCycles() == base + 5);
+  memory.takeSlowAccesses();
+
+  memory.write(0x00C036, 0x00); // slow (and another whole access)
+  memory.addFastCycles(3.0);
+  memory.read(0x00C019);
+  REQUIRE(memory.slowCycles() == base + 10);
+}
+
 TEST_CASE("Vertical blanking interrupts through $C041, $C046 and $C047",
           "[iigs][memory][interrupt]") {
   IIgsMemory memory;
   memory.signalVerticalBlank();
   REQUIRE_FALSE(memory.interruptPending()); // it happened, but it is not enabled
-  REQUIRE(memory.read(0x00C046) == 0x00);
+  // ...and the flag says it happened all the same: $C046 reports what
+  // occurred, and only $C047 clears it. The diagnostic's handler switches the
+  // interrupt off before it looks, and must still find the flag.
+  REQUIRE(memory.read(0x00C046) == IIgsMemory::INT_VBL);
 
   memory.write(0x00C041, IIgsMemory::INT_VBL);
   REQUIRE(memory.read(0x00C041) == IIgsMemory::INT_VBL);
   REQUIRE(memory.interruptPending());
   REQUIRE(memory.read(0x00C046) == (IIgsMemory::INT_STATUS_ANY | IIgsMemory::INT_VBL));
 
-  memory.write(0x00C047, 0x08); // any write acknowledges
+  memory.write(0x00C041, 0x00); // disabled again: the line drops, the flag stays
   REQUIRE_FALSE(memory.interruptPending());
+  REQUIRE(memory.read(0x00C046) == IIgsMemory::INT_VBL);
+
+  memory.write(0x00C047, 0x08); // any write acknowledges
   REQUIRE(memory.read(0x00C046) == 0x00);
 }
 

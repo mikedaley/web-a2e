@@ -12,10 +12,9 @@ namespace a2e {
 
 const std::string SmartPortCard::emptyString_;
 
-// ProDOS block device entry point offset in slot ROM
-static constexpr uint8_t PRODOS_ENTRY = 0x10;
-// SmartPort entry = ProDOS entry + 3
-static constexpr uint8_t SMARTPORT_ENTRY = 0x13;
+// A card's own slot ROM puts the ProDOS entry at $Cn10 and the SmartPort
+// entry three past it (prodosEntry_'s default). See setProDOSEntry for the
+// IIgs's layout.
 // Boot trigger offset in I/O space
 static constexpr uint8_t BOOT_IO_OFFSET = 0x00;
 
@@ -38,6 +37,11 @@ void SmartPortCard::setSlotNumber(uint8_t slot) {
     buildROM();
 }
 
+void SmartPortCard::setProDOSEntry(uint8_t offset) {
+    prodosEntry_ = offset;
+    buildROM();
+}
+
 void SmartPortCard::buildROM() {
     rom_.fill(0);
 
@@ -54,32 +58,43 @@ void SmartPortCard::buildROM() {
     // $06: LDA #$00  -> $Cn07 = $00 (SmartPort present)
     rom_[0x06] = 0xA9; rom_[0x07] = 0x00;
 
-    // Boot code at $08: set X to slot*16, trigger I/O boot, JMP $0801
-    // This path is used by PR#n from BASIC (execution falls through from $Cn00)
-    uint8_t slotOffset = slotNum_ << 4; // slot * 16
-    uint8_t ioAddr = 0x80 + slotOffset; // $C0n0 base
+    // Boot code: set X to slot*16, trigger the I/O boot, and RTS to $0801.
+    // This path is used by PR#n from BASIC (execution falls through from
+    // $Cn00) and by the autostart ROM.
+    const uint8_t slotOffset = slotNum_ << 4; // slot * 16
+    const uint8_t ioAddr = 0x80 + slotOffset; // $C0n0 base
+    const uint8_t prodos = prodosEntry_;
+    const uint8_t smartPort = smartPortEntry();
 
+    // Where the six-byte boot stub goes depends on where the entries are. A
+    // card's own layout has room for it at $08, below entries at $10 and $13.
+    // The IIgs's layout has the entries at $0A and $0D, so the fall-through
+    // from $07 branches over them to a stub at $10 — BRA is a 65C02
+    // instruction, and every machine with this layout has one.
+    uint8_t stub = 0x08;
+    if (prodos < 0x10) {
+        stub = 0x10;
+        rom_[0x08] = 0x80;                                      // BRA
+        rom_[0x09] = static_cast<uint8_t>(stub - 0x0A);
+    }
     // LDX #$n0 (set X to slot*16, needed by ProDOS boot block)
-    rom_[0x08] = 0xA2;
-    rom_[0x09] = slotOffset;
+    rom_[stub + 0] = 0xA2;
+    rom_[stub + 1] = slotOffset;
     // STX $C0n0 (trigger I/O trap for boot block load)
-    rom_[0x0A] = 0x8E;
-    rom_[0x0B] = ioAddr;
-    rom_[0x0C] = 0xC0;
+    rom_[stub + 2] = 0x8E;
+    rom_[stub + 3] = ioAddr;
+    rom_[stub + 4] = 0xC0;
     // RTS - if boot succeeded, writeIO pushed $0800 on stack so RTS goes to $0801.
     // If no disk loaded, RTS returns to the autostart ROM caller which scans the next slot.
-    rom_[0x0D] = 0x60;
+    rom_[stub + 5] = 0x60;
 
-    // ProDOS block device entry at $10: SEC + RTS (trapped by readROM)
-    rom_[PRODOS_ENTRY] = 0x38;     // SEC
-    rom_[PRODOS_ENTRY + 1] = 0x60; // RTS
-
-    // Padding byte at $12
-    rom_[0x12] = 0xEA; // NOP
-
-    // SmartPort entry at $13: SEC + RTS (trapped by readROM)
-    rom_[SMARTPORT_ENTRY] = 0x38;     // SEC
-    rom_[SMARTPORT_ENTRY + 1] = 0x60; // RTS
+    // ProDOS block device entry: SEC + RTS (trapped by readROM)
+    rom_[prodos] = 0x38;     // SEC
+    rom_[prodos + 1] = 0x60; // RTS
+    rom_[prodos + 2] = 0xEA; // NOP
+    // SmartPort entry: SEC + RTS (trapped by readROM)
+    rom_[smartPort] = 0x38;     // SEC
+    rom_[smartPort + 1] = 0x60; // RTS
 
     // $FB: the SmartPort ID type byte. Bit 7 says the card takes extended
     // calls — the ones with a four-byte pointer, which is how anything on a
@@ -91,8 +106,8 @@ void SmartPortCard::buildROM() {
     // is answered by readROM rather than baked in here.
 
     // $FF: ProDOS entry point offset (used by both autostart ROM boot and ProDOS driver)
-    // The readROM trap at $Cn10 distinguishes boot vs ProDOS calls via the booted_ flag.
-    rom_[0xFF] = PRODOS_ENTRY;
+    // The readROM trap at the entry distinguishes boot vs ProDOS calls via the booted_ flag.
+    rom_[0xFF] = prodos;
 }
 
 int SmartPortCard::deviceCount() const {
@@ -105,8 +120,17 @@ int SmartPortCard::deviceCount() const {
 
 uint8_t SmartPortCard::prodosStatusByte() const {
     // Bits 5-4 are one less than the number of volumes; the low four say the
-    // slot can be asked for status, read, written and formatted. Nothing here
-    // is removable or interrupting.
+    // slot can be asked for status, read, written and formatted.
+    //
+    // A IIgs's own slot 5 firmware answers $BF whatever is plugged in: four
+    // volumes, removable, interrupting — the port, not the drives on it. And
+    // ProDOS 8 1.x depends on the two drives that implies: its device-table
+    // builder pushes a byte for every device that is not the boot device and
+    // pops one for every other device in the boot slot, which only balances
+    // when the boot slot has a drive 2. A card that reported the one image
+    // it held sent ProDOS 8 1.4 into a BRK after its splash screen, on every
+    // demo disk that boots it.
+    if (prodosEntry_ < 0x10) return 0xBF;
     const int volumes = deviceCount() > 0 ? deviceCount() : 1;
     return static_cast<uint8_t>(((volumes - 1) << 4) | 0x0F);
 }
@@ -223,7 +247,7 @@ uint8_t SmartPortCard::readROM(uint8_t offset) {
     if (offset == 0xFE) return prodosStatusByte();
 
     if (executingAt_ && executingAt_(here)) {
-        if (offset == PRODOS_ENTRY) {
+        if (offset == prodosEntry_) {
             if (!booted_) {
                 // First call to entry point = boot (from autostart ROM or PR#n fallthrough)
                 if (!handleBoot()) {
@@ -249,7 +273,7 @@ uint8_t SmartPortCard::readROM(uint8_t offset) {
             }
             return 0x60; // RTS
         }
-        if (offset == SMARTPORT_ENTRY) {
+        if (offset == smartPortEntry()) {
                     handleSmartPort();
             return 0x60; // RTS
         }
@@ -342,6 +366,7 @@ void SmartPortCard::handleProDOSBlock() {
                 setErrorResult(SP_NO_DEVICE);
                 return;
             }
+            if (onTransfer_) onTransfer_(1, device, blockNum, memRead_(0x44) | (memRead_(0x45) << 8));
             uint8_t blockBuf[BlockDevice::BLOCK_SIZE];
             if (!devices_[device].readBlock(blockNum, blockBuf)) {
                 setErrorResult(SP_IO_ERROR);
@@ -509,6 +534,7 @@ void SmartPortCard::handleSmartPort() {
             if (device < 0 || device >= MAX_DEVICES) { setErrorResult(SP_BAD_UNIT); return; }
             if (!devices_[device].isLoaded()) { setErrorResult(SP_NO_DEVICE); return; }
 
+            if (onTransfer_) onTransfer_(op, device, blockNum, pointer);
             uint8_t blockBuf[BlockDevice::BLOCK_SIZE];
             if (op == 0x01) {
                 if (!devices_[device].readBlock(blockNum, blockBuf)) { setErrorResult(SP_IO_ERROR); return; }

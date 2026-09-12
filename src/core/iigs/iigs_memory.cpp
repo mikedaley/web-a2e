@@ -40,6 +40,8 @@ constexpr uint16_t REG_ADB_MOUSE = 0xC024;
 constexpr uint16_t REG_ADB_MODIFIERS = 0xC025;
 constexpr uint16_t REG_ADB_DATA = 0xC026;
 constexpr uint16_t REG_ADB_STATUS = 0xC027;
+constexpr uint16_t REG_VERTICAL_COUNT = 0xC02E;
+constexpr uint16_t REG_HORIZONTAL_COUNT = 0xC02F;
 constexpr uint16_t REG_SOUND_CONTROL = 0xC03C;
 constexpr uint16_t REG_SOUND_DATA = 0xC03D;
 constexpr uint16_t REG_SOUND_ADDRESS_LOW = 0xC03E;
@@ -154,10 +156,7 @@ uint8_t IIgsMemory::read(uint32_t address) {
   const Region region = regionFor(address, bank, offset);
   // Reaching the Mega II costs the Mega II's time, whichever clock the
   // processor is running at.
-  if (region == Region::IO || region == Region::MegaII) {
-    slowCycles_++;
-    slowAccesses_++;
-  }
+  if (region == Region::IO || region == Region::MegaII) slowAccess();
 
   switch (region) {
   case Region::IO:
@@ -211,10 +210,7 @@ void IIgsMemory::write(uint32_t address, uint8_t value) {
   const uint16_t offset = static_cast<uint16_t>(address);
 
   const Region region = regionFor(address, bank, offset);
-  if (region == Region::IO || region == Region::MegaII) {
-    slowCycles_++;
-    slowAccesses_++;
-  }
+  if (region == Region::IO || region == Region::MegaII) slowAccess();
 
   switch (region) {
   case Region::IO:
@@ -324,6 +320,12 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     return adb_.readData();
   case REG_ADB_STATUS:
     return adb_.readStatus();
+  case REG_VERTICAL_COUNT:
+  case REG_HORIZONTAL_COUNT:
+    // Reading either clears the scan-line interrupt, as GSSquared has it.
+    scanLinePending_ = false;
+    return offset == REG_VERTICAL_COUNT ? verticalCountRegister()
+                                        : horizontalCountRegister();
   case REG_SOUND_CONTROL:
     return sound_.readControl();
   case REG_SOUND_DATA:
@@ -373,6 +375,13 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     if (ExpansionCard *card = cardForSlotRom(offset)) {
       return card->readROM(static_cast<uint8_t>(offset & 0xFF));
     }
+    // A slot the Control Panel has given to "Your Card" with nothing in the
+    // socket answers the way an empty slot does on any Apple II: with the
+    // bus. Showing the internal firmware there instead would defeat the
+    // setting — ProDOS 8 2.4.1 finds the AppleTalk firmware's "ATLK" in slot
+    // 7 and calls into it, which ends in a BRK on a ROM 01, and the known
+    // way round that is to set slot 7 to Your Card.
+    if (slotIsExternalAndEmpty(offset)) return 0xFF; // nothing driving the bus
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
 
@@ -426,9 +435,14 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
   case REG_SCC_DATA_A:
     writeSerial(offset, value);
     return;
-  case REG_SOUND_CONTROL:
+  case REG_SOUND_CONTROL: {
+    const uint8_t before = sound_.volume();
     sound_.writeControl(value);
+    if (sound_.volume() != before && volumeChanged_) {
+      volumeChanged_(sound_.volume(), slowCycles_);
+    }
     return;
+  }
   case REG_SOUND_DATA:
     sound_.writeData(value);
     return;
@@ -495,6 +509,10 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     return sound_.readAddressLow();
   case REG_SOUND_ADDRESS_HIGH:
     return sound_.readAddressHigh();
+  case REG_VERTICAL_COUNT:
+    return verticalCountRegister();
+  case REG_HORIZONTAL_COUNT:
+    return horizontalCountRegister();
   case REG_CLOCK_DATA:
     return clock_.readData();
   case REG_CLOCK_CONTROL:
@@ -527,6 +545,7 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     if (ExpansionCard *card = cardForSlotRom(offset)) {
       return card->peekROM(static_cast<uint8_t>(offset & 0xFF));
     }
+    if (slotIsExternalAndEmpty(offset)) return 0xFF; // the bus, without disturbing it
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
   // The vectors' firmware, as in readIO — so a debugger looking at $C074
@@ -560,6 +579,15 @@ ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
   return (slotSelect_ & (1u << slot)) ? card : nullptr;
 }
 
+bool IIgsMemory::slotIsExternalAndEmpty(uint16_t offset) const {
+  if (offset < 0xC100 || offset >= 0xC800) return false;
+  const uint8_t slot = static_cast<uint8_t>((offset >> 8) & 0x07);
+  if (slot < 1 || slot > 7 || slot == internalCardSlot_) return false;
+  if ((slotSelect_ & (1u << slot)) == 0) return false; // internal firmware
+  ExpansionCard *card = megaII_->getCard(slot);
+  return !card || !card->hasROM();
+}
+
 uint8_t IIgsMemory::readSerial(uint16_t offset) {
   const int channel = (offset == REG_SCC_COMMAND_A || offset == REG_SCC_DATA_A) ? 0 : 1;
   if (offset == REG_SCC_DATA_A || offset == REG_SCC_DATA_B) return 0x00; // nothing received
@@ -583,6 +611,28 @@ void IIgsMemory::writeSerial(uint16_t offset, uint8_t value) {
   }
 }
 
+namespace {
+uint16_t verticalCounter(int line) {
+  if (line < 192) return static_cast<uint16_t>(0x100 + line);
+  if (line < 256) return static_cast<uint16_t>(0x1C0 + (line - 192));
+  return static_cast<uint16_t>(0xFA + (line - 256));
+}
+uint8_t horizontalCounter(int column) {
+  return column == 0 ? 0 : static_cast<uint8_t>(0x40 + column - 1);
+}
+} // namespace
+
+uint8_t IIgsMemory::verticalCountRegister() const {
+  const Beam beam = beamQuery_ ? beamQuery_() : Beam{0, 0};
+  return static_cast<uint8_t>(verticalCounter(beam.line) >> 1);
+}
+
+uint8_t IIgsMemory::horizontalCountRegister() const {
+  const Beam beam = beamQuery_ ? beamQuery_() : Beam{0, 0};
+  return static_cast<uint8_t>(((verticalCounter(beam.line) & 1) << 7) |
+                              horizontalCounter(beam.column));
+}
+
 uint8_t IIgsMemory::vgcInterruptRegister() const {
   uint8_t value = vgcInterrupt_;
   if (oneSecondPending_ && (vgcInterrupt_ & VGC_ONE_SECOND_ENABLE)) {
@@ -595,12 +645,16 @@ uint8_t IIgsMemory::vgcInterruptRegister() const {
 }
 
 uint8_t IIgsMemory::interruptStatusRegister() const {
+  // $C046 INTFLAG: the flags say what has happened, whether or not it was
+  // allowed to interrupt — a handler that switches its source off before
+  // looking (the diagnostic's does) must still find the flag — and only a
+  // write to $C047 clears them. Bit 7 says whether anything is holding the
+  // line down right now, which is enable and flag together, across every
+  // source. GSSquared reads the same.
   uint8_t value = 0;
-  if (vblPending_ && (interruptEnable_ & INT_VBL)) value |= INT_VBL;
-  if (quarterSecondPending_ && (interruptEnable_ & INT_QUARTER_SECOND)) {
-    value |= INT_QUARTER_SECOND;
-  }
-  if (value) value |= INT_STATUS_ANY;
+  if (vblPending_) value |= INT_VBL;
+  if (quarterSecondPending_) value |= INT_QUARTER_SECOND;
+  if (interruptPending()) value |= INT_STATUS_ANY;
   return value;
 }
 
@@ -608,7 +662,8 @@ bool IIgsMemory::interruptPending() const {
   if (adb_.interruptPending()) return true;
   if (sound_.interruptPending()) return true;
   if (vgcInterruptRegister() & VGC_ANY_PENDING) return true;
-  if (interruptStatusRegister() & INT_STATUS_ANY) return true;
+  if (vblPending_ && (interruptEnable_ & INT_VBL)) return true;
+  if (quarterSecondPending_ && (interruptEnable_ & INT_QUARTER_SECOND)) return true;
   return false;
 }
 

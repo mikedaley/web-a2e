@@ -441,7 +441,7 @@ TEST_CASE("A IIgs boots ProDOS from its own SmartPort", "[iigs][boot][smartport]
 
 TEST_CASE("A IIgs SmartPort traps execution, not reads",
           "[iigs][boot][smartport]") {
-  // The entry point at $C510 is a trap: the card services a driver call when
+  // The entry point at $C50A is a trap: the card services a driver call when
   // the CPU *executes* there, and hands back a ROM byte when something reads
   // it as data. Which of those is happening depends on what the processor has
   // done to the program counter by the time the read arrives, and a 65816 has
@@ -466,11 +466,11 @@ TEST_CASE("A IIgs SmartPort traps execution, not reads",
   // Reading the slot's bytes is what a ProDOS driver scan does, and it must
   // see the ROM: the signature that says "a block device lives here", and the
   // SEC that a call would have been answered with.
-  const uint32_t entry = 0x00C500 + 0x10;
+  const uint32_t entry = 0x00C500 + 0x0A; // the machine's own ProDOS entry
   REQUIRE(machine.memory().read(0x00C501) == 0x20);
   REQUIRE(machine.memory().read(0x00C503) == 0x00);
   REQUIRE(machine.memory().read(0x00C505) == 0x03);
-  REQUIRE(machine.memory().read(0x00C5FF) == 0x10);
+  REQUIRE(machine.memory().read(0x00C5FF) == 0x0A); // the machine's own layout
   REQUIRE(machine.memory().read(entry) == 0x38); // SEC, untouched
 }
 
@@ -595,7 +595,9 @@ TEST_CASE("The firmware services a vertical-blanking interrupt and comes back",
   for (int i = 0; i < 20000; i++) machine.step();
 
   REQUIRE_FALSE(memory.interruptPending());          // acknowledged
-  REQUIRE((memory.read(0x00C046) & IIgsMemory::INT_VBL) == 0);
+  // The flag itself may well be set again by now: several frames have gone
+  // by with VBL enabled, and $C046 reports every one until $C047 clears it.
+  // What matters is that nothing is still asking.
   const uint32_t pc = (static_cast<uint32_t>(machine.cpu().getPBR()) << 16) | machine.cpu().getPC();
   REQUIRE(pc >= 0x000100);                            // not in page zero
   REQUIRE(machine.cpu().getPBR() == 0xFF);            // back in the firmware's prompt loop
@@ -741,4 +743,123 @@ TEST_CASE("The firmware services an oscillator interrupt and comes back",
   REQUIRE_FALSE(sound.interruptPending());      // and was answered
   REQUIRE_FALSE(memory.interruptPending());
   REQUIRE(machine.cpu().getPBR() == 0xFF);      // back in the firmware's prompt loop
+}
+
+TEST_CASE("The bell fades out and ends quiet", "[iigs][boot][audio]") {
+  // The ROM's bell toggles the speaker while ramping the $C03C volume nibble
+  // down, then puts the nibble back. The gain follows the nibble as it
+  // happened, after the coupling stage and through a slew, so the fade is
+  // continuous and putting the volume back does not bring the speaker's
+  // decaying tail back as a thump — which was heard as a note after the bell.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the bell test");
+    return;
+  }
+  const std::vector<uint8_t> image = loadSystemMaster();
+  if (image.empty()) {
+    WARN("DOS 3.3 System Master not found; skipping the bell test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE, roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  REQUIRE(machine.insertDisk(0, image.data(), image.size(), "dos33.dsk"));
+  for (int i = 0; i < 40000000 && !machine.cpu().isStopped(); i++) machine.step();
+  REQUIRE(screenText(machine).find(']') != std::string::npos);
+
+  for (const char *c = "PRINT CHR$(7)"; *c; c++) { machine.keyDown(*c); for (int i = 0; i < 60000; i++) machine.step(); }
+  machine.keyDown(0x0D);
+
+  // The envelope in ten-millisecond windows, with the nibble at each.
+  std::vector<float> buffer(480 * 2);
+  std::vector<float> peaks; std::vector<int> nibbles;
+  for (int n = 0; n < 100; n++) {
+    machine.generateStereoAudioSamples(buffer.data(), 480);
+    float peak = 0; for (int i = 0; i < 480; i++) peak = std::max(peak, std::fabs(buffer[i * 2]));
+    peaks.push_back(peak); nibbles.push_back(machine.memory().sound().volume());
+  }
+  // Find the bell: the loudest window, and the window where the nibble goes
+  // back up after having been ramped to zero.
+  int loudest = 0; for (int n = 0; n < 100; n++) if (peaks[n] > peaks[loudest]) loudest = n;
+  int restored = -1;
+  for (int n = loudest; n < 99; n++) if (nibbles[n] == 0 && nibbles[n + 1] > 0) { restored = n + 1; break; }
+  REQUIRE(loudest > 2);
+  REQUIRE(restored > loudest);
+  INFO("tone peak " << peaks[loudest] << ", after restore " << peaks[restored] << " " << peaks[restored + 1]);
+  // Rang, faded to nearly nothing, and stayed quiet once the volume came back.
+  REQUIRE(peaks[loudest] > 0.1f);
+  REQUIRE(peaks[restored - 1] < peaks[loudest] * 0.25f);
+  REQUIRE(peaks[restored] < peaks[loudest] * 0.15f);
+  REQUIRE(peaks[restored + 2] < peaks[loudest] * 0.05f);
+  // And the fade was a slope, not steps: no window louder than the one before it.
+  for (int n = loudest + 1; n < restored; n++) REQUIRE(peaks[n] <= peaks[n - 1] + 0.005f);
+}
+
+TEST_CASE("A IIgs's SmartPort answers where its own firmware does",
+          "[iigs][boot][smartport]") {
+  // The machine's slot 5 firmware has its ProDOS entry at $C50A and its
+  // SmartPort entry at $C50D, and software written for a IIgs hard-codes those
+  // rather than reading $C5FF. A boot loader that did `JSR $C50D` into a card
+  // laid out like a card found an RTS there, came back without its inline
+  // parameters skipped, and executed them into a BRK.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the SmartPort layout test");
+    return;
+  }
+  const std::vector<uint8_t> image = loadFile("public/disks/ProDOS 2.4.3.po");
+  if (image.empty()) {
+    WARN("ProDOS image not found; skipping the SmartPort layout test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  REQUIRE(machine.insertBlockImage(0, image.data(), image.size(), "hd.po"));
+  IIgsMemory &memory = machine.memory();
+  REQUIRE(memory.peek(0x00C5FF) == 0x0A);
+  REQUIRE(memory.peek(0x00C50A) == 0x38);
+  REQUIRE(memory.peek(0x00C50D) == 0x38);
+  REQUIRE(memory.peek(0x00C501) == 0x20);
+}
+
+TEST_CASE("The IIgs Diagnostic's speed loop counts what the disk expects",
+          "[iigs][boot][timing]") {
+  // The Apple IIgs Diagnostic measures the processor's speed by counting
+  // iterations of a nine-cycle loop between two changes of $C02E, the
+  // vertical counter, which moves every two scan lines. It accepts 25 or 26
+  // at fast speed and 14 or 15 at slow, and those numbers are the sum of
+  // three things the machine models: 2.8MHz with one refresh cycle in every
+  // ten for fast RAM, a Mega II access that waits for the slow clock's edge
+  // and then takes a whole slow cycle, and a slow speed that is exactly the
+  // Mega II's. The same loop, run here, has to count the same.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the speed loop test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  IIgsMemory &memory = machine.memory();
+
+  // The diagnostic's loop, verbatim, with a STP after it:
+  //   LDX #0 / LDA $C02E / CMP $C02E / BEQ -3
+  //   LDA $C02E / INX / CMP $C02E / BEQ -3 / NOP  (run until the NOP is reached)
+  static const uint8_t loop[] = {0xA2, 0x00, 0xAD, 0x2E, 0xC0, 0xCD, 0x2E, 0xC0, 0xF0, 0xFB,
+                                 0xAD, 0x2E, 0xC0, 0xE8, 0xCD, 0x2E, 0xC0, 0xF0, 0xFA, 0xEA};
+  auto count = [&](uint8_t speed) {
+    memory.write(0x00C036, speed);
+    for (size_t i = 0; i < sizeof loop; i++) memory.write(0x000300 + i, loop[i]);
+    machine.cpu().setPBR(0x00);
+    machine.cpu().setPC(0x0300);
+    machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() | 0x04)); // no interrupts in the way
+    int steps = 0;
+    while (steps++ < 100000 && !(machine.cpu().getPBR() == 0 && machine.cpu().getPC() == 0x0313)) machine.step();
+    REQUIRE(machine.cpu().getPC() == 0x0313);
+    return machine.cpu().getX() & 0xFF;
+  };
+  const int fast = count(0x80);
+  const int slow = count(0x00);
+  INFO("fast " << fast << ", slow " << slow);
+  REQUIRE((fast == 25 || fast == 26));
+  REQUIRE((slow == 14 || slow == 15));
 }

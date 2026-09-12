@@ -93,10 +93,11 @@ public:
   void advance(uint32_t slowCycles);
 
   /**
-   * Resample what the chip has produced since the last call to the host's
-   * rate and mix it, scaled by the volume nibble, into an interleaved stereo
-   * buffer. The ring is consumed whole each time: the host asks for exactly
-   * the time the machine ran, so what was produced is what is due.
+   * Resample what the chip has produced to the host's rate into an
+   * interleaved stereo buffer. The step is the chip's rate over the host's,
+   * nudged by up to half a percent to keep the backlog near a few
+   * milliseconds — the host asks for exactly the time the machine ran, so the
+   * two only ever drift by rounding.
    *
    * @param buffer  interleaved stereo, filled with what the chip is playing
    * @param frames  how many stereo frames to produce
@@ -213,6 +214,10 @@ private:
   // The chip's clock, carried between advances, in ticks of DOC_CLOCK_HZ.
   double ticks_ = 0.0;
 
+  // The amplifier's volume as heard, following the nibble with a time
+  // constant: the real volume control is analogue and smooths the steps.
+  float heardVolume_ = 0.0f;
+
   // What the oscillators have produced and the host has not yet taken: stereo
   // frames at the chip's own rate. Sized for the fastest the chip can run for
   // longer than any host buffer.
@@ -220,6 +225,8 @@ private:
   std::vector<float> ring_;
   uint64_t produced_ = 0;    // Frames ever written
   double consumed_ = 0.0;    // Frames ever read, with the fraction
+  float lastLeft_ = 0.0f;    // What the last host frame was, for a dry ring
+  float lastRight_ = 0.0f;
 };
 
 } // namespace a2e::iigs

@@ -101,7 +101,12 @@ it, toggled on the slow clock, and the Ensoniq's samples are added on top.
 **The volume nibble in `$C03C` is the amplifier's, and the speaker is on the
 same amplifier:** the ROM's bell fades out by turning it down, and a bell that
 did not was a flat buzz. The firmware sets it to 5 from battery RAM on the way
-up, so a fresh machine is a third as loud as it could be, as a real one is.
+up, so a fresh machine is a third as loud as it could be, as a real one is. The
+speaker's gain follows the nibble's writes at the times they happened, per
+sample and through a twenty-millisecond slew, after the coupling stage: one
+gain per buffer made the bell's fade a staircase and, when the ROM put the
+volume back, brought the speaker's decaying tail back at full level — heard as
+an odd extra note at the end of the bell.
 
 **The Ensoniq runs on the machine's clock, not the host's.** `IIgsSound` is a
 port of the chip as GSSquared and MAME model it: an oscillator's accumulator
@@ -122,7 +127,12 @@ buffer from that interrupt never keeps up.
 **It interrupts, and the sound tools depend on it.** An oscillator whose control
 byte has the interrupt bit set raises one when it halts; a long sample is played
 by a swapped pair, each half refilled from the interrupt the other half's end
-raises. `IIgsMemory::interruptPending()` includes the chip, register `$E0`
+raises. The resampler runs at the chip's rate over the host's, nudged by up to
+half a percent to hold the backlog near four milliseconds; a program with every
+voice on one channel is heard through both speakers, as on a machine without a
+stereo card; and the `$C03C` volume nibble reaches the chip through a
+twenty-millisecond slew, because the real control is analogue and firmware
+flips it around every transfer. `IIgsMemory::interruptPending()` includes the chip, register `$E0`
 reports the first waiting oscillator active low and clears it on the read, and
 the line stays down while another waits. `test_iigs_boot.cpp` plays a one-shot
 from the firmware's prompt and checks the ROM's manager takes the interrupt and
@@ -236,6 +246,18 @@ A IIgs has three interrupt sources a //e has not, and GS/OS needs all of them:
   one-second's, the tick arrived through QuickDraw's vector, and the pointer
   was redrawn once a second: it followed the mouse, in jumps. GSSquared's
   `$C032` handler clears the same way round.
+- **The beam and the clock, `$C02E`/`$C02F` and `$C036`.** The IIgs Diagnostic's
+  speed test counts a nine-cycle loop between two changes of the vertical
+  counter and accepts 25 or 26 at fast speed, 14 or 15 at slow. Three things
+  make those numbers: the counters themselves (vertical `$100-$1BF` over the
+  picture, `$1C0-$1FF` then `$FA-$FF` through blanking, horizontal 0 then
+  `$40-$7F`, composed as GSSquared has them), a Mega II access from the fast
+  side that waits for the slow clock's edge and then takes a whole slow cycle,
+  and fast RAM refreshed one cycle in ten so 2.8MHz measures nearer 2.5. A
+  machine with none of them counted 33 and failed; the loop itself is now a
+  boot test. The same diagnostic's interrupt half needs `$C046` to report the
+  VBL flag after the handler has switched VBL off, so the flags are raw and
+  only `$C047` clears them.
 - **The Mega II, `$C041`/`$C046`/`$C047`.** INTEN enables vertical blanking
   (bit 3) and the quarter-second tick (bit 4); `$C046` reports them with bit 7
   for any; any write to `$C047` clears them. The ROM enables VBL itself on the
@@ -250,6 +272,21 @@ Two more things had to be right before the manager would claim any of them:
   of the vertical blank that had fired — over and over, until it gave up and
   reported an *Unclaimed Sound Interrupt*. `IIgsMemory::readSerial` is a
   register pointer, RR3 of zero, and a transmit buffer that is always empty.
+- **The SmartPort answers where the machine's own firmware does.** The real
+  slot 5 firmware has `$C5FF = $0A` — ProDOS entry `$C50A`, SmartPort entry
+  `$C50D` — and demo disks hard-code those rather than reading `$C5FF`; the
+  card is laid out that way on a IIgs (`SmartPortCard::setProDOSEntry`). Its
+  `$C5FE` is the firmware's `$BF` whatever is fitted, because ProDOS 8 1.x's
+  device-table builder only balances its stack when the boot slot has a
+  drive 2. Both were found with the ACS and Blackbird demo disks, which now
+  boot to their menus.
+- **A slot given to "Your Card" with nothing in it reads the bus.** A slot
+  switched away from the internal firmware by `$C02D` with no card fitted
+  answers `$FF`, not the firmware the setting was meant to hide. ProDOS 8
+  2.4.1 finds the AppleTalk firmware's `ATLK` in slot 7 and calls `$C710`,
+  which is a string on a ROM 01 and ends in `BRK` at `$C711`; that is
+  ProDOS 2.4.1's bug, fixed in 2.4.2, and 2.4.3 boots here. The known
+  workaround, slot 7 set to Your Card, needs the firmware to go away.
 - **The Ensoniq's interrupt register is active low.** Register `$E0` with bit 7
   clear means an oscillator interrupted, and bits 5-1 say which. With none
   waiting it must read with bit 7 set: reading the zero it was never written

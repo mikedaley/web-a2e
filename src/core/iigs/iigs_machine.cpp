@@ -72,6 +72,18 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
     return static_cast<uint16_t>(memory_->read(at) | (memory_->read(at + 1) << 8));
   });
 
+  memory_->setVolumeCallback([this](uint8_t nibble, uint64_t cycle) {
+    if (volumeChanges_.size() < 4096) volumeChanges_.push_back({cycle, nibble});
+  });
+
+  memory_->setBeamQuery([this]() {
+    const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
+    const uint64_t elapsed = memory_->slowCycles() - lastFrameCycle_;
+    const int line = static_cast<int>((elapsed / timing.cyclesPerScanline) % timing.scanlinesPerFrame);
+    const int column = static_cast<int>(elapsed % timing.cyclesPerScanline);
+    return IIgsMemory::Beam{line, column};
+  });
+
   memory_->setSlotMotorQuery([this](int slot) {
     return slot == 6 && disk_ && disk_->isMotorOn();
   });
@@ -86,6 +98,12 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   {
     auto smartPort = std::make_unique<SmartPortCard>();
     smartPort->setSlotNumber(SMARTPORT_SLOT);
+    // The machine's own slot 5 firmware has its ProDOS entry at $C50A and its
+    // SmartPort entry at $C50D, and software written for a IIgs hard-codes
+    // those rather than reading $C5FF — a boot loader that did `JSR $C50D`
+    // into a card laid out like a card found an RTS there, came back without
+    // its inline parameters skipped, and executed them.
+    smartPort->setProDOSEntry(0x0A);
     smartPort->setMemReadCallback(
         [this](uint16_t address) { return memory_->read(address); });
     smartPort->setMemWriteCallback([this](uint16_t address, uint8_t value) {
@@ -182,6 +200,9 @@ void IIgsMachine::reset() {
   lastFrameCycle_ = 0;
   linesFinished_ = 0;
   soundCycle_ = 0;
+  volumeChanges_.clear();
+  speakerGain_ = 0.0f;
+  speakerNibble_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
 
@@ -193,9 +214,20 @@ void IIgsMachine::reset() {
   cpu_->reset();
 }
 
+// One refresh cycle, ten fast cycles long in all, for every fifty 14M ticks
+// of fast RAM access: GSSquared's rule, and about 2.5MHz effective.
+static constexpr double REFRESH_STRETCH = 55.0 / 50.0;
+
 double IIgsMachine::slowCyclesFor(int cpuCycles) const {
   if (!memory_->isFastSpeed()) return cpuCycles;
-  return cpuCycles * (SLOW_CLOCK_HZ / FAST_CLOCK_HZ);
+  // Fast RAM is refreshed as it runs: the FPI takes one refresh cycle for
+  // every ten fast cycles, which is why a 2.8MHz IIgs measures nearer 2.5.
+  // ROM needs no refresh, so code running from it goes at the full rate. The
+  // diagnostic disk counts loop iterations between two changes of the
+  // vertical counter and accepts exactly the numbers this produces.
+  const bool fromRom = cpu_->getPBR() >= 0xF0;
+  const double stretch = fromRom ? 1.0 : REFRESH_STRETCH;
+  return cpuCycles * (SLOW_CLOCK_HZ / FAST_CLOCK_HZ) * stretch;
 }
 
 int IIgsMachine::step() {
@@ -425,18 +457,35 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
   // The speaker writes the buffer and the Ensoniq is added on top, because a
   // IIgs has one amplifier and everything reaches the same one.
   if (buffer) {
-    audio_->generateStereoSamples(buffer, sampleCount, memory_->slowCycles());
+    const uint64_t endCycle = memory_->slowCycles();
+    audio_->generateStereoSamples(buffer, sampleCount, endCycle);
 
     // The volume nibble in $C03C is the amplifier's, and the speaker is on
     // the same amplifier as the synthesiser: the ROM's bell fades out by
-    // turning it down, and a bell that did not was a flat buzz.
-    const float master =
-        static_cast<float>(memory_->sound().volume()) / 15.0f;
+    // turning it down, and a bell that did not was a flat buzz. The gain
+    // follows the nibble's changes at the times they happened, through the
+    // same twenty-millisecond slew the synthesiser's path has.
+    const double cyclesPerSample = static_cast<double>(cyclesToRun) / sampleCount;
+    const uint64_t startCycle = endCycle - static_cast<uint64_t>(cyclesToRun);
+    constexpr float SLEW = 1.0f / (0.020f * AUDIO_SAMPLE_RATE);
+    size_t change = 0;
+    for (int i = 0; i < sampleCount; i++) {
+      const uint64_t at = startCycle + static_cast<uint64_t>(i * cyclesPerSample);
+      while (change < volumeChanges_.size() && volumeChanges_[change].cycle <= at) {
+        speakerNibble_ = volumeChanges_[change++].nibble;
+      }
+      speakerGain_ += SLEW * (static_cast<float>(speakerNibble_) / 15.0f - speakerGain_);
+      buffer[i * 2] *= speakerGain_;
+      buffer[i * 2 + 1] *= speakerGain_;
+    }
+    // Whatever is left is later than this buffer; keep it for the next.
+    volumeChanges_.erase(volumeChanges_.begin(), volumeChanges_.begin() + change);
+
     ensoniqMix_.resize(static_cast<size_t>(sampleCount) * 2);
     memory_->sound().generateSamples(ensoniqMix_.data(), sampleCount,
                                      AUDIO_SAMPLE_RATE);
     for (size_t at = 0; at < ensoniqMix_.size(); at++) {
-      buffer[at] = buffer[at] * master + ensoniqMix_[at];
+      buffer[at] += ensoniqMix_[at];
     }
   }
   return sampleCount;

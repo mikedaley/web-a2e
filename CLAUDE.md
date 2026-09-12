@@ -251,6 +251,22 @@ and invisible until something is timed against it: the boot ROM's read loop
 runs out of bank `$00`'s I/O space, so *every* cycle of it is a slow access,
 and it came out at thirteen cycles where the disk expects seven.
 
+**A Mega II access from the fast side waits for the slow clock, and fast RAM
+is refreshed.** `IIgsMemory::slowAccess` charges an access to the Mega II
+the rest of the slow cycle in progress and then a whole one, because the
+processor stops at the slow clock's edge; `IIgsMachine::slowCyclesFor`
+stretches fast cycles run from RAM by one refresh cycle in every ten (2.8MHz
+comes out near 2.5), and code in ROM goes at the full rate. Both are
+GSSquared's rules, and the Apple IIgs Diagnostic's speed test is the check: it
+counts a nine-cycle loop between two changes of `$C02E` and accepts 25 or 26
+at fast speed and 14 or 15 at slow, which is what the machine now counts
+(`test_iigs_boot.cpp` runs the same loop). `$C02E`/`$C02F` are the Mega II's
+counters as the IIgs exposes them — vertical `$100-$1BF` over the picture and
+`$1C0-$1FF` then `$FA-$FF` through blanking, horizontal 0 then `$40-$7F` — from
+a beam query the machine installs. `$C046`'s flags say what happened whether
+or not it was enabled, and only `$C047` clears them; the diagnostic's handler
+switches VBL off before it looks and must still find the flag.
+
 **`$C036`'s bottom four bits are a veto on the fast clock, not a speed
 setting.** They are slot motor detect, one each for slots 4 to 7, and a drive
 turning in an enabled slot drops the whole machine to 1.023MHz until it stops.
@@ -307,6 +323,32 @@ firmware sizes memory by writing to one and reading it back. System 6.0.4 boots 
 with a working mouse; the built-in SmartPort in slot 5 serves it hard drive images
 through GS/OS's extended calls.
 
+**A slot given to "Your Card" with nothing in it reads the bus.** `$C02D`
+says which slots the internal firmware answers for; a slot switched away from
+it with no card fitted answers `$FF`, as an empty slot on any Apple II answers
+with the bus, rather than showing the firmware the setting was meant to hide
+(`IIgsMemory::slotIsExternalAndEmpty`). ProDOS 8 2.4.1 finds the AppleTalk
+firmware's `ATLK` signature in slot 7 and calls into it, which ends in a BRK
+at `$C711` on a ROM 01 — a ProDOS 2.4.1 bug, fixed in 2.4.2 ("not compatible
+with the AppleTalk Workstation card"), and 2.4.3 boots here — and the known
+way round it is to set slot 7 to Your Card, which only works if the firmware
+then goes away.
+
+**The IIgs's SmartPort answers where the machine's own firmware does.** The
+real slot 5 firmware has `$C5FF = $0A`: its ProDOS entry at `$C50A` and its
+SmartPort entry at `$C50D`, and software written for a IIgs hard-codes those
+rather than reading `$C5FF`. `SmartPortCard::setProDOSEntry(0x0A)` lays the
+card's ROM out that way (the fall-through boot path branches over the entries
+to its stub at `$10`), and its `$C5FE` status byte is the firmware's `$BF`
+whatever is fitted — four volumes, removable, interrupting. ProDOS 8 1.x needs
+the drive 2 that byte implies: its device-table builder pushes a byte per
+device that is not the boot device and pops one per other device in the boot
+slot, which only balances with two drives there. A card laid out like a card,
+reporting the one image it held, sent every demo disk booting ProDOS 8 1.x
+into a BRK — first at `$C711`'s neighbour when a `JSR $C50D` found an RTS, then
+after the ProDOS splash from the unbalanced stack. `SmartPortCard::
+setTransferCallback` reports every block transfer, for a trace or a debugger.
+
 **Slot 5 is the IIgs's SmartPort, and it is part of the machine** — no card to
 fit, no Control Panel setting. `IIgsMemory::setInternalCardSlot` names the slot
 that answers at `$Cn00` whatever `$C02D` says, because a part the machine has is
@@ -322,6 +364,13 @@ counter by then and a 65816 has not, and the card must not guess.
 samples on top. Without it the machine is silent through every beep and click.
 The volume nibble in `$C03C` is the amplifier's and scales both: the ROM's bell
 fades out by turning it down, and the firmware sets it to 5 from battery RAM.
+For the speaker the gain follows the nibble's writes at the slow-clock times
+they happened (`IIgsMemory::setVolumeCallback`, applied per sample in
+`IIgsMachine::generateStereoAudioSamples` through a twenty-millisecond slew),
+after the coupling stage: one gain per buffer, taken from the nibble at the
+buffer's end, made the fade a staircase and brought the speaker's decaying
+tail back at full level when the ROM put the volume back — a note after the
+bell. `test_iigs_boot.cpp` rings it and checks the envelope.
 
 **The Ensoniq runs on the machine's clock and it interrupts.** `IIgsSound` is
 the chip as GSSquared and MAME model it — resolution-shifted table addressing,
@@ -329,8 +378,13 @@ a zero byte halting every mode, the table's end wrapping free-run and halting
 the rest, swap mode handing over to the partner, sync mode restarting the
 oscillator below, one scan per `8 × (oscillators + 2)` ticks of 7.16MHz.
 `IIgsMachine::step` feeds `advance()` the slow clock and the chip produces a
-frame per scan into a ring that `generateSamples()` resamples to the host,
-consuming everything since the last call so the clocks cannot drift. An
+frame per scan into a ring that `generateSamples()` resamples to the host at
+the chip's rate over the host's, nudged by up to half a percent to hold the
+backlog near four milliseconds. A program that puts every voice on one
+channel is heard through both speakers, as on a machine with no stereo card;
+only a program using both sides is asking for stereo. The `$C03C` volume
+nibble reaches the chip through a twenty-millisecond slew, because the real
+control is analogue and firmware flips it around every transfer. An
 oscillator with its interrupt bit set raises one when it halts; `$E0` names it
 active low and clears it on the read; `IIgsMemory::interruptPending()` includes
 the chip. The sound tools play every sample through swapped pairs refilled

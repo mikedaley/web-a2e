@@ -424,8 +424,10 @@ TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
   setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x10); // running, free-run, left
 
+  // A few buffers first: the amplifier takes some twenty milliseconds to
+  // come up from silence.
   std::vector<float> samples(512 * 2, 0.0f);
-  render(sound, samples, 512);
+  for (int i = 0; i < 10; i++) render(sound, samples, 512);
   REQUIRE(loudest(samples) > 0.0f);
 
   SECTION("and a halted one plays nothing") {
@@ -453,15 +455,33 @@ TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
     REQUIRE(loudest(quieter) > 0.0f);
   }
 
-  SECTION("and so does the amplifier's nibble in $C03C") {
+  SECTION("and so does the amplifier's nibble in $C03C, once it has settled") {
+    // The volume control is analogue and takes some twenty milliseconds to
+    // follow a step, so a program's flips around a transfer are a slope
+    // rather than a chop. Give it a tenth of a second.
     sound.writeControl(0x05);
     std::vector<float> quieter(512 * 2, 0.0f);
-    render(sound, quieter, 512);
+    for (int i = 0; i < 10; i++) render(sound, quieter, 512);
     REQUIRE(quieter[0] != 0.0f);
     REQUIRE(loudest(quieter) < loudest(samples) * 0.4f);
+    REQUIRE(loudest(quieter) > loudest(samples) * 0.25f);
     sound.writeControl(0x00);
-    render(sound, quieter, 512);
-    REQUIRE(loudest(quieter) == 0.0f);
+    for (int i = 0; i < 20; i++) render(sound, quieter, 512);
+    REQUIRE(loudest(quieter) < 0.001f);
+  }
+
+  SECTION("a program that uses one speaker is heard through both") {
+    // Nothing here is a stereo card: a game that puts every voice on channel
+    // 0 is a mono game, and it comes out of both speakers rather than one.
+    std::vector<float> both(512 * 2, 0.0f);
+    render(sound, both, 512);
+    float left = 0.0f, right = 0.0f;
+    for (size_t i = 0; i < both.size(); i += 2) {
+      left = std::max(left, std::abs(both[i]));
+      right = std::max(right, std::abs(both[i + 1]));
+    }
+    REQUIRE(left > 0.0f);
+    REQUIRE(right == left);
   }
 
   SECTION("nothing comes out until the machine's clock has run") {
@@ -630,15 +650,24 @@ TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
   IIgsSound sound;
   sound.writeControl(0x0F);
   putSquareWave(sound, 0x0100, 256);
-  setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 2); // two of them
+  // Three enabled, the third halted: the last enabled oscillator is heard
+  // three times over, and that would tilt the comparison.
+  setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 4);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 2), IIgsSound::OSC_HALT);
 
   setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
   setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
   setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x10); // channel 1
+  // A second voice on channel 0, at a different volume so the two sides can
+  // be told apart: with both sides in use the program is asking for stereo.
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x00);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_WAVE_POINTER + 1), 0x01);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0x40);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_FREQUENCY_HIGH + 1), 0x08);
 
-  std::vector<float> samples(256 * 2, 0.0f);
-  render(sound, samples, 256);
+  std::vector<float> samples(2048 * 2, 0.0f);
+  for (int i = 0; i < 4; i++) render(sound, samples, 2048); // let the amplifier settle
 
   float left = 0.0f, right = 0.0f;
   for (size_t i = 0; i < samples.size(); i += 2) {
@@ -646,20 +675,8 @@ TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
     right = std::max(right, std::abs(samples[i + 1]));
   }
   REQUIRE(left > 0.0f);
-  REQUIRE(right == 0.0f);
-
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x00); // channel 0
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_WAVE_POINTER + 1), 0x01);
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0xFF);
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_FREQUENCY_HIGH + 1), 0x08);
-
-  std::fill(samples.begin(), samples.end(), 0.0f);
-  render(sound, samples, 256);
-  right = 0.0f;
-  for (size_t i = 1; i < samples.size(); i += 2) {
-    right = std::max(right, std::abs(samples[i]));
-  }
   REQUIRE(right > 0.0f);
+  REQUIRE(left > right * 2.0f); // channel 1's full-volume voice is the left one
 }
 
 TEST_CASE("The ADB controller interrupts only when asked to, and only for what it has",

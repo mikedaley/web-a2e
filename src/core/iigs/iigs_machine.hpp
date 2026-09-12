@@ -256,6 +256,16 @@ private:
   // Where the Ensoniq's clock had got to, so each step feeds it the cycles
   // the step took.
   uint64_t soundCycle_ = 0;
+
+  // The amplifier's volume as the speaker hears it. The nibble's changes are
+  // kept with the time they happened, and the gain follows them per sample
+  // through a slew, because the control is analogue and sits after the
+  // coupling capacitor: restoring the volume after the ROM's bell has ramped
+  // it to nothing must not bring the speaker's decaying tail back as a thump.
+  struct VolumeChange { uint64_t cycle; uint8_t nibble; };
+  std::vector<VolumeChange> volumeChanges_;
+  float speakerGain_ = 0.0f;
+  uint8_t speakerNibble_ = 0;
   std::vector<uint8_t> frame_;
 
   void raiseScanLineInterrupts();

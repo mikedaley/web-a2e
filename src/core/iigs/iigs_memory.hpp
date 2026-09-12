@@ -124,6 +124,23 @@ public:
    * runs out of bank $00's I/O space and so is *all* slow accesses, comes out
    * at thirteen cycles where the disk expects seven.
    */
+  /**
+   * A cycle that reaches the Mega II. From the fast side the processor stops
+   * until the slow clock's next edge and then takes a whole slow cycle — so
+   * the access costs the rest of the slow cycle in progress, and then one —
+   * which is what makes a loop that polls a Mega II register slower than its
+   * cycle count says. GSSquared charges the same. At slow speed every cycle
+   * is already on that clock and there is nothing to wait for.
+   */
+  void slowAccess() {
+    if (remainder_ > 0.0) {
+      slowCycles_++;
+      remainder_ = 0.0;
+    }
+    slowCycles_++;
+    slowAccesses_++;
+  }
+
   uint64_t takeSlowAccesses() {
     const uint64_t count = slowAccesses_;
     slowAccesses_ = 0;
@@ -257,6 +274,27 @@ public:
   void signalVerticalBlank() { vblPending_ = true; }
 
   /**
+   * Where the beam is, for $C02E and $C02F: the scan line since the top of
+   * the frame (0-261) and the cycle within it (0-64). The machine owns the
+   * frame boundary, so it answers.
+   */
+  struct Beam { int line; int column; };
+  using BeamQuery = std::function<Beam()>;
+  void setBeamQuery(BeamQuery query) { beamQuery_ = std::move(query); }
+
+  /**
+   * $C02E VERTCNT and $C02F HORIZCNT, composed as the Mega II's scanner has
+   * them: the vertical counter runs $100-$1BF over the picture and $1C0-$1FF
+   * then $FA-$FF through blanking; the horizontal counter is 0 for the first
+   * cycle of a line and $40-$7F for the rest. $C02E is the vertical counter's
+   * bits 8-1, $C02F its bit 0 above the horizontal counter. The IIgs
+   * Diagnostic times the processor against these to measure its speed, and
+   * a machine that answered nothing failed that test at once.
+   */
+  uint8_t verticalCountRegister() const;
+  uint8_t horizontalCountRegister() const;
+
+  /**
    * The VGC has finished drawing a Super Hi-Res line whose control byte asks
    * for an interrupt (bit 6 of the SCB), and $C023 bit 2 lets it.
    *
@@ -302,6 +340,14 @@ public:
    * program that changes the text colour partway down the screen, which is a
    * real thing to do, would not see it change until the next one.
    */
+  /**
+   * Told when the volume nibble in $C03C changes, with the slow-clock time,
+   * so the speaker's amplifier can follow it as it happened rather than as
+   * the buffer that carried it happened to end.
+   */
+  using VolumeCallback = std::function<void(uint8_t, uint64_t)>;
+  void setVolumeCallback(VolumeCallback callback) { volumeChanged_ = std::move(callback); }
+
   using TextColourCallback = std::function<void(uint8_t)>;
   void setTextColourCallback(TextColourCallback callback) {
     textColourChanged_ = std::move(callback);
@@ -495,6 +541,9 @@ private:
    */
   uint8_t effectiveBank(uint8_t bank, uint16_t offset, bool write) const;
 
+  /** A slot the Control Panel gave to "Your Card", with no card in it. */
+  bool slotIsExternalAndEmpty(uint16_t offset) const;
+
   IIgsADB adb_;
   IIgsClock clock_;
   IIgsSound sound_;
@@ -551,6 +600,8 @@ private:
 
   // Who to tell when the text colours change. See setTextColourCallback.
   TextColourCallback textColourChanged_;
+  VolumeCallback volumeChanged_;
+  BeamQuery beamQuery_;
 };
 
 } // namespace a2e::iigs

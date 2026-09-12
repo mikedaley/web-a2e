@@ -454,3 +454,41 @@ TEST_CASE("A SmartPort card says it takes extended calls", "[smartport][protocol
     card.insertImage(1, image.data(), image.size(), "hd2.po");
     REQUIRE((card.readROM(0xFE) & 0x30) == 0x10);
 }
+
+TEST_CASE("The IIgs layout puts the entries where the machine's own firmware has them",
+          "[smartport][iigs]") {
+    // A IIgs's slot 5 firmware has $C5FF = $0A: the ProDOS entry at $C50A and
+    // the SmartPort entry at $C50D, and software written for the machine
+    // hard-codes those. A card standing in for that firmware has to answer
+    // there, with the fall-through boot path still reaching its stub.
+    SmartPortCard card;
+    card.setSlotNumber(5);
+    card.setProDOSEntry(0x0A);
+    std::vector<uint8_t> image(512 * 16, 0);
+    REQUIRE(card.insertImage(0, image.data(), image.size(), "hd.po"));
+
+    REQUIRE(card.readROM(0xFF) == 0x0A);
+    REQUIRE(card.readROM(0x01) == 0x20); // still a ProDOS block device
+    REQUIRE(card.readROM(0x0A) == 0x38); // SEC / RTS at the ProDOS entry
+    REQUIRE(card.readROM(0x0B) == 0x60);
+    REQUIRE(card.readROM(0x0D) == 0x38); // and at the SmartPort entry
+    REQUIRE(card.readROM(0x0E) == 0x60);
+    REQUIRE(card.readROM(0x08) == 0x80); // BRA over them...
+    REQUIRE(card.readROM(0x10) == 0xA2); // ...to the boot stub
+    REQUIRE(card.readROM(0x11) == 0x50);
+    REQUIRE(card.readROM(0x12) == 0x8E);
+    REQUIRE(card.readROM(0x15) == 0x60);
+    REQUIRE(card.prodosEntry() == 0x0A);
+    REQUIRE(card.smartPortEntry() == 0x0D);
+
+    // And the firmware's status byte: four volumes, removable, interrupting,
+    // whatever is fitted — ProDOS 8 1.x needs the drive 2 that implies.
+    REQUIRE(card.readROM(0xFE) == 0xBF);
+
+    // The default is a card's own layout.
+    SmartPortCard plain;
+    plain.setSlotNumber(5);
+    REQUIRE(plain.insertImage(0, image.data(), image.size(), "hd.po"));
+    REQUIRE(plain.readROM(0xFF) == 0x10);
+    REQUIRE(plain.readROM(0x08) == 0xA2);
+}
