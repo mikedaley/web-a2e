@@ -1,0 +1,72 @@
+name: Deploy to Cloudflare Pages (optional)
+
+# Optional Cloudflare Pages deployment for the CORS proxy / URL media feature.
+#
+# This workflow is opt-in per repository and is skipped unless the repository
+# sets the CLOUDFLARE_PAGES_ENABLED variable to "true". A maintainer who keeps
+# the existing VPS / static-server deployment never sets it, and nothing here
+# runs — the standard deployment is untouched.
+#
+# To enable Cloudflare Pages:
+#   Repository Settings → Secrets and variables → Actions
+#     Variable: CLOUDFLARE_PAGES_ENABLED = true
+#     Variable: CLOUDFLARE_PAGES_PROJECT  (optional; defaults to web-a2e)
+#     Secret:   CLOUDFLARE_API_TOKEN   (Account · Cloudflare Pages:Edit)
+#     Secret:   CLOUDFLARE_ACCOUNT_ID
+#
+# The Cloudflare Pages project must already exist in the account.
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # Opt-in: skipped unless the repo owner enables it.
+    if: vars.CLOUDFLARE_PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Check Secrets
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::GitHub Secret 'CLOUDFLARE_API_TOKEN' is missing. See the workflow comments."
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          PROJECT="${CLOUDFLARE_PAGES_PROJECT:-web-a2e}"
+          npx -y wrangler pages project create "$PROJECT" --production-branch "${{ github.ref_name }}" || true
+          npx -y wrangler pages deploy dist --project-name="$PROJECT" --branch "${{ github.ref_name }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          WRANGLER_LOG: debug
