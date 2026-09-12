@@ -285,6 +285,28 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
+**The clock chip is a serial line, and it answers on the read transfer.**
+`$C033` is the byte and `$C034` drives it: bit 7 starts a transfer, bit 6 is
+its direction (set, the chip supplies the byte; clear, it takes the one in
+`$C033`), and bit 5 holds the chip selected across the transfers of one
+transaction — the firmware's driver drops it after every one, and
+`IIgsClock` goes back to expecting a command when it does. A transaction is a
+command byte and then a data byte, each its own transfer, with the 256 bytes of
+battery RAM addressed across two command bytes. What matters is *when* the
+chip answers a read: on the read-direction transfer, not when it sees the
+command. The driver — the same routine in the ROM and in the IIgs Diagnostic —
+stores whatever it is holding to `$C033` before every transfer, the read of
+the data byte included, so a chip that answered early had its answer
+overwritten and then took the junk as its next command. The Diagnostic's Clock
+RAM Test read every clock byte back as that junk, retried 256 times, and
+dropped into the monitor. The seconds are seeded from the host's clock when
+the chip is made and then counted by the machine: `IIgsMemory::tickClocks`
+ticks the chip on the same second that raises the VGC's one-second interrupt,
+because on the real machine that interrupt *is* the chip's tick. The
+Diagnostic writes `$FFFFFFFF` and waits for the roll-over, which a clock
+reading the host would never show a machine running faster than real time.
+`test_iigs_devices.cpp` pins the protocol, the junk, and the tick.
+
 **Banks `$00` and `$01` are 64K of fast RAM each, language card included.**
 Their `$D000-$FFFF` is the bank's own memory in the shape of a //e's card, with
 the second `$D000` bank being the 4K hidden under `$C000`; the Mega II's card

@@ -291,25 +291,55 @@ TEST_CASE("The Ensoniq's RAM is reached a byte at a time", "[iigs][sound]") {
 
 namespace {
 
-// A transaction is a byte in the data register and a nudge to the control one.
-void send(IIgsClock &clock, uint8_t byte) {
+// The firmware's driver, byte for byte: every transfer stores what it has in
+// hand to $C033 first, and the control byte says which way that byte goes —
+// bit 6 clear for one going to the chip, set for one the chip supplies — with
+// bit 5 holding the chip selected until the driver drops it at the end.
+void sendToChip(IIgsClock &clock, uint8_t byte) {
   clock.writeData(byte);
-  clock.writeControl(IIgsClock::CONTROL_TRANSACTION);
+  clock.writeControl(IIgsClock::CONTROL_TRANSACTION | IIgsClock::CONTROL_SELECT);
 }
 
-// Battery RAM takes three of them: two command bytes carrying the address
+uint8_t takeFromChip(IIgsClock &clock, uint8_t junk) {
+  clock.writeData(junk);
+  clock.writeControl(IIgsClock::CONTROL_TRANSACTION | IIgsClock::CONTROL_READ |
+                     IIgsClock::CONTROL_SELECT);
+  return clock.readData();
+}
+
+void endTransaction(IIgsClock &clock) {
+  clock.writeControl(static_cast<uint8_t>(clock.readControl() &
+                                          ~IIgsClock::CONTROL_SELECT));
+}
+
+// Battery RAM takes three transfers: two command bytes carrying the address
 // between them, and then the byte itself.
 void writeBatteryRam(IIgsClock &clock, uint8_t address, uint8_t value) {
-  send(clock, static_cast<uint8_t>(0x38 | (address >> 5)));
-  send(clock, static_cast<uint8_t>((address & 0x1F) << 2));
-  send(clock, value);
+  sendToChip(clock, static_cast<uint8_t>(0x38 | (address >> 5)));
+  sendToChip(clock, static_cast<uint8_t>((address & 0x1F) << 2));
+  sendToChip(clock, value);
+  endTransaction(clock);
 }
 
 uint8_t readBatteryRam(IIgsClock &clock, uint8_t address) {
-  send(clock, static_cast<uint8_t>(0xB8 | (address >> 5)));
-  send(clock, static_cast<uint8_t>((address & 0x1F) << 2));
-  send(clock, 0x00);
-  return clock.readData();
+  sendToChip(clock, static_cast<uint8_t>(0xB8 | (address >> 5)));
+  sendToChip(clock, static_cast<uint8_t>((address & 0x1F) << 2));
+  const uint8_t value = takeFromChip(clock, 0x00);
+  endTransaction(clock);
+  return value;
+}
+
+uint8_t readClockByte(IIgsClock &clock, int which, uint8_t junk = 0x00) {
+  sendToChip(clock, static_cast<uint8_t>(0x81 | (which << 2)));
+  const uint8_t value = takeFromChip(clock, junk);
+  endTransaction(clock);
+  return value;
+}
+
+void writeClockByte(IIgsClock &clock, int which, uint8_t value) {
+  sendToChip(clock, static_cast<uint8_t>(0x01 | (which << 2)));
+  sendToChip(clock, value);
+  endTransaction(clock);
 }
 
 } // namespace
@@ -343,6 +373,18 @@ TEST_CASE("Battery RAM is addressed across three transactions",
     clock.reset();
     REQUIRE(readBatteryRam(clock, 0x20) == 0x33);
   }
+
+  SECTION("the twenty bytes the old commands reach are the first twenty") {
+    sendToChip(clock, 0x41 | (0x0B << 2)); // z1aaaa01: the old RAM $0B
+    sendToChip(clock, 0x55);
+    endTransaction(clock);
+    REQUIRE(readBatteryRam(clock, 0x0B) == 0x55);
+
+    sendToChip(clock, 0x11 | (0x02 << 1)); // z0010aa1: the old RAM $12
+    sendToChip(clock, 0x66);
+    endTransaction(clock);
+    REQUIRE(readBatteryRam(clock, 0x12) == 0x66);
+  }
 }
 
 TEST_CASE("The clock counts seconds since 1904", "[iigs][clock]") {
@@ -350,14 +392,74 @@ TEST_CASE("The clock counts seconds since 1904", "[iigs][clock]") {
   clock.setSeconds(0x12345678);
 
   // Four registers, least significant first.
-  send(clock, 0x81);
-  REQUIRE(clock.readData() == 0x78);
-  send(clock, 0x85);
-  REQUIRE(clock.readData() == 0x56);
-  send(clock, 0x89);
-  REQUIRE(clock.readData() == 0x34);
-  send(clock, 0x8D);
-  REQUIRE(clock.readData() == 0x12);
+  REQUIRE(readClockByte(clock, 0) == 0x78);
+  REQUIRE(readClockByte(clock, 1) == 0x56);
+  REQUIRE(readClockByte(clock, 2) == 0x34);
+  REQUIRE(readClockByte(clock, 3) == 0x12);
+
+  SECTION("and a byte written is a byte read back") {
+    // The IIgs Diagnostic's Clock RAM Test writes each of the four and reads
+    // it straight back, up to 256 times before it gives up.
+    writeClockByte(clock, 1, 0xA5);
+    REQUIRE(readClockByte(clock, 1) == 0xA5);
+    REQUIRE(readClockByte(clock, 0) == 0x78);
+    REQUIRE(clock.seconds() == 0x1234A578);
+  }
+}
+
+TEST_CASE("The chip supplies a read's data byte on the read transfer, not on "
+          "the command",
+          "[iigs][clock]") {
+  // The firmware's driver — and the Diagnostic's, which is the same routine —
+  // stores whatever it is holding to $C033 before *every* transfer, the read
+  // of the data byte included. A chip that put its answer in the register when
+  // it saw the command had it overwritten by that store, and the Diagnostic
+  // read every clock byte back as the junk it had just stored: 256 retries,
+  // then the monitor.
+  IIgsClock clock;
+  clock.setSeconds(0x11223344);
+  REQUIRE(readClockByte(clock, 0, 0xFF) == 0x44);
+  REQUIRE(readClockByte(clock, 3, 0x00) == 0x11);
+
+  writeBatteryRam(clock, 0x42, 0x99);
+  sendToChip(clock, 0xB8 | (0x42 >> 5));
+  sendToChip(clock, (0x42 & 0x1F) << 2);
+  REQUIRE(takeFromChip(clock, 0x00) == 0x99);
+  endTransaction(clock);
+
+  SECTION("and the junk is not taken as the next command") {
+    // The read transfer's stored byte, $01, is a write-seconds command if the
+    // chip looks at it. It must not.
+    REQUIRE(readClockByte(clock, 0, 0x01) == 0x44);
+    REQUIRE(clock.seconds() == 0x11223344);
+  }
+}
+
+TEST_CASE("Dropping the select line ends a transaction", "[iigs][clock]") {
+  // The driver drops bit 5 after every transaction. A chip halfway through a
+  // RAM address that ignored it would take the next command as that address.
+  IIgsClock clock;
+  writeBatteryRam(clock, 0x07, 0x77);
+  sendToChip(clock, 0x38); // the first half of a RAM address...
+  endTransaction(clock);   // ...abandoned
+  REQUIRE(readBatteryRam(clock, 0x07) == 0x77);
+}
+
+TEST_CASE("The clock starts at the host's time and counts the machine's",
+          "[iigs][clock]") {
+  // Seeded from the host so the date is right, and ticked by the machine so
+  // that a program which sets the time sees it move — the Diagnostic writes
+  // $FFFFFFFF and waits for the roll-over, which a clock reading the host
+  // would never show a machine running faster than real time.
+  IIgsClock clock;
+  const uint32_t host = IIgsClock::hostSecondsSince1904();
+  REQUIRE(clock.seconds() - host <= 1);
+
+  clock.setSeconds(0xFFFFFFFF);
+  clock.tick();
+  REQUIRE(clock.seconds() == 0);
+  REQUIRE(readClockByte(clock, 0) == 0x00);
+  REQUIRE(readClockByte(clock, 3) == 0x00);
 }
 
 TEST_CASE("The border colour shares the clock's control register",

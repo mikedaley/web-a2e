@@ -680,6 +680,7 @@ void IIgsMemory::tickClocks() {
   if (slowCycles_ - lastSecond_ >= SECOND) {
     lastSecond_ = slowCycles_;
     oneSecondPending_ = true;
+    clock_.tick(); // the interrupt is the clock chip's second
   }
 }
 

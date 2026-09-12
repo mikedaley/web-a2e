@@ -34,6 +34,38 @@ None of that is a number. The rule the codebase has followed from the start says
 
 `MachineProfile` therefore gained one field — `MachineFamily`, which is `AppleII` or `AppleIIgs` — and it is what selects the parts, once, at construction. It is also what the compile-time validation asks before applying a rule that only holds for one design: a IIgs is not checked against the //e-sized arrays it does not use, or against "a visible column clocks out 14 dots" when its picture is 640 dots wide.
 
+## The Clock Chip
+
+`$C033` is a byte of data and `$C034` is the serial line under it: bit 7
+starts a transfer, bit 6 is the direction — set, the chip supplies the byte;
+clear, it takes the one in `$C033` — and bit 5 holds the chip selected for the
+transfers of one transaction. The firmware's driver drops bit 5 after every
+transaction, and the chip goes back to expecting a command when it does. A
+transaction is a command byte and then a data byte, each its own transfer; the
+256 bytes of battery RAM need two command bytes for the address, `00111aaa` and
+then `0aaaaa00`, and the four seconds bytes one, `z0000ss1`.
+
+**The chip answers a read on the read transfer, not on the command.** The
+driver — the same routine in the ROM and in the IIgs Diagnostic — stores
+whatever it is holding to `$C033` before *every* transfer, the read of the data
+byte included. A chip that put its answer in the register when it saw the
+command had it overwritten by that store, and then took the stored junk as its
+next command. The Diagnostic's Clock RAM Test read every clock byte back as the
+junk, retried 256 times, and dropped into the monitor with a break at
+`00/F3F0`.
+
+**The seconds are the machine's, seeded from the host.** The chip starts at
+the host's local time (seconds since 1904, as a IIgs counts) and is ticked by
+`IIgsMemory::tickClocks` on the same second that raises the VGC's one-second
+interrupt — on the real machine that interrupt is this chip's tick. The
+Diagnostic writes `$FFFFFFFF` to the clock and waits for it to roll over; a
+chip that read the host's time would never show that to a machine running
+faster than real time, and a native test runs at whatever speed the host has.
+
+With the clock right, the Diagnostic's sequence gets past it to the **Serial
+Internal Test**, which fails: the SCC is still the quiet Z8530 stub that keeps
+the ROM's interrupt manager happy, not a serial controller.
+
 ## The Two Clocks
 
 A IIgs runs at 2.8MHz until it reaches across to the Mega II, and then it runs at the Mega II's 1.023MHz for that access. So the machine is not "a //e at 2.8MHz": how fast a program goes depends on where it is reading.
