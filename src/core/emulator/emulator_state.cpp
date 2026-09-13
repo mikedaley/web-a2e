@@ -588,7 +588,7 @@ bool Emulator::importState(const uint8_t *data, size_t size) {
   }
 
   frameReady_ = true;
-  breakpointHit_ = false;
+  debug_.clearHits();
   paused_ = false;
 
   // basicProgramRunning_ is inferred from ROM entry points ($D912 RUN, $D43C

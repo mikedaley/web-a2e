@@ -11,6 +11,7 @@
 #include "iigs_spec.hpp"
 #include "iigs_video.hpp"
 
+#include "../debug/machine_debug.hpp"
 #include "../disk-image/disk_converter.hpp"
 
 #include <string>
@@ -83,6 +84,55 @@ public:
 
   /** Run one instruction, whatever it costs. Returns the cycles it took. */
   int step();
+
+  // ===== Debugging =====
+  //
+  // The same facilities a //e has, and deliberately the same object behind
+  // them: a breakpoint, a watchpoint, a trace entry and a beam position are
+  // the same questions on a 65816 as on a 6502, and the host asks them the
+  // same way whichever machine is running.
+
+  /** Breakpoints, watchpoints, the trace ring and beam breakpoints. */
+  MachineDebug &debug() { return debug_; }
+  const MachineDebug &debug() const { return debug_; }
+
+  bool isPaused() const { return paused_; }
+
+  /**
+   * Stop or start the machine.
+   *
+   * Resuming from a breakpoint skips the one it is sitting on, or continuing
+   * would stop again without running an instruction.
+   */
+  void setPaused(bool paused);
+
+  /** One instruction, whether or not a breakpoint sits on it. */
+  void stepInstruction();
+
+  /**
+   * Run to just after the call at the program counter, or one instruction if
+   * it is not a call.
+   *
+   * Returns the address the temporary breakpoint was put on, or 0 if it
+   * single-stepped instead. A JSL is four bytes where a JSR is three, which
+   * is the whole of why this cannot be the //e's version.
+   */
+  uint32_t stepOver();
+
+  /**
+   * Run to the return address on the stack.
+   *
+   * Returns the address, or 0 if the stack does not hold a plausible one. The
+   * 65816 has two kinds of return — RTS takes two bytes off the stack and RTL
+   * three — so which one is looked for depends on how the subroutine was
+   * entered, and that is not knowable from the stack alone. The instruction
+   * at the program counter is consulted when it is a return, and RTS is
+   * assumed otherwise, because a long call is the rarer of the two.
+   */
+  uint32_t stepOut();
+
+  /** Where the beam is, derived from the machine's own clock. */
+  BeamPosition beam() const;
 
   // ===== The parts =====
 
@@ -246,6 +296,11 @@ private:
   // Scratch for the Ensoniq's half of the mix, kept rather than reallocated
   // every buffer.
   std::vector<float> ensoniqMix_;
+
+  MachineDebug debug_;
+  bool paused_ = false;
+
+  void recordTrace();
 
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;

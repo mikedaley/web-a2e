@@ -270,21 +270,10 @@ void Emulator::reset() {
   lastFrameCycle_ = 0;
   samplesGenerated_ = 0;
   frameReady_ = false;
-  breakpointHit_ = false;
-  watchpointHit_ = false;
-  skipBreakpointOnce_ = false;
-  tempBreakpointActive_ = false;
-  tempBreakpoint_ = 0;
-  tempBreakpointHit_ = false;
+  debug_.reset();
   // Keep beam breakpoints across reset (same as regular breakpoints)
-  for (auto& bp : beamBreakpoints_) {
-    bp.lastFireFrame = UINT64_MAX;
-    bp.lastFireScanline = -1;
-  }
-  beamBreakHit_ = false;
-  beamBreakHitId_ = -1;
-  beamBreakHitScanline_ = -1;
-  beamBreakHitHPos_ = -1;
+  // MachineDebug::reset() above has already released every beam breakpoint
+  // for the new frame.
   paused_ = false;
 
   // Clear BASIC debugging state
@@ -323,12 +312,7 @@ void Emulator::warmReset() {
   video_->beginNewFrame(cpu_->getTotalCycles());
 
   // Clear debugger hit flags
-  breakpointHit_ = false;
-  watchpointHit_ = false;
-  skipBreakpointOnce_ = false;
-  tempBreakpointActive_ = false;
-  tempBreakpointHit_ = false;
-  beamBreakHit_ = false;
+  debug_.reset();
 
   // Clear BASIC debugger state
   basicBreakpointHit_ = false;
@@ -341,8 +325,8 @@ void Emulator::warmReset() {
 }
 
 void Emulator::setPaused(bool paused) {
-  if (!paused && paused_ && breakpointHit_) {
-    skipBreakpointOnce_ = true;
+  if (!paused && paused_ && debug_.isBreakpointHit()) {
+    debug_.skipNextBreakpoint();
   }
   if (!paused && paused_ && basicBreakpointHit_) {
     // Skip this BASIC breakpoint until we move to a different line/statement
@@ -362,11 +346,8 @@ void Emulator::setPaused(bool paused) {
     }
     skipBasicBreakpointStmt_ = hasStmtBp ? static_cast<int8_t>(stmtIdx) : -1;
   }
-  breakpointHit_ = false;
+  debug_.clearHits();
   basicBreakpointHit_ = false;
-  watchpointHit_ = false;
-  beamBreakHit_ = false;
-  beamBreakHitId_ = -1;
   // Reset frame sample counter when unpausing to prevent backlog
   if (!paused && paused_) {
     samplesGenerated_ = 0;
@@ -409,34 +390,10 @@ void Emulator::runCycles(int cycles) {
       continue;
     }
 
-    // Check breakpoints (user breakpoints and temp breakpoint)
-    {
-      uint16_t pc = cpu_->getPC();
-
-      // Check temp breakpoint (step over / step out)
-      if (tempBreakpointActive_ && pc == tempBreakpoint_) {
-        // Disarm FIRST, then record the hit: clearTempBreakpoint() resets
-        // tempBreakpointHit_, so setting the flag before the call wiped it
-        // again and isTempBreakpointHit() could never report true.
-        clearTempBreakpoint();
-        tempBreakpointHit_ = true;
-        breakpointHit_ = true;
-        breakpointAddress_ = pc;
-        paused_ = true;
-        return;
-      }
-
-      // Check user breakpoints
-      if (!breakpoints_.empty()) {
-        if (skipBreakpointOnce_) {
-          skipBreakpointOnce_ = false;
-        } else if (breakpoints_.count(pc) && !disabledBreakpoints_.count(pc)) {
-          breakpointHit_ = true;
-          breakpointAddress_ = pc;
-          paused_ = true;
-          return;
-        }
-      }
+    // Breakpoints, the temporary one behind step over and step out included
+    if (debug_.shouldBreakBefore(cpu_->getPC())) {
+      paused_ = true;
+      return;
     }
 
     // Track BASIC program running state by monitoring ROM entry points.
@@ -613,7 +570,7 @@ void Emulator::runCycles(int cycles) {
     }
 
     // Record trace before execution
-    if (traceEnabled_) recordTrace();
+    if (debug_.isTraceEnabled()) recordTrace();
 
     // Track cycles before instruction
     uint64_t cyclesBefore = cpu_->getTotalCycles();
@@ -669,42 +626,22 @@ void Emulator::runCycles(int cycles) {
       frameReady_ = true;
     }
 
-    // Check watchpoint hit (set by MMU callbacks during execution)
-    if (watchpointHit_) return;
+    // A watchpoint hit during the instruction, through the MMU's callbacks
+    if (debug_.isWatchpointHit()) return;
 
-    // Check beam breakpoints
-    if (!beamBreakpoints_.empty()) {
-      uint64_t fc = cpu_->getTotalCycles() - lastFrameCycle_;
-      const auto framecycles =
+    // Beam breakpoints, measured from the start of the frame in progress
+    if (debug_.hasBeamBreakpoints()) {
+      uint64_t frameCycle = cpu_->getTotalCycles() - lastFrameCycle_;
+      const auto perFrame =
           static_cast<uint64_t>(machine_->timing.cyclesPerFrame());
-      if (fc >= framecycles) fc %= framecycles;
-      int16_t sl = static_cast<int16_t>(fc / 65);
-      int16_t hp = static_cast<int16_t>(fc % 65);
-      for (auto& bp : beamBreakpoints_) {
-        if (!bp.enabled) continue;
-        bool scanOk = (bp.scanline < 0) || (sl == bp.scanline);
-        bool hPosOk = (bp.hPos < 0) || (hp >= bp.hPos);
-        bool valid = (bp.scanline >= 0 || bp.hPos >= 0);
-        if (!scanOk || !hPosOk || !valid) continue;
-
-        // For wildcard-scanline breakpoints (HBLANK, Column), fire once per scanline.
-        // For specific-scanline breakpoints (VBL, Scanline, ScanCol), fire once per frame.
-        bool alreadyFired;
-        if (bp.scanline < 0) {
-          alreadyFired = (lastFrameCycle_ == bp.lastFireFrame && sl == bp.lastFireScanline);
-        } else {
-          alreadyFired = (lastFrameCycle_ == bp.lastFireFrame);
-        }
-        if (!alreadyFired) {
-          beamBreakHit_ = true;
-          beamBreakHitId_ = bp.id;
-          beamBreakHitScanline_ = sl;
-          beamBreakHitHPos_ = hp;
-          bp.lastFireFrame = lastFrameCycle_;
-          bp.lastFireScanline = sl;
-          paused_ = true;
-          return;
-        }
+      if (frameCycle >= perFrame) frameCycle %= perFrame;
+      const int scanline =
+          static_cast<int>(frameCycle / machine_->timing.cyclesPerScanline);
+      const int hPos =
+          static_cast<int>(frameCycle % machine_->timing.cyclesPerScanline);
+      if (debug_.shouldBreakAtBeam(lastFrameCycle_, scanline, hPos)) {
+        paused_ = true;
+        return;
       }
     }
   }
@@ -1052,13 +989,10 @@ const char *Emulator::getDiskFilename(int drive) const {
 // Debug facilities (breakpoints, watchpoints, trace, beam) are in emulator_debug.cpp
 
 void Emulator::stepInstruction() {
-  breakpointHit_ = false;
-  watchpointHit_ = false;
-  beamBreakHit_ = false;
-  beamBreakHitId_ = -1;
+  debug_.clearHits();
 
   // Record trace before execution
-  if (traceEnabled_) recordTrace();
+  if (debug_.isTraceEnabled()) recordTrace();
 
   // Track cycles before instruction
   uint64_t cyclesBefore = cpu_->getTotalCycles();

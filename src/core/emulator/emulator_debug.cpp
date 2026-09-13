@@ -10,6 +10,8 @@
  */
 
 #include "../emulator.hpp"
+
+#include "../disassembler/disassembler.hpp"
 #include <algorithm>
 
 namespace a2e {
@@ -18,33 +20,33 @@ namespace a2e {
 // Beam Position
 // ============================================================================
 
+// The video scanner counts like a television scans, so the cycle count is the
+// beam position. The arithmetic is in machine_debug.cpp because a IIgs derives
+// it the same way from its own profile.
+
 int Emulator::getFrameCycle() const {
   return static_cast<int>(cpu_->getTotalCycles() %
                           machine_->timing.cyclesPerFrame());
 }
 
 int Emulator::getBeamScanline() const {
-  return getFrameCycle() / machine_->timing.cyclesPerScanline;
+  return beamPosition(cpu_->getTotalCycles(), machine_->timing).scanline;
 }
 
 int Emulator::getBeamHPos() const {
-  return getFrameCycle() % machine_->timing.cyclesPerScanline;
+  return beamPosition(cpu_->getTotalCycles(), machine_->timing).hPos;
 }
 
 int Emulator::getBeamColumn() const {
-  // A scanline starts in blanking; the visible columns follow it, so a beam
-  // still inside the blanking interval is on no column at all.
-  const int hblank = machine_->timing.hblankCycles;
-  int hPos = getBeamHPos();
-  return hPos >= hblank ? hPos - hblank : -1;
+  return beamPosition(cpu_->getTotalCycles(), machine_->timing).column;
 }
 
 bool Emulator::isInVBL() const {
-  return getBeamScanline() >= machine_->timing.visibleScanlines;
+  return beamPosition(cpu_->getTotalCycles(), machine_->timing).inVerticalBlank;
 }
 
 bool Emulator::isInHBLANK() const {
-  return getBeamHPos() < machine_->timing.hblankCycles;
+  return beamPosition(cpu_->getTotalCycles(), machine_->timing).inHorizontalBlank;
 }
 
 // ============================================================================
@@ -59,15 +61,13 @@ uint16_t Emulator::stepOver() {
   if (opcode == 0x20) {
     // JSR - set temp breakpoint at instruction after JSR (PC + 3)
     uint16_t returnAddr = (pc + 3) & 0xFFFF;
-    tempBreakpoint_ = returnAddr;
-    tempBreakpointActive_ = true;
+    debug_.setTempBreakpoint(returnAddr);
     setPaused(false);
     return returnAddr;
   } else if (opcode == 0x00) {
     // BRK - treat like JSR but with PC+2 as return address
     uint16_t returnAddr = (pc + 2) & 0xFFFF;
-    tempBreakpoint_ = returnAddr;
-    tempBreakpointActive_ = true;
+    debug_.setTempBreakpoint(returnAddr);
     setPaused(false);
     return returnAddr;
   } else {
@@ -87,8 +87,7 @@ uint16_t Emulator::stepOut() {
 
   if (returnAddr > 0 && returnAddr <= 0xFFFF) {
     returnAddr &= 0xFFFF;
-    tempBreakpoint_ = returnAddr;
-    tempBreakpointActive_ = true;
+    debug_.setTempBreakpoint(returnAddr);
     setPaused(false);
     return returnAddr;
   } else {
@@ -99,10 +98,8 @@ uint16_t Emulator::stepOut() {
 }
 
 void Emulator::clearTempBreakpoint() {
-  if (tempBreakpointActive_) {
-    tempBreakpointActive_ = false;
-    tempBreakpoint_ = 0;
-    tempBreakpointHit_ = false;
+  if (debug_.isTempBreakpointActive()) {
+    debug_.clearTempBreakpoint();
   }
 }
 
@@ -110,21 +107,14 @@ void Emulator::clearTempBreakpoint() {
 // Breakpoints
 // ============================================================================
 
-void Emulator::addBreakpoint(uint16_t address) { breakpoints_.insert(address); }
+void Emulator::addBreakpoint(uint16_t address) { debug_.addBreakpoint(address); }
 
 void Emulator::removeBreakpoint(uint16_t address) {
-  breakpoints_.erase(address);
-  disabledBreakpoints_.erase(address);
+  debug_.removeBreakpoint(address);
 }
 
 void Emulator::enableBreakpoint(uint16_t address, bool enabled) {
-  if (enabled) {
-    disabledBreakpoints_.erase(address);
-  } else {
-    if (breakpoints_.count(address)) {
-      disabledBreakpoints_.insert(address);
-    }
-  }
+  debug_.enableBreakpoint(address, enabled);
 }
 
 // ============================================================================
@@ -374,55 +364,35 @@ int Emulator::getBasicHeatMapData(uint16_t* lines, uint32_t* counts, int maxEntr
 // Watchpoints
 // ============================================================================
 
-void Emulator::addWatchpoint(uint16_t startAddr, uint16_t endAddr, WatchpointType type) {
-  watchpoints_.push_back({startAddr, endAddr, type, true});
+void Emulator::addWatchpoint(uint16_t startAddr, uint16_t endAddr,
+                             WatchpointType type) {
+  debug_.addWatchpoint(startAddr, endAddr, type);
+  // Routing every access through the watchpoint check costs something, so the
+  // MMU only does it while there is a watchpoint to check.
   watchpointsActive_ = true;
   mmu_->setWatchpointsActive(true);
 }
 
 void Emulator::removeWatchpoint(uint16_t startAddr) {
-  watchpoints_.erase(
-    std::remove_if(watchpoints_.begin(), watchpoints_.end(),
-      [startAddr](const Watchpoint& wp) { return wp.startAddr == startAddr; }),
-    watchpoints_.end());
-  watchpointsActive_ = !watchpoints_.empty();
+  debug_.removeWatchpoint(startAddr);
+  watchpointsActive_ = debug_.hasWatchpoints();
   mmu_->setWatchpointsActive(watchpointsActive_);
 }
 
 void Emulator::clearWatchpoints() {
-  watchpoints_.clear();
+  debug_.clearWatchpoints();
   watchpointsActive_ = false;
   mmu_->setWatchpointsActive(false);
 }
 
 void Emulator::onWatchpointRead(uint16_t address, uint8_t value) {
-  if (!watchpointsActive_ || watchpointHit_) return;
-  for (const auto& wp : watchpoints_) {
-    if (!wp.enabled) continue;
-    if ((wp.type & WP_READ) && address >= wp.startAddr && address <= wp.endAddr) {
-      watchpointHit_ = true;
-      watchpointAddress_ = address;
-      watchpointValue_ = value;
-      watchpointIsWrite_ = false;
-      paused_ = true;
-      return;
-    }
-  }
+  if (!watchpointsActive_) return;
+  if (debug_.onRead(address, value)) paused_ = true;
 }
 
 void Emulator::onWatchpointWrite(uint16_t address, uint8_t value) {
-  if (!watchpointsActive_ || watchpointHit_) return;
-  for (const auto& wp : watchpoints_) {
-    if (!wp.enabled) continue;
-    if ((wp.type & WP_WRITE) && address >= wp.startAddr && address <= wp.endAddr) {
-      watchpointHit_ = true;
-      watchpointAddress_ = address;
-      watchpointValue_ = value;
-      watchpointIsWrite_ = true;
-      paused_ = true;
-      return;
-    }
-  }
+  if (!watchpointsActive_) return;
+  if (debug_.onWrite(address, value)) paused_ = true;
 }
 
 // ============================================================================
@@ -430,35 +400,19 @@ void Emulator::onWatchpointWrite(uint16_t address, uint8_t value) {
 // ============================================================================
 
 int32_t Emulator::addBeamBreakpoint(int16_t scanline, int16_t hPos) {
-  if (beamBreakpoints_.size() >= MAX_BEAM_BREAKPOINTS) return -1;
-  int32_t id = beamBreakNextId_++;
-  beamBreakpoints_.push_back({scanline, hPos, true, id, UINT64_MAX, -1});
-  return id;
+  return debug_.addBeamBreakpoint(scanline, hPos);
 }
 
 void Emulator::removeBeamBreakpoint(int32_t id) {
-  beamBreakpoints_.erase(
-    std::remove_if(beamBreakpoints_.begin(), beamBreakpoints_.end(),
-      [id](const BeamBreakpoint& bp) { return bp.id == id; }),
-    beamBreakpoints_.end());
+  debug_.removeBeamBreakpoint(id);
 }
 
 void Emulator::enableBeamBreakpoint(int32_t id, bool enabled) {
-  for (auto& bp : beamBreakpoints_) {
-    if (bp.id == id) {
-      bp.enabled = enabled;
-      return;
-    }
-  }
+  debug_.enableBeamBreakpoint(id, enabled);
 }
 
 void Emulator::clearAllBeamBreakpoints() {
-  beamBreakpoints_.clear();
-  beamBreakNextId_ = 1;
-  beamBreakHit_ = false;
-  beamBreakHitId_ = -1;
-  beamBreakHitScanline_ = -1;
-  beamBreakHitHPos_ = -1;
+  debug_.clearBeamBreakpoints();
 }
 
 // ============================================================================
@@ -466,45 +420,30 @@ void Emulator::clearAllBeamBreakpoints() {
 // ============================================================================
 
 void Emulator::recordTrace() {
-  if (traceBuffer_.empty()) {
-    traceBuffer_.resize(10000);
-  }
+  TraceEntry *entry = debug_.beginTraceEntry();
+  if (!entry) return;
 
-  auto& entry = traceBuffer_[traceHead_];
-  entry.pc = cpu_->getPC();
-  entry.opcode = mmu_->peek(entry.pc);
-  entry.a = cpu_->getA();
-  entry.x = cpu_->getX();
-  entry.y = cpu_->getY();
-  entry.sp = cpu_->getSP();
-  entry.p = cpu_->getP();
+  // The machine fills the entry in, because only the machine knows which bus
+  // to peek. A 6502's registers are the low halves of the fields a 65816
+  // fills, and everything it does not have stays zero.
+  entry->pc = cpu_->getPC();
+  entry->opcode = mmu_->peek(static_cast<uint16_t>(entry->pc));
+  entry->a = cpu_->getA();
+  entry->x = cpu_->getX();
+  entry->y = cpu_->getY();
+  entry->sp = cpu_->getSP();
+  entry->p = cpu_->getP();
+  entry->instrLen = static_cast<uint8_t>(getInstructionLength(entry->opcode));
+  if (entry->instrLen >= 2)
+    entry->operand1 = mmu_->peek(static_cast<uint16_t>(entry->pc + 1));
+  if (entry->instrLen >= 3)
+    entry->operand2 = mmu_->peek(static_cast<uint16_t>(entry->pc + 2));
+  // An eight-bit processor is always in the width an emulation-mode 65816 is,
+  // which is what lets the host read both machines' entries the same way.
+  entry->widths = TraceEntry{}.widths | MachineDebug::WIDTH_EMULATION |
+                  MachineDebug::WIDTH_A8 | MachineDebug::WIDTH_INDEX8;
+  entry->cycle = static_cast<uint32_t>(cpu_->getTotalCycles());
 
-  // Read operands
-  entry.instrLen = 1;
-  entry.operand1 = 0;
-  entry.operand2 = 0;
-
-  // Determine instruction length from opcode
-  static const uint8_t instrLengths[256] = {
-    1,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,2,2,2,2,1,3,1,1,3,3,3,3,
-    3,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,2,2,2,2,1,3,1,1,3,3,3,3,
-    1,2,1,1,1,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,1,2,2,2,1,3,1,1,1,3,3,3,
-    1,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,2,2,2,2,1,3,1,1,3,3,3,3,
-    2,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,2,2,2,2,1,3,1,1,3,3,3,3,
-    2,2,2,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,2,2,2,2,1,3,1,1,3,3,3,3,
-    2,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,1,2,2,2,1,3,1,1,1,3,3,3,
-    2,2,1,1,2,2,2,2,1,2,1,1,3,3,3,3,2,2,2,1,1,2,2,2,1,3,1,1,1,3,3,3,
-  };
-
-  entry.instrLen = instrLengths[entry.opcode];
-  if (entry.instrLen >= 2) entry.operand1 = mmu_->peek(entry.pc + 1);
-  if (entry.instrLen >= 3) entry.operand2 = mmu_->peek(entry.pc + 2);
-
-  entry.cycle = static_cast<uint32_t>(cpu_->getTotalCycles());
-  entry.padding = 0;
-
-  traceHead_ = (traceHead_ + 1) % traceBuffer_.size();
-  if (traceCount_ < traceBuffer_.size()) traceCount_++;
 }
 
 } // namespace a2e

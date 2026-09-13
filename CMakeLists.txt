@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Source files
 set(CORE_SOURCES
     src/core/emulator.cpp
+    src/core/debug/machine_debug.cpp
     src/core/emulator/emulator_state.cpp
     src/core/emulator/emulator_debug.cpp
     src/core/cpu/6502/cpu6502.cpp
@@ -34,6 +35,7 @@ set(CORE_SOURCES
     src/core/iigs/iigs_memory.cpp
     src/core/iigs/iigs_clock.cpp
     src/core/iigs/iigs_machine.cpp
+    src/core/disassembler/disassembler65816.cpp
     src/core/iigs/iigs_sound.cpp
     src/core/iigs/iigs_video.cpp
     src/core/iigs/iigs_adb.cpp
@@ -540,6 +542,7 @@ else()
     # All core source files (excluding wasm_interface.cpp)
     set(CORE_TEST_SOURCES
         src/core/emulator.cpp
+        src/core/debug/machine_debug.cpp
         src/core/emulator/emulator_state.cpp
         src/core/emulator/emulator_debug.cpp
         src/core/cpu/6502/cpu6502.cpp
@@ -562,6 +565,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/disassembler/disassembler65816.cpp
         src/core/audio/audio.cpp
         src/core/disk-image/disk_converter.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
@@ -654,6 +658,9 @@ else()
     add_catch2_test(test_iigs_video
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/debug/machine_debug.cpp
+        src/core/disassembler/disassembler65816.cpp
         src/core/audio/audio.cpp
         src/core/disk-image/disk_converter.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp
@@ -684,6 +691,42 @@ else()
     )
 
     # The two devices a IIgs will not boot without.
+    # Debugging a IIgs: breakpoints with banks, watchpoints on the processor's
+    # own bus, a step over that knows a long call, a trace entry twice as wide.
+    add_catch2_test(test_iigs_debug
+        tests/unit/test_iigs_debug.cpp
+        src/core/iigs/iigs_machine.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/debug/machine_debug.cpp
+        src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
+        src/core/iigs/iigs_scc.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_video.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+        src/core/mmu/mmu.cpp
+        src/core/video/video.cpp
+        src/core/video/ntsc.cpp
+        src/core/audio/audio.cpp
+        src/core/input/keyboard.cpp
+        src/core/input/mouse_iou.cpp
+        src/core/noslot_clock.cpp
+        src/core/debug/debug_log.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/cards/smartport/smartport_card.cpp
+        src/core/cards/smartport/block_device.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
+        src/core/disk-image/disk_converter.cpp
+    )
+
     add_catch2_test(test_iigs_devices
         tests/unit/test_iigs_devices.cpp
         src/core/iigs/iigs_adb.cpp
@@ -696,6 +739,9 @@ else()
     add_catch2_test(test_iigs_boot
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/debug/machine_debug.cpp
+        src/core/disassembler/disassembler65816.cpp
         src/core/audio/audio.cpp
         src/core/disk-image/disk_converter.cpp
         src/core/cards/mockingboard/mockingboard_card.cpp

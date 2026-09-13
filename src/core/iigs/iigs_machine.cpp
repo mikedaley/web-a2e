@@ -8,6 +8,7 @@
 #include "iigs_machine.hpp"
 
 #include "../cpu/65816/cpu65816.hpp"
+#include "../disassembler/disassembler65816.hpp"
 #include "../audio/audio.hpp"
 #include "../mmu/mmu.hpp"
 #include "../cards/disk_controller.hpp"
@@ -25,9 +26,24 @@ namespace a2e::iigs {
 
 IIgsMachine::IIgsMachine(size_t fastRamSize)
     : memory_(std::make_unique<IIgsMemory>(fastRamSize)) {
+  // Watchpoints are checked here rather than inside the memory, and that is
+  // the difference between "the program touched this" and "something did": the
+  // video scanner reads the text page every line, and a watchpoint on it that
+  // fired for the scanner would never let the machine run.
   cpu_ = std::make_unique<CPU65816>(
-      [this](uint32_t address) { return memory_->read(address); },
-      [this](uint32_t address, uint8_t value) { memory_->write(address, value); });
+      [this](uint32_t address) {
+        const uint8_t value = memory_->read(address);
+        if (debug_.hasWatchpoints() && debug_.onRead(address, value)) {
+          paused_ = true;
+        }
+        return value;
+      },
+      [this](uint32_t address, uint8_t value) {
+        memory_->write(address, value);
+        if (debug_.hasWatchpoints() && debug_.onWrite(address, value)) {
+          paused_ = true;
+        }
+      });
 
   // The picture is the Mega II's, and the Mega II is a //e: the same class,
   // reading the same memory through the same MMU.
@@ -307,6 +323,8 @@ void IIgsMachine::raiseScanLineInterrupts() {
 }
 
 void IIgsMachine::runCycles(int slowCyclesToRun) {
+  if (paused_) return;
+
   const uint64_t target =
       memory_->slowCycles() + static_cast<uint64_t>(slowCyclesToRun);
   while (memory_->slowCycles() < target) {
@@ -316,8 +334,148 @@ void IIgsMachine::runCycles(int slowCyclesToRun) {
           static_cast<double>(target - memory_->slowCycles()));
       break;
     }
+
+    // A breakpoint is an address the program counter reaches, and on this
+    // machine that address has a bank in it.
+    if (debug_.shouldBreakBefore(cpu_->getPCFull())) {
+      paused_ = true;
+      return;
+    }
+    if (debug_.isTraceEnabled()) recordTrace();
+
     step();
+
+    // A watchpoint fired inside the instruction, through the CPU's own bus.
+    if (debug_.isWatchpointHit()) {
+      paused_ = true;
+      return;
+    }
+
+    if (debug_.hasBeamBreakpoints()) {
+      uint64_t frameCycle = memory_->slowCycles() - lastFrameCycle_;
+      const auto &timing = machineProfile(MachineId::AppleIIgs).timing;
+      const auto perFrame = static_cast<uint64_t>(timing.cyclesPerFrame());
+      if (frameCycle >= perFrame) frameCycle %= perFrame;
+      const int scanline =
+          static_cast<int>(frameCycle / timing.cyclesPerScanline);
+      const int hPos = static_cast<int>(frameCycle % timing.cyclesPerScanline);
+      if (debug_.shouldBreakAtBeam(lastFrameCycle_, scanline, hPos)) {
+        paused_ = true;
+        return;
+      }
+    }
   }
+}
+
+// ============================================================================
+// Debugging
+//
+// The same facilities a //e has, through the same object; what differs is what
+// the processor has to say about itself.
+// ============================================================================
+
+void IIgsMachine::setPaused(bool paused) {
+  if (!paused && paused_ && debug_.isBreakpointHit()) {
+    // Resuming from the breakpoint the machine is sitting on: let this one
+    // instruction through, or continuing would stop again having run nothing.
+    debug_.skipNextBreakpoint();
+  }
+  debug_.clearHits();
+  if (!paused && paused_) samplesGenerated_ = 0;
+  paused_ = paused;
+}
+
+void IIgsMachine::stepInstruction() {
+  debug_.clearHits();
+  if (debug_.isTraceEnabled()) recordTrace();
+  step();
+}
+
+uint32_t IIgsMachine::stepOver() {
+  debug_.clearTempBreakpoint();
+  const uint32_t pc = cpu_->getPCFull();
+  const uint8_t opcode = memory_->peek(pc);
+
+  // A call, of which this processor has three, and they are not all the same
+  // length: JSL is four bytes where the two JSRs are three.
+  if (flowType816(opcode) == FlowType::CALL || opcode == 0x00 /* BRK */) {
+    const int length =
+        instructionLength816(opcode, cpu_->accumulator8(), cpu_->index8());
+    // The return lands in the program bank, which a call does not leave until
+    // it arrives — so the address after a JSL is still in this bank.
+    const uint32_t after =
+        (pc & 0xFF0000) | static_cast<uint16_t>((pc & 0xFFFF) + length);
+    debug_.setTempBreakpoint(after);
+    setPaused(false);
+    return after;
+  }
+
+  stepInstruction();
+  return 0;
+}
+
+uint32_t IIgsMachine::stepOut() {
+  debug_.clearTempBreakpoint();
+
+  // The stack pointer is sixteen bits and the stack is anywhere in bank zero,
+  // so the return address is read from where it actually points rather than
+  // from page one.
+  const uint16_t sp = cpu_->getSP();
+  auto stack = [this](uint16_t at) { return memory_->peek(at); };
+
+  // Which kind of return is on the stack is not knowable from the stack, so
+  // the instruction the machine is sitting on decides: RTL took three bytes,
+  // and anything else is assumed to be the two a JSR pushed, because a long
+  // call is much the rarer of the two.
+  const bool longReturn = memory_->peek(cpu_->getPCFull()) == 0x6B;
+  const uint16_t offset =
+      static_cast<uint16_t>((stack(sp + 1) | (stack(sp + 2) << 8)) + 1);
+  const uint8_t bank = longReturn ? stack(sp + 3)
+                                  : static_cast<uint8_t>(cpu_->getPBR());
+  const uint32_t returnAddress = (static_cast<uint32_t>(bank) << 16) | offset;
+
+  if (offset == 0) {
+    // Nothing plausible on the stack; a step is the best that can be done.
+    stepInstruction();
+    return 0;
+  }
+  debug_.setTempBreakpoint(returnAddress);
+  setPaused(false);
+  return returnAddress;
+}
+
+BeamPosition IIgsMachine::beam() const {
+  return beamPosition(memory_->slowCycles(),
+                      machineProfile(MachineId::AppleIIgs).timing);
+}
+
+void IIgsMachine::recordTrace() {
+  MachineDebug::TraceEntry *entry = debug_.beginTraceEntry();
+  if (!entry) return;
+
+  entry->pc = cpu_->getPCFull();
+  entry->a = cpu_->getA();
+  entry->x = cpu_->getX();
+  entry->y = cpu_->getY();
+  entry->sp = cpu_->getSP();
+  entry->d = cpu_->getD();
+  entry->p = cpu_->getP();
+  entry->dbr = cpu_->getDBR();
+  entry->opcode = memory_->peek(entry->pc);
+  entry->widths =
+      static_cast<uint8_t>((cpu_->getEmulation() ? MachineDebug::WIDTH_EMULATION : 0) |
+                           (cpu_->accumulator8() ? MachineDebug::WIDTH_A8 : 0) |
+                           (cpu_->index8() ? MachineDebug::WIDTH_INDEX8 : 0));
+  entry->instrLen = static_cast<uint8_t>(
+      instructionLength816(entry->opcode, cpu_->accumulator8(), cpu_->index8()));
+  // The operands are read inside the program bank, which is where the
+  // processor is about to read them from.
+  const uint32_t bank = entry->pc & 0xFF0000;
+  for (int i = 1; i < entry->instrLen && i <= 3; i++) {
+    const uint32_t at = bank | static_cast<uint16_t>((entry->pc & 0xFFFF) + i);
+    (&entry->operand1)[i - 1] = memory_->peek(at);
+  }
+  entry->cycle = static_cast<uint32_t>(memory_->slowCycles());
 }
 
 bool IIgsMachine::insertBlockImage(int device, const uint8_t *data, size_t size,

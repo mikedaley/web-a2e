@@ -14,6 +14,7 @@
 #include "cards/expansion_card.hpp"
 #include "input/joyport.hpp"
 #include "input/keyboard.hpp"
+#include "debug/machine_debug.hpp"
 #include "machine/machine_profile.hpp"
 #include "cards/mockingboard/mockingboard_card.hpp"
 #include "cards/mouse/mouse_card.hpp"
@@ -220,8 +221,10 @@ public:
   void addBreakpoint(uint16_t address);
   void removeBreakpoint(uint16_t address);
   void enableBreakpoint(uint16_t address, bool enabled);
-  bool isBreakpointHit() const { return breakpointHit_; }
-  uint16_t getBreakpointAddress() const { return breakpointAddress_; }
+  bool isBreakpointHit() const { return debug_.isBreakpointHit(); }
+  uint16_t getBreakpointAddress() const {
+    return static_cast<uint16_t>(debug_.breakpointAddress());
+  }
 
   // BASIC line and statement breakpoints
   void addBasicBreakpoint(uint16_t lineNumber, int statementIndex);
@@ -280,7 +283,7 @@ public:
   uint16_t stepOver();   // Returns temp breakpoint address, or 0 if single-stepped
   uint16_t stepOut();    // Returns temp breakpoint address, or 0 if invalid
   void clearTempBreakpoint();
-  bool isTempBreakpointHit() const { return tempBreakpointHit_; }
+  bool isTempBreakpointHit() const { return debug_.isTempBreakpointHit(); }
 
   // CPU state access
   uint16_t getPC() const { return cpu_->getPC(); }
@@ -303,40 +306,51 @@ public:
   void setP(uint8_t v) { cpu_->setP(v); }
 
   // Watchpoints
-  enum WatchpointType : uint8_t { WP_READ = 1, WP_WRITE = 2, WP_READWRITE = 3 };
+  // The watchpoint and trace types belong to MachineDebug, which both
+  // machines own; these keep the names callers already use.
+  using WatchpointType = MachineDebug::WatchpointType;
+  static constexpr WatchpointType WP_READ = MachineDebug::WP_READ;
+  static constexpr WatchpointType WP_WRITE = MachineDebug::WP_WRITE;
+  static constexpr WatchpointType WP_READWRITE = MachineDebug::WP_READWRITE;
   void addWatchpoint(uint16_t startAddr, uint16_t endAddr, WatchpointType type);
   void removeWatchpoint(uint16_t startAddr);
   void clearWatchpoints();
-  bool isWatchpointHit() const { return watchpointHit_; }
-  uint16_t getWatchpointAddress() const { return watchpointAddress_; }
-  uint8_t getWatchpointValue() const { return watchpointValue_; }
-  bool isWatchpointWrite() const { return watchpointIsWrite_; }
+  bool isWatchpointHit() const { return debug_.isWatchpointHit(); }
+  uint16_t getWatchpointAddress() const {
+    return static_cast<uint16_t>(debug_.watchpointAddress());
+  }
+  uint8_t getWatchpointValue() const { return debug_.watchpointValue(); }
+  bool isWatchpointWrite() const { return debug_.isWatchpointWrite(); }
 
   // Beam breakpoints
   int32_t addBeamBreakpoint(int16_t scanline, int16_t hPos);  // returns ID, -1 if full
   void removeBeamBreakpoint(int32_t id);
   void enableBeamBreakpoint(int32_t id, bool enabled);
   void clearAllBeamBreakpoints();
-  bool isBeamBreakpointHit() const { return beamBreakHit_; }
-  int32_t getBeamBreakpointHitId() const { return beamBreakHitId_; }
-  int16_t getBeamBreakScanline() const { return beamBreakHitScanline_; }
-  int16_t getBeamBreakHPos() const { return beamBreakHitHPos_; }
+  bool isBeamBreakpointHit() const { return debug_.isBeamBreakpointHit(); }
+  int32_t getBeamBreakpointHitId() const { return debug_.beamBreakpointHitId(); }
+  int16_t getBeamBreakScanline() const { return debug_.beamBreakScanline(); }
+  int16_t getBeamBreakHPos() const { return debug_.beamBreakHPos(); }
 
   // Trace log
-  struct TraceEntry {
-    uint16_t pc;
-    uint8_t opcode, a, x, y, sp, p;
-    uint8_t operand1, operand2, instrLen;
-    uint8_t padding;
-    uint32_t cycle;
-  };
-  void setTraceEnabled(bool enabled) { traceEnabled_ = enabled; }
-  bool isTraceEnabled() const { return traceEnabled_; }
-  void clearTrace() { traceHead_ = 0; traceCount_ = 0; }
-  size_t getTraceCount() const { return traceCount_; }
-  size_t getTraceHead() const { return traceHead_; }
-  const TraceEntry* getTraceBuffer() const { return traceBuffer_.data(); }
-  size_t getTraceCapacity() const { return traceBuffer_.size(); }
+  using TraceEntry = MachineDebug::TraceEntry;
+  void setTraceEnabled(bool enabled) { debug_.setTraceEnabled(enabled); }
+  bool isTraceEnabled() const { return debug_.isTraceEnabled(); }
+  void clearTrace() { debug_.clearTrace(); }
+  size_t getTraceCount() const { return debug_.traceCount(); }
+  size_t getTraceHead() const { return debug_.traceHead(); }
+  const TraceEntry* getTraceBuffer() const { return debug_.traceBuffer(); }
+  size_t getTraceCapacity() const { return debug_.traceCapacity(); }
+
+  /**
+   * Breakpoints, watchpoints, the trace ring and beam breakpoints.
+   *
+   * The same object a IIgs owns, so the host asks one set of questions
+   * whichever machine is running. The methods above are the older, 16-bit
+   * spellings of the same thing and forward here.
+   */
+  MachineDebug &debug() { return debug_; }
+  const MachineDebug &debug() const { return debug_; }
 
   // Cycle profiling
   void setProfileEnabled(bool enabled) { profileEnabled_ = enabled; }
@@ -582,13 +596,10 @@ private:
   static constexpr int SAMPLES_PER_FRAME = 800; // 48000 Hz / 60 Hz
   int samplesGenerated_ = 0;
 
-  // Debugger state
-  std::set<uint16_t> breakpoints_;
-  std::set<uint16_t> disabledBreakpoints_;
-  bool breakpointHit_ = false;
-  uint16_t breakpointAddress_ = 0;
+  // Breakpoints, watchpoints, the trace ring, beam breakpoints: the parts of
+  // debugging that are not about this processor, shared with the IIgs.
+  MachineDebug debug_;
   bool paused_ = false;
-  bool skipBreakpointOnce_ = false;
 
   // BASIC breakpoints - supports whole-line and statement-level
   struct BasicBreakpoint {
@@ -642,51 +653,13 @@ private:
   // Helper to find the next colon address after a given position within a line
   uint16_t findNextColonAfter(uint16_t lineStart, uint16_t afterPos);
 
-  // Temp breakpoint for step over / step out
-  uint16_t tempBreakpoint_ = 0;
-  bool tempBreakpointActive_ = false;
-  bool tempBreakpointHit_ = false;
-
-  // Watchpoints
-  struct Watchpoint {
-    uint16_t startAddr;
-    uint16_t endAddr;
-    WatchpointType type;
-    bool enabled;
-  };
-  std::vector<Watchpoint> watchpoints_;
+  // Whether the MMU is routing every access through the watchpoint check,
+  // which is a cost worth paying only while there is a watchpoint to check.
   bool watchpointsActive_ = false;
-  bool watchpointHit_ = false;
-  uint16_t watchpointAddress_ = 0;
-  uint8_t watchpointValue_ = 0;
-  bool watchpointIsWrite_ = false;
 
-  // Beam breakpoints
-  struct BeamBreakpoint {
-    int16_t scanline;       // -1 = any
-    int16_t hPos;           // -1 = any (raw 0-64)
-    bool enabled;
-    int32_t id;
-    uint64_t lastFireFrame;    // per-breakpoint re-fire prevention
-    int16_t lastFireScanline;  // for wildcard-scanline breakpoints (fire once per scanline)
-  };
-  std::vector<BeamBreakpoint> beamBreakpoints_;
-  int32_t beamBreakNextId_ = 1;
-  static constexpr size_t MAX_BEAM_BREAKPOINTS = 16;
-  bool beamBreakHit_ = false;
-  int32_t beamBreakHitId_ = -1;
-  int16_t beamBreakHitScanline_ = -1;  // Scanline where break occurred (for display)
-  int16_t beamBreakHitHPos_ = -1;      // hPos where break occurred (for display)
-
-  // Watchpoint callback for MMU
+  // Watchpoint callbacks for the MMU
   void onWatchpointRead(uint16_t address, uint8_t value);
   void onWatchpointWrite(uint16_t address, uint8_t value);
-
-  // Trace log
-  std::vector<TraceEntry> traceBuffer_;
-  size_t traceHead_ = 0;
-  size_t traceCount_ = 0;
-  bool traceEnabled_ = false;
 
   void recordTrace();
 
