@@ -28,7 +28,7 @@ constexpr uint32_t bankAddress(uint8_t bank, uint16_t offset) {
 struct Screen {
   IIgsMachine machine;
   const uint8_t *frame = nullptr;
-  int width = 640;
+  int width = RASTER_WIDTH;
 
   Screen() {
     machine.memory().write(bankAddress(0x00, 0xC029),
@@ -59,10 +59,15 @@ struct Screen {
 
   void draw() { frame = machine.screen().render(); }
 
-  // The colour at a point, as three channels.
-  std::array<uint8_t, 3> at(int x, int y) const {
+  // The colour at a point of the raster, as three channels.
+  std::array<uint8_t, 3> rasterAt(int x, int y) const {
     const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
     return {frame[offset], frame[offset + 1], frame[offset + 2]};
+  }
+
+  // The colour at a point of the picture, which sits inside the border.
+  std::array<uint8_t, 3> at(int x, int y) const {
+    return rasterAt(PICTURE_LEFT + x, PICTURE_TOP + y);
   }
 };
 
@@ -217,9 +222,10 @@ TEST_CASE("A program draws Super Hi-Res by writing to fast RAM",
   machine.memory().write(bankAddress(0x01, SHR_PIXEL_BASE), 0x10);
 
   const uint8_t *frame = machine.screen().render();
-  REQUIRE(frame[0] == 0xFF); // red, having arrived by way of the other bank
-  REQUIRE(frame[1] == 0x00);
-  REQUIRE(frame[2] == 0x00);
+  const size_t first = (static_cast<size_t>(PICTURE_TOP) * RASTER_WIDTH + PICTURE_LEFT) * 4;
+  REQUIRE(frame[first] == 0xFF); // red, having arrived by way of the other bank
+  REQUIRE(frame[first + 1] == 0x00);
+  REQUIRE(frame[first + 2] == 0x00);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,8 +240,8 @@ TEST_CASE("The border is the bottom nibble of $C034", "[iigs][video][colour]") {
   machine.memory().write(bankAddress(0x00, 0xC034), 0x06);
   REQUIRE(machine.memory().borderColour() == 0x06);
 
-  // The Mega II's picture is 560x384 inside a 640x400 screen, so the corner is
-  // border and nothing else.
+  // The Mega II's picture sits inside the border, so the corner of the raster
+  // is border and nothing else.
   const uint8_t *frame = machine.screen().render();
   uint8_t red = 0, green = 0, blue = 0;
   IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), red, green, blue);
@@ -275,18 +281,18 @@ TEST_CASE("$C022 colours the text rather than decoding it",
   IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x0F), fr, fg, fb);
   IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), br, bg, bb);
 
-  // The //e's 560x384 picture is centred in the 640x400 screen.
-  const int left = (640 - 560) / 2;
-  const int top = (400 - 384) / 2;
+  // The //e's picture is inside the border, stretched to 640 wide: a 14-dot
+  // cell is 16 pixels here.
   auto pixel = [&](int x, int y) {
-    const size_t at = (static_cast<size_t>(top + y) * 640 + (left + x)) * 4;
+    const size_t at =
+        (static_cast<size_t>(PICTURE_TOP + y) * RASTER_WIDTH + (PICTURE_LEFT + x)) * 4;
     return std::array<uint8_t, 3>{frame[at], frame[at + 1], frame[at + 2]};
   };
 
   // The inverse cell is solid foreground; the blank cell beside it is solid
   // background. Neither is anything else.
   REQUIRE(pixel(2, 2) == std::array<uint8_t, 3>{fr, fg, fb});
-  REQUIRE(pixel(40, 2) == std::array<uint8_t, 3>{br, bg, bb});
+  REQUIRE(pixel(44, 2) == std::array<uint8_t, 3>{br, bg, bb});
 
   // A monochrome monitor has one phosphor and no opinion about what the
   // machine sent it, so the display setting still wins over the VGC.
@@ -294,4 +300,59 @@ TEST_CASE("$C022 colours the text rather than decoding it",
   machine.video().forceRenderFrame();
   frame = machine.screen().render();
   REQUIRE(pixel(40, 2) == std::array<uint8_t, 3>{0x00, 0x00, 0x00});
+}
+
+TEST_CASE("The raster is the picture with the border a monitor sees around it",
+          "[iigs][video][border]") {
+  // What a IIgs sends is 53 cycles across by 240 lines: the picture, and 6
+  // cycles of border before it, 7 after, 19 lines above and 21 below — the
+  // cycles GSSquared's scanner flags as border. Super Hi-Res is 16 pixels a
+  // cycle, so the raster is 848x480 with the picture at (96, 38).
+  REQUIRE(RASTER_WIDTH == 848);
+  REQUIRE(RASTER_HEIGHT == 480);
+  REQUIRE(PICTURE_LEFT == 96);
+  REQUIRE(PICTURE_TOP == 38);
+
+  Screen screen;
+  screen.machine.memory().write(bankAddress(0x00, 0xC034), 0x06); // blue border
+  screen.setPalette(0, 1, 0x0F00);
+  for (int line = 0; line < SHR_LINES; line++) {
+    screen.setControlByte(line, 0x00);
+    for (int byte = 0; byte < SHR_BYTES_PER_LINE; byte++) screen.setPixelByte(line, byte, 0x11);
+  }
+  screen.draw();
+
+  uint8_t br = 0, bg = 0, bb = 0;
+  IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), br, bg, bb);
+  const std::array<uint8_t, 3> border = {br, bg, bb};
+
+  SECTION("Super Hi-Res fills the picture and nothing else") {
+    REQUIRE(screen.at(0, 0) == RED);
+    REQUIRE(screen.at(639, 399) == RED);
+    REQUIRE(screen.rasterAt(0, 0) == border);
+    REQUIRE(screen.rasterAt(PICTURE_LEFT - 1, PICTURE_TOP) == border);
+    REQUIRE(screen.rasterAt(PICTURE_LEFT + 640, PICTURE_TOP) == border);
+    REQUIRE(screen.rasterAt(PICTURE_LEFT, PICTURE_TOP - 1) == border);
+    REQUIRE(screen.rasterAt(PICTURE_LEFT, PICTURE_TOP + 400) == border);
+    REQUIRE(screen.rasterAt(RASTER_WIDTH - 1, RASTER_HEIGHT - 1) == border);
+  }
+
+  SECTION("a //e mode draws 192 lines in the same place, and the last 8 are border") {
+    // Text mode, every cell inverse, so the picture is solid text foreground.
+    screen.machine.memory().write(bankAddress(0x00, 0xC029), 0x00);
+    screen.machine.memory().write(bankAddress(0x00, 0xC022), 0xF6);
+    screen.machine.memory().write(bankAddress(0x00, 0xC051), 0x00);
+    for (uint16_t at = 0x0400; at < 0x0800; at++) {
+      screen.machine.memory().write(bankAddress(SLOW_BANK_MAIN, at), 0x20);
+    }
+    screen.machine.video().forceRenderFrame();
+    screen.draw();
+    uint8_t fr = 0, fg = 0, fb = 0;
+    IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x0F), fr, fg, fb);
+    const std::array<uint8_t, 3> white = {fr, fg, fb};
+    REQUIRE(screen.at(0, 0) == white);
+    REQUIRE(screen.at(639, 383) == white); // stretched to the full width
+    REQUIRE(screen.at(0, 384) == border);   // the eight lines a //e never draws
+    REQUIRE(screen.rasterAt(PICTURE_LEFT - 1, PICTURE_TOP) == border);
+  }
 }

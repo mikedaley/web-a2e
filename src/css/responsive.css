@@ -42,7 +42,7 @@
         width: 100%;
         max-width: 560px;
         height: auto;
-        aspect-ratio: 560 / 384;
+        aspect-ratio: var(--screen-aspect, 560 / 384);
     }
 
     #disk-drives {

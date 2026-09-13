@@ -6,6 +6,7 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
+import { machineAspect } from "../machine/machine-profile.js";
 
 export class ScreenWindow extends BaseWindow {
   constructor(renderer, textSelection) {
@@ -23,11 +24,20 @@ export class ScreenWindow extends BaseWindow {
     this.renderer = renderer;
     this.textSelection = textSelection;
     this._viewportLocked = false;
-    this._aspect = renderer.width / renderer.height;
+    // The shape the monitor shows the frame at, not the frame's pixel count:
+    // a IIgs's raster is 848x480 and is shown at 4:3.
+    this._aspect = machineAspect();
   }
 
   renderContent() {
     return '<div class="screen-window-content"></div>';
+  }
+
+  /** The machine changed, and with it the shape of its picture. */
+  setAspect(aspect) {
+    this._aspect = aspect;
+    this.fitToViewport();
+    this._fitCanvas();
   }
 
   /**

@@ -12,6 +12,7 @@
 #include "../video/video.hpp"
 #include "iigs_memory.hpp"
 
+#include <array>
 #include <cstring>
 
 namespace a2e::iigs {
@@ -43,12 +44,28 @@ constexpr uint16_t VGC_COLOURS[16] = {
 };
 } // namespace
 
+// The profile is the host's description of the frame and iigs_spec.hpp is
+// the machine's; they must be the same picture.
+static_assert(machineProfile(MachineId::AppleIIgs).display.pixelWidth == RASTER_WIDTH);
+static_assert(machineProfile(MachineId::AppleIIgs).display.pixelHeight == RASTER_HEIGHT);
+static_assert(machineProfile(MachineId::AppleIIgs).display.lineDoubling == RASTER_LINE_DOUBLING);
+static_assert(machineProfile(MachineId::AppleIIgs).display.textLeft == PICTURE_LEFT);
+static_assert(machineProfile(MachineId::AppleIIgs).display.textTop == PICTURE_TOP);
+static_assert(machineProfile(MachineId::AppleIIgs).display.textWidth == SHR_PIXELS_PER_LINE);
+static_assert(machineProfile(MachineId::AppleIIgs).display.textHeight ==
+              machineProfile(MachineId::AppleIIe).display.pixelHeight);
+
 IIgsVideo::IIgsVideo(Video &megaII, IIgsMemory &memory)
     : megaII_(megaII), memory_(memory) {
   const auto &display = machineProfile(MachineId::AppleIIgs).display;
   width_ = display.pixelWidth;
   height_ = display.pixelHeight;
   frame_.assign(static_cast<size_t>(width_) * height_ * 4, 0);
+}
+
+uint8_t *IIgsVideo::pictureRow(int line) {
+  return scanline(PICTURE_TOP + line * RASTER_LINE_DOUBLING) +
+         static_cast<size_t>(PICTURE_LEFT) * 4;
 }
 
 void IIgsVideo::paletteColour(uint16_t entry, uint8_t &red, uint8_t &green,
@@ -114,24 +131,50 @@ const uint8_t *IIgsVideo::render() {
 }
 
 void IIgsVideo::renderMegaII() {
-  // The //e's picture, centred in a screen that is bigger than it. A real IIgs
-  // does much the same: the //e modes do not fill a Super Hi-Res raster, and
-  // what is around them is border — the border the Control Panel sets, in the
-  // bottom nibble of $C034, and not black unless that is what it says.
-  const uint32_t border = vgcColourARGB(memory_.borderColour());
-  fillFrame(border);
+  // The //e's picture, in the same place on the raster as Super Hi-Res's and
+  // the same width: 40 cycles of 14 dots stretched over 40 cycles of 16
+  // pixels, because that is what the monitor shows. Around it is border, in
+  // the colour the Control Panel set — the bottom nibble of $C034 — and so
+  // are the last eight lines of the picture area, which a //e mode's 192
+  // lines do not reach.
+  fillFrame(vgcColourARGB(memory_.borderColour()));
 
   const auto &megaIIDisplay = machineProfile(MachineId::AppleIIe).display;
   const int sourceWidth = megaIIDisplay.pixelWidth;
   const int sourceHeight = megaIIDisplay.pixelHeight;
-  const int left = (width_ - sourceWidth) / 2;
-  const int top = (height_ - sourceHeight) / 2;
-
   const uint8_t *source = megaII_.getFramebuffer();
+
+  // Eight pixels for every seven dots, linearly: a dot boundary that falls
+  // inside a pixel is shared between its two dots, as a beam would draw it.
+  // The weights repeat every eight pixels, so they are worked out once.
+  constexpr int PIXELS = SHR_PIXELS_PER_LINE;
+  constexpr int DOTS = 560;
+  static_assert(PIXELS * 7 == DOTS * 8);
+  struct Tap { int dot; int weightA; int weightB; };
+  static const auto taps = [] {
+    std::array<Tap, PIXELS> t{};
+    for (int x = 0; x < PIXELS; x++) {
+      const int numerator = x * DOTS;   // dot position, times PIXELS
+      const int dot = numerator / PIXELS;
+      const int fraction = numerator % PIXELS; // of PIXELS
+      t[x] = {dot, PIXELS - fraction, fraction};
+    }
+    return t;
+  }();
+
   for (int y = 0; y < sourceHeight; y++) {
-    std::memcpy(scanline(top + y) + static_cast<size_t>(left) * 4,
-                source + static_cast<size_t>(y) * sourceWidth * 4,
-                static_cast<size_t>(sourceWidth) * 4);
+    const uint8_t *in = source + static_cast<size_t>(y) * sourceWidth * 4;
+    uint8_t *out = scanline(PICTURE_TOP + y) + static_cast<size_t>(PICTURE_LEFT) * 4;
+    for (int x = 0; x < PIXELS; x++) {
+      const Tap &tap = taps[x];
+      const uint8_t *a = in + static_cast<size_t>(tap.dot) * 4;
+      const uint8_t *b = tap.dot + 1 < DOTS ? a + 4 : a;
+      for (int c = 0; c < 3; c++) {
+        out[x * 4 + c] = static_cast<uint8_t>(
+            (a[c] * tap.weightA + b[c] * tap.weightB + PIXELS / 2) / PIXELS);
+      }
+      out[x * 4 + 3] = 0xFF;
+    }
   }
 }
 
@@ -140,6 +183,10 @@ void IIgsVideo::renderSuperHiRes() {
   // control byte for each line at $9D00, and sixteen palettes at $9E00. A
   // program running in fast RAM writes to bank $01 and shadowing brings it
   // here, which is the arrangement the whole machine is built around.
+  // The border is drawn first and the picture over it: a IIgs sends border
+  // colour wherever it is not sending picture, Super Hi-Res or not.
+  fillFrame(vgcColourARGB(memory_.borderColour()));
+
   MMU &megaIIMemory = memory_.megaII();
   auto slowRead = [&megaIIMemory](uint16_t address) {
     return megaIIMemory.readRAM(address, true); // bank $E1 is the aux side
@@ -173,16 +220,16 @@ void IIgsVideo::renderSuperHiRes() {
       drawLine320(line, pixels, palette, (control & SCB_FILL_MODE) != 0);
     }
 
-    // 200 lines over a 400-line screen: every line is drawn twice, which is
+    // 200 lines over a 400-line picture: every line is drawn twice, which is
     // what the machine does and why a IIgs picture is 200 lines tall.
-    std::memcpy(scanline(line * 2 + 1), scanline(line * 2),
-                static_cast<size_t>(width_) * 4);
+    std::memcpy(pictureRow(line) + static_cast<size_t>(width_) * 4, pictureRow(line),
+                static_cast<size_t>(SHR_PIXELS_PER_LINE) * 4);
   }
 }
 
 void IIgsVideo::drawLine320(int line, const uint8_t *pixels,
                             const uint16_t *palette, bool fillMode) {
-  uint8_t *row = scanline(line * 2);
+  uint8_t *row = pictureRow(line);
   uint8_t previous = 0;
 
   for (int byte = 0; byte < SHR_BYTES_PER_LINE; byte++) {
@@ -207,7 +254,7 @@ void IIgsVideo::drawLine320(int line, const uint8_t *pixels,
 
 void IIgsVideo::drawLine640(int line, const uint8_t *pixels,
                             const uint16_t *palette) {
-  uint8_t *row = scanline(line * 2);
+  uint8_t *row = pictureRow(line);
 
   for (int byte = 0; byte < SHR_BYTES_PER_LINE; byte++) {
     for (int position = 0; position < 4; position++) {

@@ -285,6 +285,27 @@ colours instead of through a receiver, and a machine that never calls it behaves
 exactly as before. Monochrome still overrides it, because a monochrome monitor
 has one phosphor whatever the machine sent.
 
+**A IIgs's frame is the raster a monitor is sent, border included.** The
+Mega II's line is 65 cycles: 40 of picture, 12 of blanking, and 13 of border —
+6 before the picture and 7 after; its frame is 262 lines: 200 of picture, 22 of
+blanking, and 40 of border — 19 above and 21 below. Those are the cycles
+GSSquared's scanner flags as border, and `iigs_spec.hpp` holds them. At Super
+Hi-Res's 16 pixels a cycle the frame is therefore **848x480** (lines doubled)
+with the 640x400 picture at (96, 38), and `IIgsVideo` fills the rest with the
+colour in `$C034`'s bottom nibble — in Super Hi-Res too, which used to fill the
+frame with no border at all. **The //e's 560x384 goes in the same place,
+stretched to 640 wide** (eight pixels for every seven dots, linearly), because
+a text screen and a Super Hi-Res screen are the same width on the monitor; its
+last eight lines are border, because 192 is eight short of 200. The profile's
+`text` rectangle says where the text screen landed, so the host's text
+selection maps a pointer onto a cell through it rather than assuming the text
+fills the frame, and its `aspect` says the shape the monitor shows the frame
+at: a //e's 560x384 at its own ratio, as always, and the IIgs raster at 4:3.
+`machineAspect()` drives the screen window and a `--screen-aspect` CSS variable
+drives the full-page layout. The shared framebuffer slot is sized 848x480 for
+it. `test_iigs_video.cpp` pins the raster and `test_machine_profile.cpp` the
+profile.
+
 **The SCC is a real Z8530 with nothing plugged into it.** `IIgsSCC`
 (`core/iigs/iigs_scc.*`) at `$C038-$C03B` is the register file behind the
 command/data pair per channel, the transmitter and receiver with their

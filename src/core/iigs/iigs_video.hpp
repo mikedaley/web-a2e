@@ -39,16 +39,18 @@ class IIgsMemory;
  * artwork above a 640-wide menu bar, with different colours in each, and
  * programs really did that.
  *
- * The picture is composited into a frame the size of the machine's screen,
- * 640x400. Super Hi-Res draws 200 lines doubled; the Mega II's 560x384 is
- * centred in it, with border around the edges, which is roughly where a real
- * machine puts it.
+ * The picture is composited into the raster a monitor is sent, border and
+ * all: 848x480, with the 640x200 picture (lines doubled) at (96, 38) and the
+ * border colour from $C034 around it — the counts are iigs_spec.hpp's. The
+ * Mega II's 560x384 goes in the same place, stretched to 640 wide, because a
+ * text screen and a Super Hi-Res screen are the same width on the monitor,
+ * and its last eight lines are border, because it is eight lines shorter.
  */
 class IIgsVideo {
 public:
   IIgsVideo(Video &megaII, IIgsMemory &memory);
 
-  /** Draw the current screen and return it. RGBA, 640x400. */
+  /** Draw the current screen and return it. RGBA, 848x480. */
   const uint8_t *render();
 
   size_t framebufferSize() const { return frame_.size(); }
@@ -93,6 +95,7 @@ private:
   void drawLine320(int line, const uint8_t *pixels, const uint16_t *palette,
                    bool fillMode);
   void drawLine640(int line, const uint8_t *pixels, const uint16_t *palette);
+  uint8_t *pictureRow(int line); // the first picture pixel of a doubled line
   uint8_t *scanline(int y);
   void putPixel(uint8_t *row, int x, uint16_t colour);
 

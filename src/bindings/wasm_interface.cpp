@@ -261,6 +261,12 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += ",\"height\":" + std::to_string(m.display.pixelHeight);
   json += ",\"lineDoubling\":" + std::to_string(m.display.lineDoubling);
   json += ",\"framebufferSize\":" + std::to_string(m.display.framebufferSize());
+  json += ",\"text\":{\"left\":" + std::to_string(m.display.textLeft);
+  json += ",\"top\":" + std::to_string(m.display.textTop);
+  json += ",\"width\":" + std::to_string(m.display.textWidth);
+  json += ",\"height\":" + std::to_string(m.display.textHeight) + "}";
+  json += ",\"aspect\":{\"width\":" + std::to_string(m.display.aspectWidth);
+  json += ",\"height\":" + std::to_string(m.display.aspectHeight) + "}";
   json += "}";
 
   json += ",\"caps\":{";

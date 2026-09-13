@@ -108,6 +108,39 @@ generator's rate whatever WR11 said took a fifth of a second over the byte.
 With that the serial tests are all passed, and the sequence reaches the
 Speaker Tone Test.
 
+## The Raster
+
+What a monitor is sent is more than the picture. The Mega II's line is 65
+cycles: 40 of picture, 12 of blanking (sync and porches), and 13 of border — 6
+before the picture and 7 after it — in the colour the bottom nibble of `$C034`
+names. The frame is 262 lines: 200 of Super Hi-Res picture (a //e mode draws
+the first 192 and the last 8 are border), 22 of blanking, and 40 of border —
+19 above the picture and 21 below it. Those are the cycles GSSquared's scanner
+flags as border, cycle by cycle, and `iigs_spec.hpp` holds the counts; the
+visible raster is 53 cycles by 240 lines.
+
+The frame is that raster: at Super Hi-Res's 16 pixels a cycle, **848x480**
+with lines doubled, the 640x400 picture at (96, 38) and border everywhere else.
+Two things about it are deliberate:
+
+- **Super Hi-Res has a border too.** It used to fill a 640x400 frame edge to
+  edge, and the //e's picture sat centred in that frame inside a border of its
+  own invention. A IIgs sends border colour wherever it is not sending picture,
+  whichever video system is on.
+- **The //e's 560 dots are stretched to the picture's 640 pixels**, eight for
+  every seven, linearly. On the monitor a text screen and a Super Hi-Res screen
+  are the same width — both are 40 cycles of the same line — so a frame that
+  drew one at 560 and the other at 640 showed the text screen an eighth too
+  narrow. The stretch blends a glyph's edge between its two colours, which is
+  what a beam does and what the boot test now allows for.
+
+The raster's shape is a monitor's, 4:3, and the profile says so (`aspect`), so
+the screen window and the full-page layout show it at that rather than at the
+frame's own 848:480; a //e's frame is still shown at 560:384 as it always was.
+The profile's `text` rectangle says where the text screen landed, and the
+host's text selection maps through it. The shared framebuffer slot is sized
+for this frame, the largest of any machine's.
+
 ## The Two Clocks
 
 A IIgs runs at 2.8MHz until it reaches across to the Mega II, and then it runs at the Mega II's 1.023MHz for that access. So the machine is not "a //e at 2.8MHz": how fast a program goes depends on where it is reading.

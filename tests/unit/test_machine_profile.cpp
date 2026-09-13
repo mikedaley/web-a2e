@@ -285,14 +285,28 @@ TEST_CASE("The IIgs profile describes a machine of a different family",
     }
 
     SECTION("but its picture is Super Hi-Res, and does not follow from that") {
-        // 640 dots across 200 lines doubled, where a //e's 40 columns clock out
-        // 14 dots each to make 560. The one place two answers to the same
-        // question are both right, and why the "14 dots a column" rule is asked
-        // only of the family it belongs to.
-        REQUIRE(m.display.pixelWidth == 640);
-        REQUIRE(m.display.pixelHeight == 400);
+        // The frame is the raster a monitor sees: 53 cycles of 16 Super Hi-Res
+        // pixels — 6 of border, 40 of picture, 7 of border — by 240 lines
+        // doubled, where a //e's 40 columns clock out 14 dots each to make 560
+        // and nothing else. The one place two answers to the same question are
+        // both right, and why the "14 dots a column" rule is asked only of the
+        // family it belongs to.
+        REQUIRE(m.display.pixelWidth == 848);
+        REQUIRE(m.display.pixelHeight == 480);
         REQUIRE(m.timing.visibleColumns * 14 != m.display.dotsPerLine);
         REQUIRE(iie.timing.visibleColumns * 14 == iie.display.dotsPerLine);
+
+        // The text screen sits inside the border, stretched to the picture's
+        // width, and the raster is shown at a monitor's 4:3; a //e's frame is
+        // its text screen and is shown at its own ratio.
+        REQUIRE(m.display.textLeft == 96);
+        REQUIRE(m.display.textTop == 38);
+        REQUIRE(m.display.textWidth == 640);
+        REQUIRE(m.display.textHeight == 384);
+        REQUIRE(m.display.aspectWidth * 3 == m.display.aspectHeight * 4);
+        REQUIRE(iie.display.textLeft == 0);
+        REQUIRE(iie.display.textWidth == iie.display.pixelWidth);
+        REQUIRE(iie.display.aspectWidth == iie.display.pixelWidth);
     }
 
     SECTION("its own numbers are not in the shared description") {

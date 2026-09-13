@@ -157,6 +157,22 @@ struct MachineDisplay {
   int pixelHeight;
   int lineDoubling;  // Framebuffer rows per emitted scanline
 
+  // Where the //e's text screen lands in the framebuffer: the rectangle a
+  // host needs to map a pointer onto a character cell. A //e's fills the
+  // frame; a IIgs's sits inside a border, and is stretched to Super Hi-Res's
+  // width because the monitor shows both the same size.
+  int textLeft;
+  int textTop;
+  int textWidth;
+  int textHeight;
+
+  // The shape the frame is shown at, as the monitor would show it. A //e's
+  // frame is 560x384 and is shown at that ratio, as it always has been; a
+  // IIgs's raster is the whole visible line and field, which a monitor shows
+  // at 4:3.
+  int aspectWidth;
+  int aspectHeight;
+
   constexpr size_t framebufferSize() const {
     return static_cast<size_t>(pixelWidth) * static_cast<size_t>(pixelHeight) * 4;
   }
@@ -285,6 +301,8 @@ inline constexpr MachineProfile APPLE_IIE_PROFILE = {
         560, // pixelWidth
         384, // pixelHeight
         2,   // lineDoubling
+        0, 0, 560, 384, // the text screen is the whole frame
+        560, 384,       // shown at the frame's own ratio
     },
     // caps
     {
@@ -373,6 +391,8 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
         560, // pixelWidth
         384, // pixelHeight
         2,   // lineDoubling
+        0, 0, 560, 384, // the text screen is the whole frame
+        560, 384,       // shown at the frame's own ratio
     },
     // caps
     {
@@ -481,6 +501,8 @@ inline constexpr MachineProfile APPLE_IIC_PROFILE = {
         560, // pixelWidth
         384, // pixelHeight
         2,   // lineDoubling
+        0, 0, 560, 384, // the text screen is the whole frame
+        560, 384,       // shown at the frame's own ratio
     },
     // caps
     {
@@ -573,12 +595,17 @@ inline constexpr MachineProfile APPLE_IIGS_PROFILE = {
         4 * 1024,   // lcBankSize
         8 * 1024,   // lcHighSize
     },
-    // display — Super Hi-Res: 640 dots across, 200 lines, doubled to 400.
+    // display — the raster a monitor is sent, border included: 53 cycles of
+    // 16 Super Hi-Res pixels across, 240 lines doubled. The picture is 640x200
+    // (or the //e's 192 lines, stretched to the same width) at (96, 38); the
+    // numbers are iigs_spec.hpp's, and iigs_video.cpp asserts they agree.
     {
-        640, // dotsPerLine
-        640, // pixelWidth
-        400, // pixelHeight
+        848, // dotsPerLine
+        848, // pixelWidth
+        480, // pixelHeight
         2,   // lineDoubling
+        96, 38, 640, 384, // the text screen, inside the border
+        4, 3,             // the whole raster, which a monitor shows at 4:3
     },
     // caps
     {

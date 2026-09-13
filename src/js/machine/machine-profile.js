@@ -53,6 +53,10 @@ const APPLE_IIE_FALLBACK = Object.freeze({
     height: 384,
     lineDoubling: 2,
     framebufferSize: 560 * 384 * 4,
+    // Where the text screen lands in the frame; a //e's fills it.
+    text: Object.freeze({ left: 0, top: 0, width: 560, height: 384 }),
+    // The shape the frame is shown at, which is the frame's own on a //e.
+    aspect: Object.freeze({ width: 560, height: 384 }),
   }),
   caps: Object.freeze({
     hasAuxRam: true,
@@ -134,6 +138,35 @@ export function machineDisplay() {
   return current.display;
 }
 
+/**
+ * The rectangle of the frame the text screen occupies. A //e's is the whole
+ * frame; a IIgs's sits inside a border. A profile without one (an older core)
+ * is taken to fill the frame.
+ */
+/**
+ * The shape the frame is shown at, width over height. A //e's frame is shown
+ * at its own ratio; a IIgs's raster, border and all, at a monitor's 4:3. A
+ * profile without one (an older core) is shown at the frame's ratio.
+ */
+export function machineAspect() {
+  const d = current.display;
+  return d.aspect ? d.aspect.width / d.aspect.height : d.width / d.height;
+}
+
+/**
+ * Tell the stylesheet, for the layouts that size the screen in CSS.
+ */
+export function applyMachineAspectToDocument() {
+  const d = current.display;
+  const a = d.aspect || { width: d.width, height: d.height };
+  document.documentElement.style.setProperty("--screen-aspect", `${a.width} / ${a.height}`);
+}
+
+export function machineTextArea() {
+  const d = current.display;
+  return d.text || { left: 0, top: 0, width: d.width, height: d.height };
+}
+
 /** Shorthand for the machine's cycle timing. */
 export function machineTiming() {
   return current.timing;
@@ -159,6 +192,7 @@ export async function loadMachineProfile(wasmModule) {
     if (!parsed || !parsed.display || !parsed.display.width) return current;
 
     current = Object.freeze(parsed);
+    if (typeof document !== "undefined") applyMachineAspectToDocument();
   } catch (err) {
     console.warn("Could not read the machine profile from the core:", err);
   }

@@ -367,19 +367,23 @@ TEST_CASE("A IIgs comes up white on blue, with a blue border",
   REQUIRE(isBorderBlue(1, 1));
   REQUIRE(isBorderBlue(width - 2, display.pixelHeight - 2));
 
-  // And the screen is only ever those two colours: no decoder ran on it.
+  // And the screen is only ever those two colours, or — where the //e's 560
+  // dots are stretched to the 640-wide picture — a mix of the two at a
+  // glyph's edge: no decoder ran on it. Medium blue is $22,$22,$FF and white
+  // is $FF,$FF,$FF, so every pixel has red equal to green and blue full; a
+  // decoder's fringes would not.
+  REQUIRE(red == green);
+  REQUIRE(blue == 0xFF);
   size_t other = 0;
   for (int y = 0; y < display.pixelHeight; y++) {
     for (int x = 0; x < width; x++) {
       const size_t at = (static_cast<size_t>(y) * width + x) * 4;
-      const bool isBlue = frame[at] == red && frame[at + 1] == green &&
-                          frame[at + 2] == blue;
-      const bool isWhite =
-          frame[at] == 0xFF && frame[at + 1] == 0xFF && frame[at + 2] == 0xFF;
-      if (!isBlue && !isWhite) other++;
+      const bool onTheLine = frame[at] == frame[at + 1] && frame[at + 2] == 0xFF &&
+                             frame[at] >= red;
+      if (!onTheLine) other++;
     }
   }
-  INFO("pixels that are neither white nor the border blue: " << other);
+  INFO("pixels that are not between white and the border blue: " << other);
   REQUIRE(other == 0);
 }
 

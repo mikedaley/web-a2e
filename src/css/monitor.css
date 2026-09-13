@@ -91,7 +91,7 @@ body.full-page-mode #screen {
     height: auto;
     max-width: 100vw;
     max-height: 100vh;
-    aspect-ratio: 560 / 384;
+    aspect-ratio: var(--screen-aspect, 560 / 384);
 }
 
 /* Constrain by height on wide screens */

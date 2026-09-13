@@ -105,6 +105,45 @@ inline constexpr int SHR_PALETTE_ENTRIES = 16;
 inline constexpr int SHR_COLOUR_DEPTH_BITS = 4;
 
 // ----------------------------------------------------------------------------
+// The raster
+//
+// What a monitor is sent is more than the picture. The Mega II's line is 65
+// cycles: 40 of picture, 12 of blanking (sync and porches), and 13 of border —
+// 6 before the picture and 7 after it — in the colour the bottom nibble of
+// $C034 names. The frame is 262 lines: 200 of Super Hi-Res picture (a //e
+// mode draws the first 192 and the last 8 are border), 22 of blanking, and 40
+// of border — 19 above the picture and 21 below it. These are the counts
+// GSSquared's scanner flags as border, cycle by cycle, and the visible raster
+// is therefore 53 cycles by 240 lines.
+//
+// Super Hi-Res clocks 16 pixels a cycle, so the raster is 848 pixels wide;
+// the //e's 14 dots a cycle cover the same width, and are stretched to it,
+// because on the monitor a text screen and a Super Hi-Res screen are the
+// same width. Lines are doubled, as the picture's are.
+// ----------------------------------------------------------------------------
+inline constexpr int SHR_PIXELS_PER_CYCLE = 16;
+inline constexpr int SHR_PIXELS_PER_LINE = 640;
+inline constexpr int PICTURE_CYCLES = 40;
+inline constexpr int BORDER_LEFT_CYCLES = 6;
+inline constexpr int BORDER_RIGHT_CYCLES = 7;
+inline constexpr int BORDER_TOP_LINES = 19;
+inline constexpr int BORDER_BOTTOM_LINES = 21;
+inline constexpr int RASTER_LINE_DOUBLING = 2;
+
+inline constexpr int RASTER_WIDTH =
+    (BORDER_LEFT_CYCLES + PICTURE_CYCLES + BORDER_RIGHT_CYCLES) * SHR_PIXELS_PER_CYCLE;
+inline constexpr int RASTER_LINES = BORDER_TOP_LINES + SHR_LINES + BORDER_BOTTOM_LINES;
+inline constexpr int RASTER_HEIGHT = RASTER_LINES * RASTER_LINE_DOUBLING;
+
+/** Where the picture's top-left pixel lands in the raster. */
+inline constexpr int PICTURE_LEFT = BORDER_LEFT_CYCLES * SHR_PIXELS_PER_CYCLE;
+inline constexpr int PICTURE_TOP = BORDER_TOP_LINES * RASTER_LINE_DOUBLING;
+
+static_assert(PICTURE_CYCLES * SHR_PIXELS_PER_CYCLE == SHR_PIXELS_PER_LINE);
+static_assert(RASTER_WIDTH == 848);
+static_assert(RASTER_HEIGHT == 480);
+
+// ----------------------------------------------------------------------------
 // Sound
 //
 // An Ensoniq 5503 DOC with 32 oscillators and its own 64KB of RAM, which the

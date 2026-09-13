@@ -5,7 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
-import { machineDisplay } from "../machine/machine-profile.js";
+import { machineDisplay, machineTextArea } from "../machine/machine-profile.js";
 
 /**
  * TextSelection - Enable text selection and copying from the Apple II screen
@@ -30,9 +30,13 @@ export class TextSelection {
     this.overlayCtx = null;
 
     // Screen dimensions
-    this.charWidth40 = 14;   // 40-col: 14 pixels per char (7 * 2)
-    this.charWidth80 = 7;    // 80-col: 7 pixels per char
-    this.charHeight = 16;    // 16 pixels per char (8 * 2)
+    // Cell sizes follow the text area: 40 columns and 24 rows across it,
+    // which is 14x16 on a //e and 16x16 on a IIgs, whose text is stretched to
+    // its Super Hi-Res width and sits inside a border.
+    const text = machineTextArea();
+    this.charWidth40 = text.width / 40;
+    this.charWidth80 = text.width / 80;
+    this.charHeight = text.height / 24;
     this.rows = 24;
 
     // Bind event handlers for proper cleanup
@@ -52,6 +56,16 @@ export class TextSelection {
     this.overlay.width = width;
     this.overlay.height = height;
     this.overlayCtx = this.overlay.getContext('2d');
+  }
+
+  /** The machine changed: a new frame size, and a new text area inside it. */
+  onMachineChanged() {
+    const text = machineTextArea();
+    this.charWidth40 = text.width / 40;
+    this.charWidth80 = text.width / 80;
+    this.charHeight = text.height / 24;
+    this.clearSelection?.();
+    this.setupOverlay();
   }
 
   setupEventListeners() {
@@ -141,10 +155,12 @@ export class TextSelection {
       v = (v - 0.5) * scale + 0.5;
     }
 
-    // u,v are now contentUV — map to the machine's framebuffer space
+    // u,v are now contentUV — map to the machine's framebuffer space, and
+    // from there into the text area, which on a IIgs is inside a border
     const { width: fbWidth, height: fbHeight } = machineDisplay();
-    const contentX = u * fbWidth;
-    const contentY = v * fbHeight;
+    const text = machineTextArea();
+    const contentX = u * fbWidth - text.left;
+    const contentY = v * fbHeight - text.top;
 
     const mode = await this.getDisplayMode();
     const cols = mode.col80 ? 80 : 40;
@@ -245,13 +261,14 @@ export class TextSelection {
     const highlightColor = getComputedStyle(document.documentElement)
       .getPropertyValue('--selection-highlight').trim() || 'rgba(88, 166, 255, 0.35)';
     ctx.fillStyle = highlightColor;
+    const text = machineTextArea();
 
     for (let row = sel.startRow; row <= sel.endRow; row++) {
       const colStart = (row === sel.startRow) ? sel.startCol : 0;
       const colEnd = (row === sel.endRow) ? sel.endCol : cols - 1;
 
-      const x = colStart * charWidth;
-      const y = row * this.charHeight;
+      const x = text.left + colStart * charWidth;
+      const y = text.top + row * this.charHeight;
       const width = (colEnd - colStart + 1) * charWidth;
       const height = this.charHeight;
 

@@ -40,6 +40,8 @@ import { AudioDriver } from "./audio/audio-driver.js";
 import { WasmProxy } from "./worker/wasm-proxy.js";
 import {
   loadMachineProfile,
+  applyMachineAspectToDocument,
+  machineAspect,
   machineDisplay,
   restoreRememberedMachine,
 } from "./machine/machine-profile.js";
@@ -533,6 +535,9 @@ class AppleIIeEmulator {
         onMachineChanged: async (profile) => {
           this.machine = profile;
           this.renderer.setMachineDisplay(profile.display);
+          applyMachineAspectToDocument();
+          this.screenWindow?.setAspect(machineAspect());
+          this.textSelection?.onMachineChanged?.();
           await this.onMachineChanged();
           showToast(`Switched to ${profile.name}`, "info", 4000);
         },

@@ -18,9 +18,9 @@
 // falling back to postMessage on the one machine that would not fit. main.js
 // still checks the fit at startup rather than letting a frame write past the
 // end of the slot.
-export const FB_WIDTH = 640;
-export const FB_HEIGHT = 400;
-export const FB_BYTES = FB_WIDTH * FB_HEIGHT * 4; // 1,024,000 bytes RGBA
+export const FB_WIDTH = 848;
+export const FB_HEIGHT = 480;
+export const FB_BYTES = FB_WIDTH * FB_HEIGHT * 4; // RGBA, sized for the largest machine's frame (a IIgs's raster)
 // Two frames are allocated and written alternately: the Worker fills the half
 // the renderer is not reading, so a frame can never be torn by a write landing
 // mid-upload. Which half holds the newest complete frame is published in the
