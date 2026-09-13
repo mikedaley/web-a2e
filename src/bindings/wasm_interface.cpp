@@ -7,6 +7,7 @@
 
 #include "../core/emulator.hpp"
 #include "../core/disassembler/disassembler.hpp"
+#include "../core/disassembler/disassembler65816.hpp"
 #include "../core/assembler/assembler.hpp"
 #include "../core/debug/condition_evaluator.hpp"
 #include "../core/filesystem/dos33.hpp"
@@ -26,6 +27,7 @@
 #include <emscripten.h>
 
 #include "iigs/iigs_machine.hpp"
+#include "cpu/65816/cpu65816.hpp"
 
 // Global emulator instance
 static a2e::Emulator *g_emulator = nullptr;
@@ -66,6 +68,19 @@ static a2e::DiskController *diskController() {
   if (g_iigs) return &g_iigs->disk();
   return nullptr;
 }
+
+// The debug facilities are one object on either machine, for the same reason
+// the disk controller is: a breakpoint is a breakpoint, and a machine with
+// banks and one without both answer at 24 bits.
+static a2e::MachineDebug *machineDebug() {
+  if (g_emulator) return &g_emulator->debug();
+  if (g_iigs) return &g_iigs->debug();
+  return nullptr;
+}
+
+#define REQUIRE_DEBUG() do { if (!machineDebug()) return; } while(0)
+#define REQUIRE_DEBUG_OR(default_val) \
+  do { if (!machineDebug()) return (default_val); } while(0)
 
 #define REQUIRE_DISK() do { if (!diskController()) return; } while(0)
 #define REQUIRE_DISK_OR(default_val) do { if (!diskController()) return (default_val); } while(0)
@@ -229,6 +244,21 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   case a2e::CPUVariant::NMOS_6502: break;
   }
   json += ",\"cpu\":\"" + std::string(cpuName) + "\"";
+  // What the processor has to show, so a debug view is built from the machine
+  // rather than from the //e it would otherwise assume. A 65816's flag names
+  // change with its mode, which is why there are two sets.
+  {
+    const bool wide = m.cpu == a2e::CPUVariant::CMOS_65C816;
+    json += ",\"processor\":{";
+    json += "\"addressBits\":" + std::string(wide ? "24" : "16");
+    json += ",\"registerBits\":" + std::string(wide ? "16" : "8");
+    json += std::string(",\"hasBanks\":") + boolean(wide);
+    json += std::string(",\"hasDirectPage\":") + boolean(wide);
+    json += std::string(",\"hasModes\":") + boolean(wide);
+    json += ",\"flags\":\"NV-BDIZC\"";
+    json += ",\"nativeFlags\":\"" + std::string(wide ? "NVMXDIZC" : "") + "\"";
+    json += "}";
+  }
   // Which set of parts the machine is built from, so the host can say why one
   // it cannot run is listed at all.
   json += ",\"family\":\"" +
@@ -625,102 +655,126 @@ const uint8_t *getDiskSectorData(int drive, size_t *size) {
   return g_emulator->getDiskData(drive, size);
 }
 
+namespace {
+// Where the beam is on whichever machine is running.
+a2e::BeamPosition machineBeam() {
+  if (g_iigs) return g_iigs->beam();
+  if (!g_emulator) return {};
+  return a2e::beamPosition(g_emulator->getTotalCycles(),
+                           g_emulator->getMachine().timing);
+}
+} // namespace
+
 // ============================================================================
 // Beam Position
+//
+// The video scanner counts like a television scans, so the cycle count is the
+// beam position, and both machines derive it the same way from their own
+// timing — a IIgs from the Mega II's clock, which is the one its video runs on.
 // ============================================================================
 
 EMSCRIPTEN_KEEPALIVE
 int getFrameCycle() {
+  if (g_iigs) {
+    const auto &timing = a2e::machineProfile(a2e::MachineId::AppleIIgs).timing;
+    return static_cast<int>(g_iigs->slowCycles() % timing.cyclesPerFrame());
+  }
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getFrameCycle();
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getBeamScanline() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getBeamScanline();
+  return machineBeam().scanline;
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getBeamHPos() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getBeamHPos();
+  return machineBeam().hPos;
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getBeamColumn() {
-  REQUIRE_EMULATOR_OR(-1);
-  return g_emulator->getBeamColumn();
+  return machineBeam().column;
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isInVBL() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isInVBL();
+  return machineBeam().inVerticalBlank;
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isInHBLANK() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isInHBLANK();
+  return machineBeam().inHorizontalBlank;
 }
 
 // ============================================================================
 // Step Over / Step Out
 // ============================================================================
 
+// Both return the address the temporary breakpoint was put on, with the bank
+// in it, or 0 if the machine single-stepped instead.
 EMSCRIPTEN_KEEPALIVE
-uint16_t stepOver() {
+uint32_t stepOver() {
+  if (g_iigs) return g_iigs->stepOver();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->stepOver();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint16_t stepOut() {
+uint32_t stepOut() {
+  if (g_iigs) return g_iigs->stepOut();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->stepOut();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearTempBreakpoint() {
-  REQUIRE_EMULATOR();
-  g_emulator->clearTempBreakpoint();
+  REQUIRE_DEBUG();
+  machineDebug()->clearTempBreakpoint();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isTempBreakpointHit() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isTempBreakpointHit();
+  REQUIRE_DEBUG_OR(false);
+  return machineDebug()->isTempBreakpointHit();
+}
+
+// ============================================================================
+// Breakpoints
+//
+// The address carries its bank, so a breakpoint on a IIgs names one of 256
+// banks rather than an offset that every bank shares.
+// ============================================================================
+
+EMSCRIPTEN_KEEPALIVE
+void addBreakpoint(uint32_t address) {
+  REQUIRE_DEBUG();
+  machineDebug()->addBreakpoint(address);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void addBreakpoint(uint16_t address) {
-  REQUIRE_EMULATOR();
-  g_emulator->addBreakpoint(address);
+void removeBreakpoint(uint32_t address) {
+  REQUIRE_DEBUG();
+  machineDebug()->removeBreakpoint(address);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void removeBreakpoint(uint16_t address) {
-  REQUIRE_EMULATOR();
-  g_emulator->removeBreakpoint(address);
-}
-
-EMSCRIPTEN_KEEPALIVE
-void enableBreakpoint(uint16_t address, bool enabled) {
-  REQUIRE_EMULATOR();
-  g_emulator->enableBreakpoint(address, enabled);
+void enableBreakpoint(uint32_t address, bool enabled) {
+  REQUIRE_DEBUG();
+  machineDebug()->enableBreakpoint(address, enabled);
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isBreakpointHit() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isBreakpointHit();
+  REQUIRE_DEBUG_OR(false);
+  return machineDebug()->isBreakpointHit();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint16_t getBreakpointAddress() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getBreakpointAddress();
+uint32_t getBreakpointAddress() {
+  REQUIRE_DEBUG_OR(0);
+  return machineDebug()->breakpointAddress();
 }
 
 // ============================================================================
@@ -936,151 +990,308 @@ void getBasicLineBytes(uint8_t* buffer, int* lineStart, int* colonCount) {
   }
 }
 
+// ===========================================================================
+// The processor, whichever one the machine has
+//
+// One set of questions for both: a 6502's answers are a 65816's with the high
+// halves zero and no banks, so the wider shape describes both and the host
+// reads the machine profile to know how much of it to show. What a 6502 does
+// not have — a program bank, a data bank, a direct page, a mode — reads as
+// zero rather than as an error, because "this machine has none" is the answer.
+// ===========================================================================
+
 EMSCRIPTEN_KEEPALIVE
-uint16_t getPC() {
+uint32_t getPC() {
+  if (g_iigs) return g_iigs->cpu().getPCFull();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getPC();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t getSP() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getSP();
-}
-
-EMSCRIPTEN_KEEPALIVE
-uint8_t getA() {
+uint16_t getA() {
+  if (g_iigs) return g_iigs->cpu().getA();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getA();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t getX() {
+uint16_t getX() {
+  if (g_iigs) return g_iigs->cpu().getX();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getX();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t getY() {
+uint16_t getY() {
+  if (g_iigs) return g_iigs->cpu().getY();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getY();
 }
 
 EMSCRIPTEN_KEEPALIVE
+uint16_t getSP() {
+  if (g_iigs) return g_iigs->cpu().getSP();
+  REQUIRE_EMULATOR_OR(0);
+  return g_emulator->getSP();
+}
+
+EMSCRIPTEN_KEEPALIVE
 uint8_t getP() {
+  if (g_iigs) return g_iigs->cpu().getP();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getP();
 }
 
+/** The program bank: which of the 65816's 256 banks the code is in. */
+EMSCRIPTEN_KEEPALIVE
+uint8_t getPBR() {
+  if (g_iigs) return g_iigs->cpu().getPBR();
+  return 0;
+}
+
+/** The data bank, which an instruction's operands are read through. */
+EMSCRIPTEN_KEEPALIVE
+uint8_t getDBR() {
+  if (g_iigs) return g_iigs->cpu().getDBR();
+  return 0;
+}
+
+/** The direct page register: where the 65816's zero page has been moved to. */
+EMSCRIPTEN_KEEPALIVE
+uint16_t getDirectPage() {
+  if (g_iigs) return g_iigs->cpu().getD();
+  return 0;
+}
+
+// What width the registers are at this moment, which is not a constant on a
+// 65816 and is what decides how long an immediate is. A machine whose
+// registers cannot change width answers "emulation mode, both eight bits",
+// because that is exactly the state it is permanently in.
+EMSCRIPTEN_KEEPALIVE
+uint8_t getCpuWidths() {
+  if (g_iigs) {
+    const a2e::CPU65816 &cpu = g_iigs->cpu();
+    return static_cast<uint8_t>(
+        (cpu.getEmulation() ? a2e::MachineDebug::WIDTH_EMULATION : 0) |
+        (cpu.accumulator8() ? a2e::MachineDebug::WIDTH_A8 : 0) |
+        (cpu.index8() ? a2e::MachineDebug::WIDTH_INDEX8 : 0));
+  }
+  return static_cast<uint8_t>(a2e::MachineDebug::WIDTH_EMULATION |
+                              a2e::MachineDebug::WIDTH_A8 |
+                              a2e::MachineDebug::WIDTH_INDEX8);
+}
+
 EMSCRIPTEN_KEEPALIVE
 uint64_t getTotalCycles() {
+  // The machine's own clock, which is what the beam and the drive are counted
+  // in. On a IIgs that is the Mega II's slow side rather than the 65816's
+  // cycles, because the processor's clock changes speed under it.
+  if (g_iigs) return g_iigs->slowCycles();
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getTotalCycles();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isIRQPending() {
+  if (g_iigs) return g_iigs->cpu().isIRQPending();
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->isIRQPending();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isNMIPending() {
+  if (g_iigs) return g_iigs->cpu().isNMIPending();
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->isNMIPending();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isNMIEdge() {
+  // The 6502 core distinguishes the edge from the level; the 65816 core
+  // latches and reports one thing, so there is no separate edge to report.
+  if (g_iigs) return false;
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->isNMIEdge();
 }
 
 // CPU register setters (for debugger editing)
 EMSCRIPTEN_KEEPALIVE
-void setRegA(uint8_t value) {
+void setRegA(uint16_t value) {
+  if (g_iigs) { g_iigs->cpu().setA(value); return; }
   REQUIRE_EMULATOR();
-  g_emulator->setA(value);
+  g_emulator->setA(static_cast<uint8_t>(value));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setRegX(uint8_t value) {
+void setRegX(uint16_t value) {
+  if (g_iigs) { g_iigs->cpu().setX(value); return; }
   REQUIRE_EMULATOR();
-  g_emulator->setX(value);
+  g_emulator->setX(static_cast<uint8_t>(value));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setRegY(uint8_t value) {
+void setRegY(uint16_t value) {
+  if (g_iigs) { g_iigs->cpu().setY(value); return; }
   REQUIRE_EMULATOR();
-  g_emulator->setY(value);
+  g_emulator->setY(static_cast<uint8_t>(value));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setRegSP(uint8_t value) {
+void setRegSP(uint16_t value) {
+  if (g_iigs) { g_iigs->cpu().setSP(value); return; }
   REQUIRE_EMULATOR();
-  g_emulator->setSP(value);
+  g_emulator->setSP(static_cast<uint8_t>(value));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setRegPC(uint16_t value) {
+void setRegPC(uint32_t value) {
+  // The bank travels with the address, so editing the program counter in a
+  // debugger can send the processor into another bank — which is the only way
+  // to get there by hand.
+  if (g_iigs) {
+    g_iigs->cpu().setPBR(static_cast<uint8_t>((value >> 16) & 0xFF));
+    g_iigs->cpu().setPC(static_cast<uint16_t>(value & 0xFFFF));
+    return;
+  }
   REQUIRE_EMULATOR();
-  g_emulator->setPC(value);
+  g_emulator->setPC(static_cast<uint16_t>(value & 0xFFFF));
 }
 
 EMSCRIPTEN_KEEPALIVE
 void setRegP(uint8_t value) {
+  if (g_iigs) { g_iigs->cpu().setP(value); return; }
   REQUIRE_EMULATOR();
   g_emulator->setP(value);
 }
 
 EMSCRIPTEN_KEEPALIVE
+void setRegPBR(uint8_t value) {
+  if (g_iigs) g_iigs->cpu().setPBR(value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setRegDBR(uint8_t value) {
+  if (g_iigs) g_iigs->cpu().setDBR(value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setRegDirectPage(uint16_t value) {
+  if (g_iigs) g_iigs->cpu().setD(value);
+}
+
+// ===========================================================================
+// Stopping and starting
+// ===========================================================================
+
+EMSCRIPTEN_KEEPALIVE
 bool isPaused() {
+  if (g_iigs) return g_iigs->isPaused();
   REQUIRE_EMULATOR_OR(false);
   return g_emulator->isPaused();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void setPaused(bool paused) {
+  if (g_iigs) { g_iigs->setPaused(paused); return; }
   REQUIRE_EMULATOR();
   g_emulator->setPaused(paused);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void stepInstruction() {
+  if (g_iigs) { g_iigs->stepInstruction(); return; }
   REQUIRE_EMULATOR();
   g_emulator->stepInstruction();
 }
 
+// ===========================================================================
+// Memory, at 24 bits
+//
+// A //e's address is the low sixteen and the bank is ignored, so the host does
+// not have to ask which machine it is talking to before reading a byte.
+// ===========================================================================
+
 EMSCRIPTEN_KEEPALIVE
-uint8_t readMemory(uint16_t address) {
+uint8_t readMemory(uint32_t address) {
+  if (g_iigs) return g_iigs->memory().read(address & 0xFFFFFF);
   REQUIRE_EMULATOR_OR(0);
-  return g_emulator->readMemory(address);
+  return g_emulator->readMemory(static_cast<uint16_t>(address & 0xFFFF));
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t peekMemory(uint16_t address) {
+uint8_t peekMemory(uint32_t address) {
+  if (g_iigs) return g_iigs->memory().peek(address & 0xFFFFFF);
   REQUIRE_EMULATOR_OR(0);
-  return g_emulator->peekMemory(address);
+  return g_emulator->peekMemory(static_cast<uint16_t>(address & 0xFFFF));
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t readMainRAM(uint16_t address) {
-  // Read directly from main RAM, bypassing ALTZP and other switches
-  // Useful for reading BASIC zero page variables which are always in main RAM
+uint8_t readMainRAM(uint32_t address) {
+  // Main RAM whatever the switches say, which is where Applesoft keeps its
+  // zero page. On a IIgs that is the Mega II's main bank — bank $E0 — because
+  // that is the //e whose ROM the interpreter is running from.
+  if (g_iigs) {
+    return g_iigs->memory().megaII().readRAM(
+        static_cast<uint16_t>(address & 0xFFFF), false);
+  }
   REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getMMU().readRAM(address, false);
+  return g_emulator->getMMU().readRAM(static_cast<uint16_t>(address & 0xFFFF),
+                                      false);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void writeMemory(uint16_t address, uint8_t value) {
+void writeMemory(uint32_t address, uint8_t value) {
+  if (g_iigs) { g_iigs->memory().write(address & 0xFFFFFF, value); return; }
   REQUIRE_EMULATOR();
-  g_emulator->writeMemory(address, value);
+  g_emulator->writeMemory(static_cast<uint16_t>(address & 0xFFFF), value);
 }
 
+// ===========================================================================
+// Disassembly
+//
+// Two processors, two disassemblers, and the choice is made here rather than
+// by the host: a 65816's instruction lengths depend on the M and X flags, so
+// only something with the live processor in front of it can walk a code
+// stream correctly.
+// ===========================================================================
+
+namespace {
+
+// One instruction as text, on whichever machine is running. The IIgs's lines
+// carry the bank, because on that machine an address without one is ambiguous.
+std::string disassembleOneAt(uint32_t address, uint8_t *lengthOut) {
+  if (g_iigs) {
+    const a2e::CPU65816 &cpu = g_iigs->cpu();
+    uint8_t bytes[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4; i++) {
+      const uint32_t at =
+          (address & 0xFF0000) | static_cast<uint16_t>((address & 0xFFFF) + i);
+      bytes[i] = g_iigs->memory().peek(at);
+    }
+    const a2e::Disasm816Instruction in = a2e::disassemble816(
+        bytes, 4, address, cpu.accumulator8(), cpu.index8());
+    if (lengthOut) *lengthOut = in.length;
+    return a2e::formatDisasm816(in);
+  }
+  if (!g_emulator) {
+    if (lengthOut) *lengthOut = 1;
+    return "";
+  }
+  const uint16_t at = static_cast<uint16_t>(address & 0xFFFF);
+  if (lengthOut) {
+    *lengthOut =
+        static_cast<uint8_t>(a2e::getInstructionLength(g_emulator->peekMemory(at)));
+  }
+  return g_emulator->disassembleAt(at);
+}
+
+} // namespace
+
 EMSCRIPTEN_KEEPALIVE
-const char *disassembleAt(uint16_t address) {
-  REQUIRE_EMULATOR_OR("");
-  return g_emulator->disassembleAt(address);
+const char *disassembleAt(uint32_t address) {
+  static std::string buffer;
+  buffer = disassembleOneAt(address & 0xFFFFFF, nullptr);
+  return buffer.c_str();
 }
 
 // Disassemble a run of instructions in a single call.
@@ -1093,10 +1304,14 @@ const char *disassembleAt(uint16_t address) {
 // inspecting. Both the alignment scan and the disassembly live here now: the
 // caller makes one call and splits the result on '\n'.
 //
+// Each line is three tab-separated fields: the address in hex, the instruction
+// bytes in hex, and the text. It used to be one fixed-width string the caller
+// sliced by column, which stopped working the moment an address needed six
+// digits and an instruction four bytes — and would have failed silently, by
+// reading the wrong columns rather than by erroring.
+//
 // centerAddr is snapped backwards onto an instruction boundary, then
-// instructionsBefore instructions of leading context are included. Each line
-// uses the same "AAAA: BB BB BB  MNEM OPERAND" format disassembleAt() emits,
-// so the caller can recover the address from the first four characters.
+// instructionsBefore instructions of leading context are included.
 //
 // A NEGATIVE centerAddr means "centre on the current PC". That exists so the
 // debugger can put this call in the same batch as the register reads: it would
@@ -1107,65 +1322,96 @@ const char *disassembleRange(int32_t centerAddrOrPC, int instructionsBefore,
                              int count) {
   static std::string buffer;
   buffer.clear();
-  REQUIRE_EMULATOR_OR(buffer.c_str());
-  if (count <= 0) {
-    return buffer.c_str();
-  }
-  if (instructionsBefore < 0) {
-    instructionsBefore = 0;
-  }
+  if (!g_emulator && !g_iigs) return buffer.c_str();
+  if (count <= 0) return buffer.c_str();
+  if (instructionsBefore < 0) instructionsBefore = 0;
 
-  const uint16_t centerAddr =
-      centerAddrOrPC < 0 ? g_emulator->getPC()
-                         : static_cast<uint16_t>(centerAddrOrPC & 0xFFFF);
+  const uint32_t centre =
+      centerAddrOrPC < 0 ? getPC() : (static_cast<uint32_t>(centerAddrOrPC) & 0xFFFFFF);
+  // A bank is a wall: walking off the end of one does not carry into the next,
+  // so the scan and the listing both stay inside the bank they started in.
+  const uint32_t bank = centre & 0xFF0000;
+  const uint16_t centreOffset = static_cast<uint16_t>(centre & 0xFFFF);
 
   // Instruction boundaries are not recoverable by scanning backwards, so start
-  // from a safe distance back and walk forward. Three bytes per instruction is
-  // the worst case; the +10 keeps a short lookback from landing mid-operand.
-  const int maxLookback = instructionsBefore * 3 + 10;
-  int scanAddr = static_cast<int>(centerAddr) - maxLookback;
-  if (scanAddr < 0) {
-    scanAddr = 0;
-  }
+  // from a safe distance back and walk forward. Four bytes per instruction is
+  // the worst case on a 65816; the +10 keeps a short lookback from landing
+  // mid-operand.
+  const int maxLookback = instructionsBefore * 4 + 10;
+  int scan = static_cast<int>(centreOffset) - maxLookback;
+  if (scan < 0) scan = 0;
 
   std::vector<uint16_t> boundaries;
-  while (scanAddr <= static_cast<int>(centerAddr)) {
-    boundaries.push_back(static_cast<uint16_t>(scanAddr));
-    scanAddr += a2e::getInstructionLength(
-        g_emulator->peekMemory(static_cast<uint16_t>(scanAddr)));
+  while (scan <= static_cast<int>(centreOffset)) {
+    boundaries.push_back(static_cast<uint16_t>(scan));
+    uint8_t length = 1;
+    disassembleOneAt(bank | static_cast<uint16_t>(scan), &length);
+    scan += length > 0 ? length : 1;
   }
 
-  // The last boundary at or before centerAddr is the anchor; back up from
-  // there. If centerAddr was itself mid-instruction the anchor is the
-  // instruction containing it, which is what the old JS fallback did too.
-  size_t anchorIndex = boundaries.size() - 1;
-  size_t startIndex = anchorIndex > static_cast<size_t>(instructionsBefore)
-                          ? anchorIndex - static_cast<size_t>(instructionsBefore)
-                          : 0;
+  // The last boundary at or before the centre is the anchor; back up from
+  // there. If the centre was itself mid-instruction the anchor is the
+  // instruction containing it.
+  const size_t anchor = boundaries.size() - 1;
+  size_t from = anchor > static_cast<size_t>(instructionsBefore)
+                    ? anchor - static_cast<size_t>(instructionsBefore)
+                    : 0;
 
-  int addr = static_cast<int>(boundaries[startIndex]);
-  for (int i = 0; i < count && addr <= 0xFFFF; i++) {
-    if (i > 0) {
-      buffer.push_back('\n');
+  int at = static_cast<int>(boundaries[from]);
+  for (int i = 0; i < count && at <= 0xFFFF; i++) {
+    if (i > 0) buffer.push_back('\n');
+    uint8_t length = 1;
+    const uint32_t address = bank | static_cast<uint16_t>(at);
+    const std::string line = disassembleOneAt(address, &length);
+
+    char head[16];
+    snprintf(head, sizeof head, "%06X\t", address);
+    buffer += head;
+    for (int b = 0; b < length; b++) {
+      char byteText[8];
+      const uint32_t byteAt =
+          bank | static_cast<uint16_t>(at + b);
+      snprintf(byteText, sizeof byteText, b == 0 ? "%02X" : " %02X",
+               g_iigs ? g_iigs->memory().peek(byteAt)
+                      : g_emulator->peekMemory(static_cast<uint16_t>(byteAt)));
+      buffer += byteText;
     }
-    buffer += g_emulator->disassembleAt(static_cast<uint16_t>(addr));
-    addr += a2e::getInstructionLength(
-        g_emulator->peekMemory(static_cast<uint16_t>(addr)));
+    buffer.push_back('\t');
+    // The text after the bytes, which both formatters put after a double
+    // space: everything from the mnemonic on.
+    const size_t mnemonic = line.find("  ");
+    buffer += mnemonic == std::string::npos
+                  ? line
+                  : line.substr(line.find_first_not_of(' ', mnemonic));
+    at += length > 0 ? length : 1;
   }
 
   return buffer.c_str();
 }
 
+namespace {
+// A IIgs's //e switches are its Mega II's, and the pushbuttons and the
+// keyboard it reports them alongside come from the ADB rather than from a
+// game connector — which is the only part of the answer that differs.
+uint64_t softSwitchState() {
+  if (g_iigs) {
+    return a2e::packSoftSwitchState(
+        g_iigs->memory().megaII().getSoftSwitches(), false, false, false,
+        (g_iigs->memory().adb().keyboardLatch() & 0x80) != 0);
+  }
+  if (!g_emulator) return 0;
+  return g_emulator->getSoftSwitchState();
+}
+} // namespace
+
 EMSCRIPTEN_KEEPALIVE
 uint32_t getSoftSwitchState() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<uint32_t>(g_emulator->getSoftSwitchState() & 0xFFFFFFFF);
+  return static_cast<uint32_t>(softSwitchState() & 0xFFFFFFFF);
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint32_t getSoftSwitchStateHigh() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<uint32_t>(g_emulator->getSoftSwitchState() >> 32);
+  return static_cast<uint32_t>(softSwitchState() >> 32);
 }
 
 // Screen text extraction
@@ -1958,46 +2204,63 @@ bool isSlotEmpty(int slot) {
 // ============================================================================
 
 EMSCRIPTEN_KEEPALIVE
-void addWatchpoint(uint16_t startAddr, uint16_t endAddr, uint8_t type) {
-  REQUIRE_EMULATOR();
-  g_emulator->addWatchpoint(startAddr, endAddr,
-    static_cast<a2e::Emulator::WatchpointType>(type));
+void addWatchpoint(uint32_t startAddr, uint32_t endAddr, uint8_t type) {
+  // The //e routes this through the Emulator, which also has to tell its MMU
+  // to start checking; a IIgs checks on the processor's own bus and needs no
+  // such switch.
+  if (g_emulator) {
+    g_emulator->addWatchpoint(
+        static_cast<uint16_t>(startAddr), static_cast<uint16_t>(endAddr),
+        static_cast<a2e::Emulator::WatchpointType>(type));
+    return;
+  }
+  REQUIRE_DEBUG();
+  machineDebug()->addWatchpoint(
+      startAddr, endAddr, static_cast<a2e::MachineDebug::WatchpointType>(type));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void removeWatchpoint(uint16_t startAddr) {
-  REQUIRE_EMULATOR();
-  g_emulator->removeWatchpoint(startAddr);
+void removeWatchpoint(uint32_t startAddr) {
+  if (g_emulator) {
+    g_emulator->removeWatchpoint(static_cast<uint16_t>(startAddr));
+    return;
+  }
+  REQUIRE_DEBUG();
+  machineDebug()->removeWatchpoint(startAddr);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearWatchpoints() {
-  REQUIRE_EMULATOR();
-  g_emulator->clearWatchpoints();
+  if (g_emulator) {
+    g_emulator->clearWatchpoints();
+    return;
+  }
+  REQUIRE_DEBUG();
+  machineDebug()->clearWatchpoints();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isWatchpointHit() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isWatchpointHit();
+  REQUIRE_DEBUG_OR(false);
+  return machineDebug()->isWatchpointHit();
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint16_t getWatchpointAddress() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getWatchpointAddress();
+uint32_t getWatchpointAddress() {
+  REQUIRE_DEBUG_OR(0);
+  return machineDebug()->watchpointAddress();
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint8_t getWatchpointValue() {
-  REQUIRE_EMULATOR_OR(0);
-  return g_emulator->getWatchpointValue();
+  REQUIRE_DEBUG_OR(0);
+  return machineDebug()->watchpointValue();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isWatchpointWrite() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isWatchpointWrite();
+  REQUIRE_DEBUG_OR(false);
+  return machineDebug()->isWatchpointWrite();
 }
 
 // ============================================================================
@@ -2006,38 +2269,47 @@ bool isWatchpointWrite() {
 
 EMSCRIPTEN_KEEPALIVE
 void setTraceEnabled(bool enabled) {
-  REQUIRE_EMULATOR();
-  g_emulator->setTraceEnabled(enabled);
+  REQUIRE_DEBUG();
+  machineDebug()->setTraceEnabled(enabled);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearTrace() {
-  REQUIRE_EMULATOR();
-  g_emulator->clearTrace();
+  REQUIRE_DEBUG();
+  machineDebug()->clearTrace();
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint32_t getTraceCount() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<uint32_t>(g_emulator->getTraceCount());
+  REQUIRE_DEBUG_OR(0);
+  return static_cast<uint32_t>(machineDebug()->traceCount());
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint32_t getTraceHead() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<uint32_t>(g_emulator->getTraceHead());
+  REQUIRE_DEBUG_OR(0);
+  return static_cast<uint32_t>(machineDebug()->traceHead());
 }
 
 EMSCRIPTEN_KEEPALIVE
 const void* getTraceBuffer() {
-  REQUIRE_EMULATOR_OR(nullptr);
-  return g_emulator->getTraceBuffer();
+  REQUIRE_DEBUG_OR(nullptr);
+  return machineDebug()->traceBuffer();
 }
 
 EMSCRIPTEN_KEEPALIVE
 uint32_t getTraceCapacity() {
-  REQUIRE_EMULATOR_OR(0);
-  return static_cast<uint32_t>(g_emulator->getTraceCapacity());
+  REQUIRE_DEBUG_OR(0);
+  return static_cast<uint32_t>(machineDebug()->traceCapacity());
+}
+
+// How many bytes one entry is. The host asks rather than assuming, because the
+// entry grew when it had to hold a 65816's registers and a reader that had the
+// old size baked in would have walked the ring in the wrong steps — and shown
+// plausible nonsense rather than failing.
+EMSCRIPTEN_KEEPALIVE
+uint32_t getTraceEntrySize() {
+  return static_cast<uint32_t>(sizeof(a2e::MachineDebug::TraceEntry));
 }
 
 // ============================================================================
@@ -2068,50 +2340,50 @@ const uint32_t* getProfileCycles() {
 
 EMSCRIPTEN_KEEPALIVE
 int32_t addBeamBreakpoint(int16_t scanline, int16_t hPos) {
-  REQUIRE_EMULATOR_OR(-1);
-  return g_emulator->addBeamBreakpoint(scanline, hPos);
+  REQUIRE_DEBUG_OR(-1);
+  return machineDebug()->addBeamBreakpoint(scanline, hPos);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void removeBeamBreakpoint(int32_t id) {
-  REQUIRE_EMULATOR();
-  g_emulator->removeBeamBreakpoint(id);
+  REQUIRE_DEBUG();
+  machineDebug()->removeBeamBreakpoint(id);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void enableBeamBreakpoint(int32_t id, bool enabled) {
-  REQUIRE_EMULATOR();
-  g_emulator->enableBeamBreakpoint(id, enabled);
+  REQUIRE_DEBUG();
+  machineDebug()->enableBeamBreakpoint(id, enabled);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearAllBeamBreakpoints() {
-  REQUIRE_EMULATOR();
-  g_emulator->clearAllBeamBreakpoints();
+  REQUIRE_DEBUG();
+  machineDebug()->clearBeamBreakpoints();
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool isBeamBreakpointHit() {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->isBeamBreakpointHit();
+  REQUIRE_DEBUG_OR(false);
+  return machineDebug()->isBeamBreakpointHit();
 }
 
 EMSCRIPTEN_KEEPALIVE
 int32_t getBeamBreakpointHitId() {
-  REQUIRE_EMULATOR_OR(-1);
-  return g_emulator->getBeamBreakpointHitId();
+  REQUIRE_DEBUG_OR(-1);
+  return machineDebug()->beamBreakpointHitId();
 }
 
 EMSCRIPTEN_KEEPALIVE
 int16_t getBeamBreakScanline() {
-  REQUIRE_EMULATOR_OR(-1);
-  return g_emulator->getBeamBreakScanline();
+  REQUIRE_DEBUG_OR(-1);
+  return machineDebug()->beamBreakScanline();
 }
 
 EMSCRIPTEN_KEEPALIVE
 int16_t getBeamBreakHPos() {
-  REQUIRE_EMULATOR_OR(-1);
-  return g_emulator->getBeamBreakHPos();
+  REQUIRE_DEBUG_OR(-1);
+  return machineDebug()->beamBreakHPos();
 }
 
 // ============================================================================

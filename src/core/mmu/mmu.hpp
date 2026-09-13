@@ -21,6 +21,18 @@ class ExpansionCard;
 class MouseIOU;
 class NoSlotClock;
 
+/**
+ * The soft switches as one word, for a debugger to look at.
+ *
+ * Both machines' //e switches are the same switches — a IIgs's are its Mega
+ * II's — so the packing is here rather than on either machine. The three
+ * pushbuttons and "a key is waiting" are passed in because they do not come
+ * from the switches: on a //e they are the game connector and the keyboard
+ * latch, and on a IIgs they come from the ADB.
+ */
+uint64_t packSoftSwitchState(const SoftSwitches &sw, bool button0, bool button1,
+                             bool button2, bool keyAvailable);
+
 class MMU {
 public:
   using KeyboardCallback = std::function<uint8_t()>;

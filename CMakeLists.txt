@@ -217,6 +217,14 @@ if(EMSCRIPTEN)
                 \"_getBasicHeatMapData\", \
                 \"_getBasicLineBytes\", \
                 \"_getPC\", \
+                \"_getPBR\", \
+                \"_getDBR\", \
+                \"_getDirectPage\", \
+                \"_getCpuWidths\", \
+                \"_setRegPBR\", \
+                \"_setRegDBR\", \
+                \"_setRegDirectPage\", \
+                \"_getTraceEntrySize\", \
                 \"_getSP\", \
                 \"_getA\", \
                 \"_getX\", \
