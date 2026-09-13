@@ -33,8 +33,9 @@ constexpr uint8_t WR1_RX_INT_SPECIAL = 0x18;
 // WR3: the receiver.
 constexpr uint8_t WR3_RX_ENABLE = 0x01;
 
-// WR5: the transmitter.
+// WR5: the transmitter, and the handshake out.
 constexpr uint8_t WR5_TX_ENABLE = 0x08;
+constexpr uint8_t WR5_DTR = 0x80;
 
 // WR9: the interrupt control shared by both channels.
 constexpr uint8_t WR9_VIS = 0x01;
@@ -47,6 +48,7 @@ constexpr uint8_t WR9_RESET_HARDWARE = 0xC0;
 
 // WR14: the baud rate generator and the loops.
 constexpr uint8_t WR14_BRG_ENABLE = 0x01;
+constexpr uint8_t WR14_BRG_SOURCE_PCLK = 0x02;
 constexpr uint8_t WR14_AUTO_ECHO = 0x08;
 constexpr uint8_t WR14_LOCAL_LOOPBACK = 0x10;
 
@@ -62,8 +64,10 @@ constexpr uint8_t EXT_STATUS_BITS = IIgsSCC::RR0_ZERO_COUNT | IIgsSCC::RR0_DCD |
                                     IIgsSCC::RR0_SYNC_HUNT | IIgsSCC::RR0_CTS |
                                     IIgsSCC::RR0_TX_UNDERRUN | IIgsSCC::RR0_BREAK;
 
-// The SCC's clock on a IIgs, and the Mega II's.
+// The SCC's clocks on a IIgs — PCLK and the crystal on RTxC are the same
+// 3.6864MHz — and the Mega II's.
 constexpr int64_t PCLK_HZ = 3686400;
+constexpr int64_t RTXC_HZ = 3686400;
 constexpr int64_t MEGA_II_HZ = 1023000;
 } // namespace
 
@@ -139,8 +143,13 @@ uint8_t IIgsSCC::statusRegister(const Channel &ch) const {
   if (!ch.txBufferFull) value |= RR0_TX_EMPTY;
   if (ch.txUnderrun) value |= RR0_TX_UNDERRUN;
   if (ch.zeroCount) value |= RR0_ZERO_COUNT;
-  // Nothing is plugged in: DCD and CTS are the pins as a IIgs with an empty
-  // port sees them, and in local loopback the modem inputs are ignored.
+  // CTS is the other port's DTR through the cable — the bit reads set when
+  // the pin is pulled low, which is DTR asserted — and nothing otherwise.
+  // DCD is never driven: nothing on the cable reaches it.
+  if (cable_) {
+    const Channel &other = channels_[&ch == &channels_[0] ? 1 : 0];
+    if (other.wr[5] & WR5_DTR) value |= RR0_CTS;
+  }
   return value;
 }
 
@@ -278,9 +287,13 @@ void IIgsSCC::writeRegister(int channel, int reg, uint8_t value) {
   case 8:
     writeData(channel, value);
     return;
-  case 5:
+  case 5: {
     ch.wr[5] = value;
+    // DTR is the other port's CTS across the cable, and a change there is
+    // an ext/status event on that channel.
+    if (cable_) extStatusChanged(channels_[channel == CHANNEL_A ? CHANNEL_B : CHANNEL_A]);
     return;
+  }
   default:
     ch.wr[reg] = value;
     return;
@@ -359,21 +372,30 @@ void IIgsSCC::writeData(int channel, uint8_t value) {
 }
 
 int32_t IIgsSCC::cyclesPerCharacter(const Channel &ch) const {
-  // The baud rate generator: PCLK / (2 * (TC + 2)), then the x1/x16/x32/x64
-  // divider in WR4 — and ten bit times to a character. A generator that is
-  // switched off has no clock to shift with, but a chip that never finished
-  // a byte would hang everything waiting on it, so it goes at 9600.
-  int64_t bitHz;
-  if (ch.wr[14] & WR14_BRG_ENABLE) {
+  // The transmit clock is whatever WR11 says it is: the crystal on RTxC
+  // itself, the baud rate generator (PCLK or the crystal, divided by
+  // 2 * (TC + 2)), or the TRxC pin, which is the handshake input and carries
+  // no clock on a IIgs — so it is taken as the crystal rather than never
+  // finishing. Then the x1/x16/x32/x64 divider in WR4, and ten bit times to
+  // a character. The Diagnostic's Serial Crystal Test clocks a byte straight
+  // from the crystal at x64 and times its all-sent, which is 174 microseconds
+  // and not the generator's rate.
+  int64_t clockHz;
+  switch ((ch.wr[11] >> 3) & 0x03) {
+  case 2: { // the baud rate generator
     const int64_t constant = ch.wr[12] | (ch.wr[13] << 8);
-    static const int divider[4] = {1, 16, 32, 64};
-    const int64_t clocksPerBit = 2 * (constant + 2) * divider[(ch.wr[4] & WR4_CLOCK_MASK) >> 6];
-    bitHz = PCLK_HZ / (clocksPerBit > 0 ? clocksPerBit : 1);
-  } else {
-    bitHz = 9600;
+    const int64_t source = (ch.wr[14] & WR14_BRG_SOURCE_PCLK) ? PCLK_HZ : RTXC_HZ;
+    clockHz = source / (2 * (constant + 2));
+    if (!(ch.wr[14] & WR14_BRG_ENABLE)) clockHz = 9600 * 16; // no clock: do not hang
+    break;
   }
-  if (bitHz < 50) bitHz = 50;
-  const int64_t cycles = MEGA_II_HZ * 10 / bitHz;
+  default: // RTxC, TRxC, or the DPLL locked to one of them
+    clockHz = RTXC_HZ;
+    break;
+  }
+  static const int divider[4] = {1, 16, 32, 64};
+  const int64_t bitHz = clockHz / divider[(ch.wr[4] & WR4_CLOCK_MASK) >> 6];
+  const int64_t cycles = MEGA_II_HZ * 10 / (bitHz < 50 ? 50 : bitHz);
   return static_cast<int32_t>(cycles < 8 ? 8 : cycles);
 }
 
@@ -385,7 +407,8 @@ int32_t IIgsSCC::cyclesPerZeroCount(const Channel &ch) const {
   // window, and a generator counting the output's period is twice too slow.
   const int64_t constant = ch.wr[12] | (ch.wr[13] << 8);
   const int64_t clocks = constant + 2;
-  const int64_t cycles = clocks * MEGA_II_HZ / PCLK_HZ;
+  const int64_t source = (ch.wr[14] & WR14_BRG_SOURCE_PCLK) ? PCLK_HZ : RTXC_HZ;
+  const int64_t cycles = clocks * MEGA_II_HZ / source;
   return static_cast<int32_t>(cycles < 1 ? 1 : cycles);
 }
 
@@ -421,7 +444,11 @@ void IIgsSCC::advance(uint32_t cycles) {
     // The byte has left the shift register. Round the loop it goes, if a
     // loop is switched on — local loopback feeds this channel's receiver.
     const uint8_t sent = ch.txShift;
-    if (ch.wr[14] & (WR14_LOCAL_LOOPBACK | WR14_AUTO_ECHO)) receiveByte(ch, sent);
+    if (ch.wr[14] & (WR14_LOCAL_LOOPBACK | WR14_AUTO_ECHO)) {
+      receiveByte(ch, sent);
+    } else if (cable_) {
+      receiveByte(channels_[c == CHANNEL_A ? CHANNEL_B : CHANNEL_A], sent);
+    }
 
     if (ch.txBufferFull) {
       ch.txShift = ch.txBuffer;
@@ -438,6 +465,13 @@ void IIgsSCC::advance(uint32_t cycles) {
       }
     }
   }
+}
+
+void IIgsSCC::setLoopbackCable(bool fitted) {
+  cable_ = fitted;
+  // Plugging or unplugging moves both CTS lines.
+  extStatusChanged(channels_[CHANNEL_A]);
+  extStatusChanged(channels_[CHANNEL_B]);
 }
 
 bool IIgsSCC::interruptPending() const {

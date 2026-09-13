@@ -53,6 +53,15 @@ public:
   /** Whether the chip is holding the interrupt line down. */
   bool interruptPending() const;
 
+  /**
+   * A loopback cable between the two ports, as the Diagnostic's External
+   * Serial Ports Test asks for: each port's transmit data into the other's
+   * receiver, and each port's handshake out (DTR) into the other's handshake
+   * in (CTS). Fitted by default, because nothing else is ever plugged in.
+   */
+  void setLoopbackCable(bool fitted);
+  bool hasLoopbackCable() const { return cable_; }
+
   // ===== For the tests =====
 
   uint8_t writeRegister(int channel, int reg) const { return channels_[channel].wr[reg & 0x0F]; }
@@ -131,6 +140,7 @@ private:
   void advanceGenerator(Channel &ch, uint32_t cycles);
 
   std::array<Channel, 2> channels_;
+  bool cable_ = true;
 };
 
 } // namespace a2e::iigs

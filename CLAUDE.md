@@ -299,9 +299,17 @@ counting the output's period fell outside the window. It then sends bytes
 round the local loop at 600 baud, polling RR1's all-sent and RR0's receive
 bit. `IIgsMachine::step` advances the chip on the slow clock beside the
 Ensoniq, and `IIgsMemory::interruptPending()` includes it, gated on WR9's
-MIE. The External Serial Ports Test asks for a loopback cable between the
-two ports, which there is no way to supply. `test_iigs_devices.cpp` pins the
-register file, the zero count, the loop and the interrupts.
+MIE. **A loopback cable is fitted between the two ports** —
+`IIgsSCC::setLoopbackCable`, on by default because nothing else is ever
+plugged in — crossing each port's transmit into the other's receiver and
+its DTR into the other's CTS, which is what the External Serial Ports Test
+asks for. **The transmitter is clocked from whatever WR11 selects**: the
+crystal on RTxC, the generator, or the TRxC pin, then WR4's divider. The
+Serial Crystal Test clocks a byte straight from the crystal at x64 and times
+its all-sent at 174 microseconds; a transmitter that took the generator's rate
+regardless took a fifth of a second. `test_iigs_devices.cpp` pins the
+register file, the zero count, the loop, the cable, the clock source and the
+interrupts.
 
 **The clock chip is a serial line, and it answers on the read transfer.**
 `$C033` is the byte and `$C034` drives it: bit 7 starts a transfer, bit 6 is

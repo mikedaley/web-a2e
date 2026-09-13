@@ -92,7 +92,21 @@ RR1's all-sent and expecting RR0's receive bit and the same byte from the data
 register.
 
 The **External Serial Ports Test** that follows asks for a loopback cable
-between the two ports, which there is no way to supply.
+between the two ports, and one is fitted: `IIgsSCC::setLoopbackCable`, on by
+default because nothing else is ever plugged in. It crosses each port's
+transmit data into the other's receiver and its handshake out (DTR) into the
+other's handshake in (CTS), which is how Apple's cable is wired. The test
+sends on one port and polls the other's RR0 for the byte, both ways.
+
+The **Serial Crystal Test** after that clocks a byte straight from the
+3.6864MHz crystal — WR11 selecting RTxC as the transmit clock, x64 in WR4 —
+and times its all-sent, which is ten bits in 174 microseconds. The
+transmitter's bit clock therefore follows WR11: the crystal, the generator,
+or the TRxC pin (the handshake input, which carries no clock on a IIgs and is
+taken as the crystal rather than never finishing). A transmitter that took the
+generator's rate whatever WR11 said took a fifth of a second over the byte.
+With that the serial tests are all passed, and the sequence reaches the
+Speaker Tone Test.
 
 ## The Two Clocks
 

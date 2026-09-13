@@ -999,3 +999,75 @@ TEST_CASE("A byte sent round the SCC's local loop comes back", "[iigs][scc]") {
     REQUIRE_FALSE(scc.interruptPending());
   }
 }
+
+TEST_CASE("A loopback cable joins the two ports", "[iigs][scc]") {
+  // The Diagnostic's External Serial Ports Test: send on one port and expect
+  // the byte on the other, both ways, through a cable that crosses transmit
+  // and receive. Fitted by default, because nothing else is ever plugged in.
+  IIgsSCC scc;
+  REQUIRE(scc.hasLoopbackCable());
+  sccWrite(scc, SCC_CMD_A, 9, 0xC0);
+  for (uint8_t command : {SCC_CMD_A, SCC_CMD_B}) {
+    sccWrite(scc, command, 4, 0x4C);
+    sccWrite(scc, command, 11, 0xD0);
+    sccWrite(scc, command, 12, 0xBE);
+    sccWrite(scc, command, 13, 0x00);
+    sccWrite(scc, command, 14, 0x03); // the generator, and no local loop
+    sccWrite(scc, command, 3, 0xC1);
+    sccWrite(scc, command, 5, 0x6A);
+  }
+  scc.write(SCC_DATA_A, 0x5A);
+  for (int i = 0; i < 200; i++) scc.advance(100);
+  REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
+  REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_RX_AVAILABLE) != 0);
+  REQUIRE(scc.read(SCC_DATA_B) == 0x5A);
+
+  scc.write(SCC_DATA_B, 0xC3);
+  for (int i = 0; i < 200; i++) scc.advance(100);
+  REQUIRE(scc.read(SCC_DATA_A) == 0xC3);
+
+  SECTION("and crosses the handshake lines: DTR out is CTS in") {
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) == 0); // $6A leaves DTR down
+    sccWrite(scc, SCC_CMD_A, 5, 0xEA);
+    scc.write(SCC_CMD_B, 0x10); // acknowledge the change, so RR0 is live again
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) != 0);
+    sccWrite(scc, SCC_CMD_A, 5, 0x6A);
+    scc.write(SCC_CMD_B, 0x10);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) == 0);
+  }
+
+  SECTION("unplugged, a byte goes nowhere") {
+    scc.setLoopbackCable(false);
+    scc.write(SCC_DATA_A, 0x11);
+    for (int i = 0; i < 200; i++) scc.advance(100);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) == 0);
+  }
+}
+
+TEST_CASE("The SCC's transmitter is clocked from whatever WR11 selects",
+          "[iigs][scc]") {
+  // The Diagnostic's Serial Crystal Test clocks a byte straight from the
+  // 3.6864MHz crystal at x64 — 174 microseconds for ten bits, 178 cycles —
+  // and times its all-sent. A transmitter that took the generator's rate
+  // whatever WR11 said took a fifth of a second over it.
+  IIgsSCC scc;
+  sccWrite(scc, SCC_CMD_B, 9, 0xC0);
+  sccWrite(scc, SCC_CMD_B, 4, 0xC4);
+  sccWrite(scc, SCC_CMD_B, 11, 0x80);
+  sccWrite(scc, SCC_CMD_B, 12, 0xFF);
+  sccWrite(scc, SCC_CMD_B, 13, 0xFF);
+  sccWrite(scc, SCC_CMD_B, 14, 0xB3);
+  sccWrite(scc, SCC_CMD_B, 3, 0xC1);
+  sccWrite(scc, SCC_CMD_B, 5, 0x62);
+  scc.write(SCC_DATA_B, 0x55);
+  sccWrite(scc, SCC_CMD_B, 5, 0x6A);
+  uint32_t cycles = 0;
+  while ((sccRead(scc, SCC_CMD_B, 1) & 0x01) == 0 && cycles < 10000) {
+    scc.advance(2);
+    cycles += 2;
+  }
+  INFO("all sent after " << cycles << " cycles");
+  REQUIRE(cycles >= 170);
+  REQUIRE(cycles <= 190);
+}
