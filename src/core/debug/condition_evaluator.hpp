@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <cstring>
 
 namespace a2e {
@@ -30,19 +31,45 @@ class Emulator;
  *   Logic: &&, ||
  *   Grouping: ( )
  */
+/**
+ * What a condition can ask about a running machine.
+ *
+ * The evaluator used to take a `const Emulator&`, which meant a condition
+ * could only ever be asked of a //e — so a conditional breakpoint on a IIgs
+ * silently never fired. Everything it actually needs is in here: a way to
+ * peek a byte, and the processor's registers. A machine builds one of these
+ * and the evaluator asks no further questions about which machine it is.
+ *
+ * Addresses are 24-bit, and the registers are as wide as the widest
+ * processor's — a 6502's fill the low halves.
+ */
+struct MachineView {
+  std::function<uint8_t(uint32_t)> peek;
+  uint32_t pc = 0;
+  uint16_t a = 0, x = 0, y = 0, sp = 0;
+  uint8_t p = 0;
+};
+
 class ConditionEvaluator {
 public:
   /**
    * Evaluate a condition expression as a boolean.
    * Returns true if the condition is satisfied.
    */
+  static bool evaluate(const char* expr, const MachineView& view);
+
+  /** The same, of a //e: builds the view from the emulator. */
   static bool evaluate(const char* expr, const Emulator& emu);
 
   /**
    * Evaluate an expression and return the raw numeric value.
    * Used for watch expressions.
    */
+  static int32_t evaluateNumeric(const char* expr, const MachineView& view);
   static int32_t evaluateNumeric(const char* expr, const Emulator& emu);
+
+  /** A view of a //e, for the two overloads above and for any other caller. */
+  static MachineView viewOf(const Emulator& emu);
 
   /**
    * Get the last error message (empty string if no error).
@@ -71,7 +98,7 @@ private:
     Token tokens[MAX_TOKENS];
     int count;
     int pos;
-    const Emulator* emu;
+    const MachineView* view;
   };
 
   static int tokenize(const char* expr, Token* tokens, int maxTokens);

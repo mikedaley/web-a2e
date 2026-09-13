@@ -78,6 +78,27 @@ static a2e::MachineDebug *machineDebug() {
   return nullptr;
 }
 
+// What a breakpoint condition can ask about whichever machine is running.
+// Without this a condition could only be asked of a //e, so a conditional
+// breakpoint on a IIgs silently never fired.
+static a2e::MachineView machineView() {
+  if (g_emulator) return a2e::ConditionEvaluator::viewOf(*g_emulator);
+  if (g_iigs) {
+    a2e::MachineView view;
+    view.peek = [](uint32_t address) {
+      return g_iigs->memory().peek(address & 0xFFFFFF);
+    };
+    view.pc = g_iigs->cpu().getPCFull();
+    view.a = g_iigs->cpu().getA();
+    view.x = g_iigs->cpu().getX();
+    view.y = g_iigs->cpu().getY();
+    view.sp = g_iigs->cpu().getSP();
+    view.p = g_iigs->cpu().getP();
+    return view;
+  }
+  return {};
+}
+
 #define REQUIRE_DEBUG() do { if (!machineDebug()) return; } while(0)
 #define REQUIRE_DEBUG_OR(default_val) \
   do { if (!machineDebug()) return (default_val); } while(0)
@@ -2535,14 +2556,18 @@ int16_t getBeamBreakHPos() {
 
 EMSCRIPTEN_KEEPALIVE
 bool evaluateCondition(const char* expr) {
-  REQUIRE_EMULATOR_OR(false);
-  return a2e::ConditionEvaluator::evaluate(expr, *g_emulator);
+  if (!expr) return false;
+  const a2e::MachineView view = machineView();
+  if (!view.peek) return false;
+  return a2e::ConditionEvaluator::evaluate(expr, view);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int32_t evaluateExpression(const char* expr) {
-  REQUIRE_EMULATOR_OR(0);
-  return a2e::ConditionEvaluator::evaluateNumeric(expr, *g_emulator);
+  if (!expr) return 0;
+  const a2e::MachineView view = machineView();
+  if (!view.peek) return 0;
+  return a2e::ConditionEvaluator::evaluateNumeric(expr, view);
 }
 
 EMSCRIPTEN_KEEPALIVE
