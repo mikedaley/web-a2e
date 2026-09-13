@@ -107,19 +107,45 @@ inline constexpr int SHR_COLOUR_DEPTH_BITS = 4;
 // ----------------------------------------------------------------------------
 // The raster
 //
-// What a monitor is sent is more than the picture. The Mega II's line is 65
-// cycles: 40 of picture, 12 of blanking (sync and porches), and 13 of border —
-// 6 before the picture and 7 after it — in the colour the bottom nibble of
-// $C034 names. The frame is 262 lines: 200 of Super Hi-Res picture (a //e
-// mode draws the first 192 and the last 8 are border), 22 of blanking, and 40
-// of border — 19 above the picture and 21 below it. These are the counts
-// GSSquared's scanner flags as border, cycle by cycle, and the visible raster
-// is therefore 53 cycles by 240 lines.
+// What a monitor is sent is more than the picture. The counters are the
+// //e's, and Sather's Table 3.2 (Understanding the Apple IIe) is the source
+// for where everything falls in them:
+//
+//   Horizontal: 65 states, $00 then $40-$7F, one state a cycle.
+//     $58-$7F  the picture, 40 cycles
+//     $00,$40-$47  after the picture, 9 cycles
+//     $48-$4B  horizontal sync, 4 cycles
+//     $4C-$4F  colour burst, 4 cycles
+//     $50-$57  before the picture, 8 cycles
+//   Vertical: 262 lines, $FA-$FF then $100-$1FF.
+//     lines 0-191 the //e's picture ($100-$1BF); Super Hi-Res draws 0-199
+//     line 192 VBL; lines 224-227 vertical sync ($1E0-$1E3)
+//
+// The IIgs sends border colour wherever it is sending neither picture nor
+// the blanking a receiver needs, and no Apple document says where the VGC
+// draws that line. This is the NTSC standard applied to the counters above:
+// a front porch of 1.5us (one and a half cycles) before sync, so 7 of the 9
+// cycles after the picture are border; the back porch's 1.6us after the
+// burst, so 6 of the 8 cycles before the picture are border; three
+// equalising lines before vertical sync, so the border ends at line 220 and
+// the //e's picture leaves 29 lines of it (Super Hi-Res 21); and blanking
+// through to line 242, so 19 lines of border precede the picture. The
+// visible raster is therefore 53 cycles by 240 lines.
+//
+// That is within a cycle of every emulator that models it and none of them
+// agrees exactly: GSSquared's scanner flags the same 7/12/6 and 221-242,
+// MAME's driver says 6/13/6, and KEGS draws 4 cycles a side. A monitor's own
+// overscan hides a cycle or two of border in any case, so the difference is
+// not one a screen would show. The picture's place and size are exact.
 //
 // Super Hi-Res clocks 16 pixels a cycle, so the raster is 848 pixels wide;
 // the //e's 14 dots a cycle cover the same width, and are stretched to it,
 // because on the monitor a text screen and a Super Hi-Res screen are the
-// same width. Lines are doubled, as the picture's are.
+// same width. Lines are doubled, as the picture's are. One cycle in 65 is
+// two dots longer than the rest, inside the blanking, and is not modelled.
+// The raster is 51.9us of a 63.7us line and 240 of 262 lines, which is the
+// NTSC standard's active 52.6us and 242 lines to within a percent: a 4:3
+// monitor shows the whole of it, and that is the shape the profile names.
 // ----------------------------------------------------------------------------
 inline constexpr int SHR_PIXELS_PER_CYCLE = 16;
 inline constexpr int SHR_PIXELS_PER_LINE = 640;

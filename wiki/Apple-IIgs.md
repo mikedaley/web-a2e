@@ -110,14 +110,33 @@ Speaker Tone Test.
 
 ## The Raster
 
-What a monitor is sent is more than the picture. The Mega II's line is 65
-cycles: 40 of picture, 12 of blanking (sync and porches), and 13 of border — 6
-before the picture and 7 after it — in the colour the bottom nibble of `$C034`
-names. The frame is 262 lines: 200 of Super Hi-Res picture (a //e mode draws
-the first 192 and the last 8 are border), 22 of blanking, and 40 of border —
-19 above the picture and 21 below it. Those are the cycles GSSquared's scanner
-flags as border, cycle by cycle, and `iigs_spec.hpp` holds the counts; the
-visible raster is 53 cycles by 240 lines.
+What a monitor is sent is more than the picture. The counters are the //e's,
+and Sather's Table 3.2 in *Understanding the Apple IIe* says where everything
+falls in them: 65 states a line, `$00` then `$40-$7F`, with the picture at
+`$58-$7F` (40 cycles), horizontal sync at `$48-$4B`, the colour burst at
+`$4C-$4F`, 9 cycles after the picture before sync and 8 after the burst before
+the picture; 262 lines, with the picture on 0-191 (Super Hi-Res draws 0-199),
+VBL from 192 and vertical sync on 224-227.
+
+The IIgs sends border colour — the bottom nibble of `$C034` — wherever it is
+sending neither picture nor the blanking a receiver needs, and **no Apple
+document says where the VGC draws that line**: the Hardware Reference names
+the border and says a scan line begins at the right-hand border, and gives no
+counts. `iigs_spec.hpp` therefore applies the NTSC standard to the counters:
+a front porch of one and a half cycles before sync leaves 7 border cycles
+after the picture; the back porch after the burst leaves 6 before it; three
+equalising lines before vertical sync end the border at line 220 (21 lines
+below a Super Hi-Res picture, 29 below a //e's); blanking to line 242 leaves
+19 lines above. The visible raster is 53 cycles by 240 lines, which is the
+NTSC standard's active line and field to within a percent, so a 4:3 monitor
+shows all of it and the profile shows it at 4:3.
+
+That is within a cycle of every emulator that models the border, and none of
+them agrees exactly — GSSquared's scanner flags the same 7/12/6 and 221-242
+(with a TODO against it), MAME's driver says 6/13/6, KEGS draws 4 cycles a
+side — and a monitor's overscan hides a cycle or two in any case. The picture's
+place and size are exact; the border's outer edge is the one number here that
+is an estimate, by one cycle at most.
 
 The frame is that raster: at Super Hi-Res's 16 pixels a cycle, **848x480**
 with lines doubled, the 640x400 picture at (96, 38) and border everywhere else.
