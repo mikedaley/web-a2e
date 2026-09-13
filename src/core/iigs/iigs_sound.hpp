@@ -64,8 +64,18 @@ public:
 
   // ===== The window, at $C03C-$C03F =====
 
-  /** $C03C: bit 7 busy (never, here), 6 RAM/registers, 5 auto-increment, 3-0 volume. */
-  uint8_t readControl() const { return control_ | 0x0F; }
+  /**
+   * $C03C: bit 7 busy (never, here), 6 RAM/registers, 5 auto-increment, 3-0
+   * volume.
+   *
+   * The volume reads back as it was written. This used to force the nibble to
+   * 15, which is not what the register does and is not harmless: the Control
+   * Panel's volume setting and the toolbox's SetSoundVolume both change the
+   * volume by reading the register, altering the nibble and writing it back,
+   * so every one of them was reading a machine that claimed to be at full
+   * volume whatever it was actually set to.
+   */
+  uint8_t readControl() const { return control_; }
   void writeControl(uint8_t value);
 
   uint8_t readData();

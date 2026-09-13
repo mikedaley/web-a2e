@@ -229,6 +229,44 @@ TEST_CASE("The controller fills in the //e's keyboard registers",
 // Sound
 // ---------------------------------------------------------------------------
 
+TEST_CASE("The volume nibble reads back as it was written",
+          "[iigs][sound][volume]") {
+  // $C03C's bottom four bits are the amplifier's volume, and reading the
+  // register gives what was put there. It used to read 15 whatever was
+  // written, which is not what the register does and is not harmless: the
+  // Control Panel's volume setting and the toolbox's SetSoundVolume both
+  // change it by reading the register, altering the nibble and writing it
+  // back, so all of them saw a machine claiming to be at full volume however
+  // quiet it was actually set.
+  IIgsSound sound;
+  sound.writeControl(0x05);
+  REQUIRE(sound.volume() == 5);
+  REQUIRE((sound.readControl() & IIgsSound::CONTROL_VOLUME_MASK) == 5);
+
+  SECTION("and the bits above it still say what they said") {
+    sound.writeControl(IIgsSound::CONTROL_RAM | 0x03);
+    REQUIRE((sound.readControl() & IIgsSound::CONTROL_RAM) != 0);
+    REQUIRE((sound.readControl() & IIgsSound::CONTROL_VOLUME_MASK) == 3);
+  }
+
+  SECTION("a read-modify-write of the volume keeps the rest of the register") {
+    // What the Control Panel does, and what the forced nibble broke.
+    sound.writeControl(IIgsSound::CONTROL_AUTO_INCREMENT | 0x0A);
+    const uint8_t held = sound.readControl();
+    sound.writeControl(static_cast<uint8_t>(
+        (held & ~IIgsSound::CONTROL_VOLUME_MASK) | 0x04));
+    REQUIRE(sound.volume() == 4);
+    REQUIRE((sound.readControl() & IIgsSound::CONTROL_AUTO_INCREMENT) != 0);
+  }
+
+  SECTION("the busy bit is the chip's and is never set here") {
+    // A transfer finishes before the processor can ask about it.
+    sound.writeControl(IIgsSound::CONTROL_BUSY | 0x07);
+    REQUIRE((sound.readControl() & IIgsSound::CONTROL_BUSY) == 0);
+    REQUIRE(sound.volume() == 7);
+  }
+}
+
 TEST_CASE("The Ensoniq's RAM is reached a byte at a time", "[iigs][sound]") {
   IIgsSound sound;
   sound.writeControl(IIgsSound::CONTROL_RAM | IIgsSound::CONTROL_AUTO_INCREMENT);
