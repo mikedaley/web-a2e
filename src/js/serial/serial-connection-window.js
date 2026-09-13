@@ -6,6 +6,7 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
+import { getMachineProfile } from "../machine/machine-profile.js";
 
 const STORAGE_KEY = "a2e-serial-connection";
 
@@ -15,9 +16,9 @@ export class SerialConnectionWindow extends BaseWindow {
       id: "serial-connection",
       title: "Serial Port",
       minWidth: 320,
-      minHeight: 200,
+      minHeight: 240,
       defaultWidth: 320,
-      defaultHeight: 200,
+      defaultHeight: 240,
       resizeDirections: [],
     });
 
@@ -44,6 +45,10 @@ export class SerialConnectionWindow extends BaseWindow {
           <span class="serial-status-text" id="serial-status-text">Disconnected</span>
         </div>
         <button class="serial-connect-btn" id="serial-connect-btn">Connect</button>
+        <label class="serial-loopback-row" id="serial-loopback-row" hidden>
+          <input type="checkbox" id="serial-loopback" />
+          <span class="serial-loopback-text">Loopback cable between ports 1 and 2</span>
+        </label>
       </div>
     `;
 
@@ -55,6 +60,11 @@ export class SerialConnectionWindow extends BaseWindow {
 
     this.connectBtn.addEventListener("click", () => this.toggleConnection());
 
+    this.loopbackRow = this.contentElement.querySelector("#serial-loopback-row");
+    this.loopbackBox = this.contentElement.querySelector("#serial-loopback");
+    this.loopbackBox.addEventListener("change", () => this.applyLoopback());
+    this.onMachineChanged();
+
     // Stop keyboard events from reaching the emulator
     this.contentElement.addEventListener("keydown", (e) => e.stopPropagation());
     this.contentElement.addEventListener("keyup", (e) => e.stopPropagation());
@@ -65,6 +75,41 @@ export class SerialConnectionWindow extends BaseWindow {
     };
 
     this.updateStatus(this.modem.isConnected());
+  }
+
+  /**
+   * The loopback cable, which only a IIgs has anywhere to put.
+   *
+   * A cable from one socket on the back of the machine to the other, crossing
+   * transmit and receive: the Apple IIgs Diagnostic's External Serial Ports
+   * Test asks for one, and nothing else does. It is shown only on the machine
+   * that has two ports on one chip, and it is deliberately **not remembered**
+   * across sessions — with the cable on, a byte the printer driver sends goes
+   * round to the other socket instead of out of the machine, so a cable left
+   * fitted from last week would look like a printer that had stopped working.
+   */
+  onMachineChanged() {
+    if (!this.loopbackRow) return;
+    const machine = getMachineProfile();
+    const supported = machine?.family === "apple2gs";
+    this.loopbackRow.hidden = !supported;
+    if (!supported) {
+      this.loopbackBox.checked = false;
+      return;
+    }
+    const wasm = this.modem?.wasmModule;
+    if (!wasm?._hasIIgsLoopbackCable) return;
+    Promise.resolve(wasm._hasIIgsLoopbackCable())
+      .then((fitted) => {
+        this.loopbackBox.checked = !!fitted;
+      })
+      .catch(() => {});
+  }
+
+  applyLoopback() {
+    const wasm = this.modem?.wasmModule;
+    if (!wasm?._setIIgsLoopbackCable) return;
+    wasm._setIIgsLoopbackCable(this.loopbackBox.checked);
   }
 
   toggleConnection() {

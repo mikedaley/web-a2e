@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 
 namespace a2e::iigs {
 
@@ -57,10 +58,31 @@ public:
    * A loopback cable between the two ports, as the Diagnostic's External
    * Serial Ports Test asks for: each port's transmit data into the other's
    * receiver, and each port's handshake out (DTR) into the other's handshake
-   * in (CTS). Fitted by default, because nothing else is ever plugged in.
+   * in (CTS).
+   *
+   * **Not fitted by default.** A cable between a machine's own two ports is a
+   * test rig, not a machine: with one on, a byte the printer driver sends goes
+   * round to the other port instead of out of the back, so nothing plugged in
+   * would ever hear anything. It is a choice the host makes, and the only
+   * thing that asks for it is that one diagnostic.
    */
   void setLoopbackCable(bool fitted);
   bool hasLoopbackCable() const { return cable_; }
+
+  /**
+   * Where a byte goes when it leaves a port with no cable on it: out of the
+   * machine, to whatever the host has on the other end.
+   *
+   * The channel is which port sent it — A is the printer port (slot 1) and B
+   * the modem port (slot 2), which the firmware settles rather than the
+   * address order: slot 1's firmware programs $C039/$C03B and slot 2's
+   * $C038/$C03A.
+   */
+  using TransmitCallback = std::function<void(int channel, uint8_t byte)>;
+  void setTransmitCallback(TransmitCallback cb) { transmit_ = std::move(cb); }
+
+  /** A byte arriving from outside, into one port's receiver. */
+  void receive(int channel, uint8_t byte) { receiveByte(channels_[channel & 1], byte); }
 
   // ===== For the tests =====
 
@@ -140,7 +162,8 @@ private:
   void advanceGenerator(Channel &ch, uint32_t cycles);
 
   std::array<Channel, 2> channels_;
-  bool cable_ = true;
+  bool cable_ = false;
+  TransmitCallback transmit_;
 };
 
 } // namespace a2e::iigs

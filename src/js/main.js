@@ -709,10 +709,15 @@ class AppleIIeEmulator {
     // card, so the window has to be rebuilt rather than merely refreshed.
     if (this.slotConfigWindow) await this.slotConfigWindow.setMachine();
     // Which buses a printer can be reached over is a property of the machine
-    // as much as of the slots: a //c has a printer port soldered on and a II+
-    // has neither that nor a card until the user fits one.
-    if (this.printerManager && this.slotConfigWindow) {
-      this.printerManager.updateSlots(this.slotConfigWindow.installedCards());
+    // as much as of the slots: a //c has a printer port soldered on, a IIgs has
+    // two sockets on the back of it, and a II+ has neither that nor a card
+    // until the user fits one. The rebuilt core also has to be handed the
+    // callbacks again, because they belonged to the machine that has gone.
+    if (this.printerManager) {
+      await this.printerManager.reattach();
+      if (this.slotConfigWindow) {
+        this.printerManager.updateSlots(this.slotConfigWindow.installedCards());
+      }
     }
 
     // Every debug view is shaped by the machine it is looking at, so they all

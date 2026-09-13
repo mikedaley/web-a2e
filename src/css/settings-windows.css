@@ -1627,6 +1627,20 @@
     color: var(--text-secondary);
 }
 
+.serial-loopback-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.serial-loopback-row input {
+    margin: 0;
+    accent-color: var(--accent-blue);
+}
+
 .serial-connect-btn {
     padding: 6px 12px;
     font-size: 11px;

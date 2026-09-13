@@ -1298,6 +1298,28 @@ void setBatteryRam(const uint8_t *bytes, int size) {
   g_iigs->memory().clock().loadBatteryRam(bytes, static_cast<size_t>(size));
 }
 
+// ===========================================================================
+// The IIgs's serial loopback cable
+//
+// A cable from one port on the back of the machine to the other, crossing
+// transmit and receive and the handshake lines. Nothing but the Apple IIgs
+// Diagnostic's External Serial Ports Test wants one, and with it fitted the
+// ports cannot reach anything else: a byte the printer driver sends goes round
+// to the other socket rather than out of the machine. It is therefore off
+// unless the host asks.
+// ===========================================================================
+
+EMSCRIPTEN_KEEPALIVE
+void setIIgsLoopbackCable(bool fitted) {
+  if (!g_iigs) return;
+  g_iigs->memory().scc().setLoopbackCable(fitted);
+}
+
+EMSCRIPTEN_KEEPALIVE
+bool hasIIgsLoopbackCable() {
+  return g_iigs && g_iigs->memory().scc().hasLoopbackCable();
+}
+
 /** Whether anything has written to it since this was last asked. */
 EMSCRIPTEN_KEEPALIVE
 bool batteryRamChanged() {
@@ -2237,6 +2259,13 @@ void clearSmartPortActivity() {
 
 EMSCRIPTEN_KEEPALIVE
 void serialReceive(uint8_t byte) {
+  // A serial line is a serial line whatever provides it: a //e's SSC, a //c's
+  // built-in port, or a IIgs's SCC. The byte arrives at the modem port on
+  // every machine that has two, because a printer does not talk back.
+  if (g_iigs) {
+    g_iigs->serialReceive(byte);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->serialReceive(byte);
 }
@@ -2247,23 +2276,48 @@ bool isSSCInstalled() {
   return g_emulator->isSSCInstalled();
 }
 
+/**
+ * Hand a transmitted byte to whichever host shim is attached to the port.
+ *
+ * Runs inside the Worker: the global is `self`, not `window`. `port` is 0 on a
+ * machine whose serial ports are indistinguishable from here — a //e's single
+ * SSC, or a //c, where both ports share one callback — and 1 or 2 on a IIgs,
+ * whose SCC says which socket a byte left by. A printer is what is on the
+ * printer port and a modem or a telnet link is what is on the modem port, so
+ * a machine that knows the port asks the right shim first rather than
+ * whichever happens to be attached.
+ */
+EM_JS(void, deliverSerialByte, (int port, uint8_t byte), {
+  const emulator = self.emulator;
+  if (!emulator) return;
+  const printer = () => {
+    if (!emulator.printer) return false;
+    emulator.printer.receiveByte(byte);
+    return true;
+  };
+  const line = () => {
+    if (emulator.modem) { emulator.modem.processTxByte(byte); return true; }
+    if (emulator.serialManager) { emulator.serialManager.sendByte(byte); return true; }
+    return false;
+  };
+  if (port === 1) { if (!printer()) line(); return; }
+  if (!line()) printer();
+});
+
 EMSCRIPTEN_KEEPALIVE
 void setSerialTxCallback() {
+  if (g_iigs) {
+    g_iigs->setSerialTxCallback([](int port, uint8_t byte) {
+      deliverSerialByte(port, byte);
+    });
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->setSerialTxCallback([](uint8_t byte) {
-    // Runs inside the Worker: the global is `self`, not `window`. Fan the byte
-    // to whichever device shim is attached to the serial port. A printer wired
-    // to the SSC (the historical ImageWriter path) consumes it via the same
-    // shim the parallel port uses — one device, two possible buses.
-    EM_ASM({
-      if (self.emulator && self.emulator.modem) {
-        self.emulator.modem.processTxByte($0);
-      } else if (self.emulator && self.emulator.serialManager) {
-        self.emulator.serialManager.sendByte($0);
-      } else if (self.emulator && self.emulator.printer) {
-        self.emulator.printer.receiveByte($0);
-      }
-    }, byte);
+    // One callback for every port this machine has, so there is no port to
+    // name: a line device is asked first and the printer second, which is the
+    // order this has always used.
+    deliverSerialByte(0, byte);
   });
 }
 

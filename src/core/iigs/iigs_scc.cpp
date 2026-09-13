@@ -144,11 +144,25 @@ uint8_t IIgsSCC::statusRegister(const Channel &ch) const {
   if (ch.txUnderrun) value |= RR0_TX_UNDERRUN;
   if (ch.zeroCount) value |= RR0_ZERO_COUNT;
   // CTS is the other port's DTR through the cable — the bit reads set when
-  // the pin is pulled low, which is DTR asserted — and nothing otherwise.
-  // DCD is never driven: nothing on the cable reaches it.
+  // the pin is pulled low, which is DTR asserted. DCD is never driven:
+  // nothing on the cable reaches it.
+  //
+  // With no cable, both handshake inputs read asserted. An unplugged port
+  // here is not an unplugged socket: it is a socket with whatever the host
+  // attached on the end of it — an ImageWriter, a modem shim — and an
+  // emulated device is always powered, always connected and always ready.
+  // Both bits are load-bearing and were measured rather than assumed: the
+  // machine's own printer firmware polls RR0 before every character and waits
+  // for CTS *and* DCD, so a port that answered "not clear to send" or "no
+  // device" sat in that loop for ever and `PR#1` printed nothing at all.
+  //
+  // A device that wanted to say "busy" or drop carrier would need the core to
+  // model the pin; nothing asks for that yet.
   if (cable_) {
     const Channel &other = channels_[&ch == &channels_[0] ? 1 : 0];
     if (other.wr[5] & WR5_DTR) value |= RR0_CTS;
+  } else {
+    value |= RR0_CTS | RR0_DCD;
   }
   return value;
 }
@@ -448,6 +462,8 @@ void IIgsSCC::advance(uint32_t cycles) {
       receiveByte(ch, sent);
     } else if (cable_) {
       receiveByte(channels_[c == CHANNEL_A ? CHANNEL_B : CHANNEL_A], sent);
+    } else if (transmit_) {
+      transmit_(c, sent);
     }
 
     if (ch.txBufferFull) {

@@ -537,6 +537,29 @@ the chip. The sound tools play every sample through swapped pairs refilled
 from those interrupts, so a chip that only ran when the host asked for a
 buffer, and never interrupted, played the first buffer of anything and stopped.
 
+**A IIgs's printer is on the back of the machine, and the port is channel A.**
+The two sockets are the two halves of one Z8530, and which half is which was
+measured rather than reasoned about: slot 1's firmware programs `$C039`/`$C03B`
+and slot 2's `$C038`/`$C03A`, so the printer port is channel **A** — the
+opposite of what both the address order and the port numbering suggest.
+`IIgsMachine::setSerialTxCallback` hands the host a byte with the port it left
+by (1 or 2) and `serialReceive` puts one into the modem port, which is what the
+//c's pair of calls mean on a machine with two ports. The host's own printer
+does not have to know any of it: `serial1`/`serial2` in slots 1 and 2 of the
+IIgs profile are the same names a //c uses, so the printer manager finds an
+ImageWriter reachable without being told about a third machine.
+
+Two things in that path print nothing at all when they are wrong, and both are
+pinned by `test_iigs_boot.cpp`. **An unplugged port answers as a device that is
+present and ready** — CTS *and* DCD — because what is on the end of it is an
+emulated printer, and the firmware polls both before every character; a port
+that answered honestly sat in that loop for ever. And **the loopback cable
+between the two ports is not fitted by default**: it is a test rig that only
+the Apple IIgs Diagnostic's External Serial Ports Test asks for, and with it on
+a byte the printer driver sends goes round to the other socket instead of out
+of the machine. It is a tick box in the Serial Port window, deliberately not
+remembered across sessions.
+
 **ENABLE is not the motor, and `DiskController::isDriveEnabled()` is the
 difference.** A drive keeps turning for about a second after the CPU switches
 it off; `isMotorOn()` says so, and that is right for reading. But the IWM's
@@ -796,10 +819,11 @@ class holding four forwarding methods would describe a part that does not
 exist. This is the other half of the IWM's rule — share a mechanism, not a
 resemblance.
 
-The host's serial calls (`setSerialTxCallback`, `serialReceive`) serve both
-machines, because the question is about a serial line rather than about what
-provides it: transmit goes to every port there is, and a byte arriving from
-outside goes to port 2, the modem port, since a printer does not talk back.
+The host's serial calls (`setSerialTxCallback`, `serialReceive`) serve every
+machine that has a serial line, a IIgs included, because the question is about
+the line rather than about what provides it: transmit goes to every port there
+is, and a byte arriving from outside goes to port 2, the modem port, since a
+printer does not talk back.
 
 **Its mouse is the IOU, and is the one part that is not a card at all.** A //e's
 mouse is an MC6821 in a slot with a ROM and a command protocol; a //c's is two

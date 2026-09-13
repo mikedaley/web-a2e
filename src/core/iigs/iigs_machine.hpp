@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -133,6 +134,25 @@ public:
 
   /** Where the beam is, derived from the machine's own clock. */
   BeamPosition beam() const;
+
+  // ===== The serial ports =====
+  //
+  // A IIgs has two sockets on the back rather than a card in a slot, and the
+  // SCC behind them is part of the machine. The host's serial calls mean the
+  // same thing here as they do on a //c: a byte the machine sends goes out to
+  // whatever is attached, and a byte from outside arrives at the modem port,
+  // because a printer does not talk back.
+
+  /** Every byte either port transmits, with the byte's port: 1 or 2. */
+  using SerialTxCallback = std::function<void(int port, uint8_t byte)>;
+  void setSerialTxCallback(SerialTxCallback cb);
+
+  /** A byte from outside, into the modem port. */
+  void serialReceive(uint8_t byte);
+
+  /** Which SCC channel is which socket. Settled by the firmware, not guessed. */
+  static constexpr int PRINTER_PORT = 1; // slot 1, SCC channel A
+  static constexpr int MODEM_PORT = 2;   // slot 2, SCC channel B
 
   // ===== The parts =====
 

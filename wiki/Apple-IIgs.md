@@ -106,11 +106,19 @@ RR1's all-sent and expecting RR0's receive bit and the same byte from the data
 register.
 
 The **External Serial Ports Test** that follows asks for a loopback cable
-between the two ports, and one is fitted: `IIgsSCC::setLoopbackCable`, on by
-default because nothing else is ever plugged in. It crosses each port's
-transmit data into the other's receiver and its handshake out (DTR) into the
-other's handshake in (CTS), which is how Apple's cable is wired. The test
-sends on one port and polls the other's RR0 for the byte, both ways.
+between the two ports: `IIgsSCC::setLoopbackCable` fits one, crossing each
+port's transmit data into the other's receiver and its handshake out (DTR)
+into the other's handshake in (CTS), which is how Apple's cable is wired. The
+test sends on one port and polls the other's RR0 for the byte, both ways.
+
+**The cable is not fitted unless somebody asks for it**, which it was at first
+and should not have been. A cable between a machine's own two ports is a test
+rig, and while it is on nothing else can be reached: a byte the printer driver
+sends goes round to the other socket instead of out of the back of the
+machine. It is a tick box in the Serial Port window, shown only on the machine
+that has two ports on one chip, and deliberately not remembered across
+sessions — a cable left fitted from last week looks exactly like a printer that
+has stopped working.
 
 The **Serial Crystal Test** after that clocks a byte straight from the
 3.6864MHz crystal — WR11 selecting RTxC as the transmit clock, x64 in WR4 —
@@ -121,6 +129,41 @@ taken as the crystal rather than never finishing). A transmitter that took the
 generator's rate whatever WR11 said took a fifth of a second over the byte.
 With that the serial tests are all passed, and the sequence reaches the
 Speaker Tone Test.
+
+### Printing through it
+
+The ports are the machine's, not a card's, so there is nothing to fit and
+nothing for the host to install: `PR#1` reaches the printer on the back of the
+machine through the firmware in ROM. Three things had to be true before a
+character came out, and each of them printed absolutely nothing on its own.
+
+**The printer port is channel A.** Both the address order and the port
+numbering say channel B — it is the lower pair of addresses, and it is port 1
+that a printer goes on — and both are wrong. Tracing which channel each slot's
+firmware programs settles it: slot 1 writes `$C039`/`$C03B` and slot 2 writes
+`$C038`/`$C03A`. `IIgsMachine::PRINTER_PORT` and `MODEM_PORT` name the two, and
+the machine translates between the chip's channels and the host's ports so
+nothing outside has to know.
+
+**An unplugged port has to answer as a device that is present and ready.** The
+firmware polls RR0 before every character and waits for CTS *and* DCD, so with
+no cable fitted `statusRegister` asserts both: what is on the end of the socket
+is an emulated ImageWriter, and an emulated device is always powered, always
+connected and never busy. A port that reported the truth about a socket with
+nothing in it left `PR#1` spinning in the firmware's wait loop for ever, which
+looks like a printer that was never wired up.
+
+**The host's serial calls serve this machine too.** `setSerialTxCallback` and
+`serialReceive` used to require the 8-bit `Emulator`; they now reach whichever
+machine is running, and the transmitted byte carries the port it left by so a
+printer shim is asked for port 1 and a modem for port 2. The IIgs profile also
+names `serial1` and `serial2` in slots 1 and 2 — the same names a //c's ports
+use — so the host's printer manager finds an ImageWriter reachable on a IIgs
+without learning what a IIgs is.
+
+Verified through the whole path in a real browser: a IIgs booting DOS 3.3,
+`PR#1` typed at the prompt, and `PRINT "HELLO PRINTER"` arriving at the
+emulated ImageWriter one byte at a time, line feed and all.
 
 ## The Raster
 

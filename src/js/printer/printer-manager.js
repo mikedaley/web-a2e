@@ -223,6 +223,19 @@ export class PrinterManager {
     if (this._tickTimer)  { clearTimeout(this._tickTimer);  this._tickTimer  = null; }
   }
 
+  /**
+   * Attach to the machine again after the core has been rebuilt.
+   *
+   * Switching machine (or fitting a IIgs with different memory) destroys the
+   * core and builds another, and the new one has no host callbacks in it: the
+   * printer is still attached to a machine that no longer exists. Nothing
+   * says so, and the symptom is a print that goes nowhere after a switch.
+   */
+  async reattach() {
+    this._callbackInstalled = false;
+    await this.init();
+  }
+
   async init() {
     if (this._callbackInstalled) return;
     if (!this.wasmProxy) return;

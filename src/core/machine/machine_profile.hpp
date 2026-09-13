@@ -626,11 +626,18 @@ inline constexpr MachineProfile APPLE_IIGS_PROFILE = {
     7, // lastSlot
     // Every slot is switchable in the Control Panel between the card in it and
     // the port built into the back, which is a third state no other machine
-    // here has and is not modelled yet. Described as empty sockets until it is.
+    // here has and is not modelled yet. Described as empty sockets until it
+    // is, except for the two that have something behind them here: slots 1
+    // and 2 are the serial sockets on the back of the machine, driven by the
+    // two halves of one SCC. They are named the way a //c's are because they
+    // are the same two ports in the same order — 1 the printer, 2 the modem —
+    // and what reads this wants to know a printer can be reached, not which
+    // chip is behind the socket. Fixed, because the machine has them: there
+    // is no card to fit and nothing for the user to choose.
     {{
-        {nullptr, nullptr}, // 0
-        {nullptr, nullptr}, // 1
-        {nullptr, nullptr}, // 2
+        {nullptr, nullptr},       // 0
+        {"serial1", "serial1"},   // 1: printer port, SCC channel A
+        {"serial2", "serial2"},   // 2: modem port, SCC channel B
         {nullptr, nullptr}, // 3
         {nullptr, nullptr}, // 4
         {nullptr, nullptr}, // 5

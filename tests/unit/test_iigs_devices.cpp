@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 #include "iigs_sound.hpp"
 
@@ -1192,9 +1193,12 @@ TEST_CASE("A byte sent round the SCC's local loop comes back", "[iigs][scc]") {
 TEST_CASE("A loopback cable joins the two ports", "[iigs][scc]") {
   // The Diagnostic's External Serial Ports Test: send on one port and expect
   // the byte on the other, both ways, through a cable that crosses transmit
-  // and receive. Fitted by default, because nothing else is ever plugged in.
+  // and receive. It has to be fitted first: a machine with a cable between its
+  // own two ports is a test rig, and a machine that had one on by default
+  // would swallow everything a printer driver sent.
   IIgsSCC scc;
-  REQUIRE(scc.hasLoopbackCable());
+  REQUIRE_FALSE(scc.hasLoopbackCable());
+  scc.setLoopbackCable(true);
   sccWrite(scc, SCC_CMD_A, 9, 0xC0);
   for (uint8_t command : {SCC_CMD_A, SCC_CMD_B}) {
     sccWrite(scc, command, 4, 0x4C);
@@ -1225,12 +1229,31 @@ TEST_CASE("A loopback cable joins the two ports", "[iigs][scc]") {
     REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) == 0);
   }
 
-  SECTION("unplugged, a byte goes nowhere") {
+  SECTION("unplugged, a byte leaves the machine instead") {
+    // And the port reports clear-to-send and a device present, because what
+    // is on the back of an unplugged port is whatever the host attached, and
+    // that is always ready. The machine's own printer firmware waits on both
+    // before every character.
+    std::vector<std::pair<int, uint8_t>> sent;
+    scc.setTransmitCallback(
+        [&sent](int channel, uint8_t byte) { sent.emplace_back(channel, byte); });
     scc.setLoopbackCable(false);
     scc.write(SCC_DATA_A, 0x11);
     for (int i = 0; i < 200; i++) scc.advance(100);
     REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
-    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) == 0);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_CTS) != 0);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_DCD) != 0);
+    REQUIRE(sent.size() == 1);
+    REQUIRE(sent[0].first == IIgsSCC::CHANNEL_A);
+    REQUIRE(sent[0].second == 0x11);
+  }
+
+  SECTION("and a byte from outside arrives in the port it was sent to") {
+    scc.setLoopbackCable(false);
+    scc.receive(IIgsSCC::CHANNEL_B, 0x7E);
+    REQUIRE((sccRead(scc, SCC_CMD_B, 0) & IIgsSCC::RR0_RX_AVAILABLE) != 0);
+    REQUIRE(scc.read(SCC_DATA_B) == 0x7E);
+    REQUIRE((sccRead(scc, SCC_CMD_A, 0) & IIgsSCC::RR0_RX_AVAILABLE) == 0);
   }
 }
 

@@ -449,6 +449,26 @@ BeamPosition IIgsMachine::beam() const {
                       machineProfile(MachineId::AppleIIgs).timing);
 }
 
+// ===== The serial ports =====
+
+void IIgsMachine::setSerialTxCallback(SerialTxCallback cb) {
+  if (!cb) {
+    memory_->scc().setTransmitCallback(nullptr);
+    return;
+  }
+  // The SCC speaks in channels and the host in ports. Channel A is slot 1 and
+  // channel B is slot 2, which the firmware settles: slot 1's driver programs
+  // $C039/$C03B and slot 2's $C038/$C03A.
+  memory_->scc().setTransmitCallback(
+      [cb = std::move(cb)](int channel, uint8_t byte) {
+        cb(channel == IIgsSCC::CHANNEL_A ? PRINTER_PORT : MODEM_PORT, byte);
+      });
+}
+
+void IIgsMachine::serialReceive(uint8_t byte) {
+  memory_->scc().receive(IIgsSCC::CHANNEL_B, byte);
+}
+
 void IIgsMachine::recordTrace() {
   MachineDebug::TraceEntry *entry = debug_.beginTraceEntry();
   if (!entry) return;

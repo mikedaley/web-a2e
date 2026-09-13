@@ -231,6 +231,8 @@ if(EMSCRIPTEN)
                 \"_getBatteryRamSize\", \
                 \"_setBatteryRam\", \
                 \"_batteryRamChanged\", \
+                \"_setIIgsLoopbackCable\", \
+                \"_hasIIgsLoopbackCable\", \
                 \"_getSP\", \
                 \"_getA\", \
                 \"_getX\", \

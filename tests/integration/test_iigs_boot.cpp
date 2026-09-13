@@ -992,3 +992,72 @@ TEST_CASE("The IIgs Diagnostic's speed loop counts what the disk expects",
   REQUIRE((fast == 25 || fast == 26));
   REQUIRE((slow == 14 || slow == 15));
 }
+
+TEST_CASE("A IIgs prints through the port on the back of it",
+          "[iigs][boot][serial]") {
+  // The whole path, through the machine's own firmware: point the output hook
+  // at slot 1 the way PR#1 does, print through COUT, and the characters come
+  // out of the printer port as the host's printer sees them.
+  //
+  // Two things in this were measured rather than reasoned about, and the test
+  // exists because each of them silently printed nothing.
+  //
+  // The port is SCC channel A. Both the address order and the port numbering
+  // suggest channel B — it is the lower pair of addresses — and both are
+  // wrong: slot 1's firmware programs $C039/$C03B and slot 2's $C038/$C03A.
+  //
+  // And the firmware waits on the handshake lines before every character, so
+  // an unplugged port has to answer as a device that is present and ready
+  // (see IIgsSCC::statusRegister). It waits for DCD as well as CTS.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the printer port test");
+    return;
+  }
+
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+
+  std::vector<std::pair<int, uint8_t>> sent;
+  machine.setSerialTxCallback([&sent](int port, uint8_t byte) {
+    sent.emplace_back(port, byte);
+  });
+
+  constexpr int SAMPLES = 2048;
+  std::vector<float> buffer(SAMPLES * 2);
+  for (int i = 0; i < 500; i++) {
+    machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+  }
+  REQUIRE_FALSE(machine.memory().scc().hasLoopbackCable());
+
+  // LDA #$00 / STA $36 / LDA #$C1 / STA $37 — the output hook at $C100, which
+  // is what PR#1 writes; then two characters and a return through COUT.
+  const std::vector<uint8_t> program = {
+      0xA9, 0x00, 0x85, 0x36, 0xA9, 0xC1, 0x85, 0x37,
+      0xA9, 0xC8, 0x20, 0xED, 0xFD, // LDA #'H' / JSR COUT
+      0xA9, 0xC9, 0x20, 0xED, 0xFD, // LDA #'I'
+      0xA9, 0x8D, 0x20, 0xED, 0xFD, // LDA #CR
+      0x4C, 0x17, 0x03,             // JMP *
+  };
+  for (size_t i = 0; i < program.size(); i++) {
+    machine.memory().write(0x000300 + static_cast<uint32_t>(i), program[i]);
+  }
+  machine.cpu().setEmulation(true);
+  machine.cpu().setPBR(0x00);
+  machine.cpu().setPC(0x0300);
+  machine.cpu().setSP(0x01F0);
+
+  // Long enough for three characters at the port's own baud rate.
+  for (int i = 0; i < 6000000; i++) machine.step();
+
+  REQUIRE(sent.size() >= 3);
+  for (const auto &byte : sent) {
+    REQUIRE(byte.first == IIgsMachine::PRINTER_PORT);
+  }
+  REQUIRE(sent[0].second == 0xC8);
+  REQUIRE(sent[1].second == 0xC9);
+  REQUIRE(sent[2].second == 0x8D);
+  // The firmware adds the line feed a printer needs after a return, which is
+  // its own setting rather than anything this test asked for.
+  if (sent.size() > 3) REQUIRE(sent[3].second == 0x8A);
+}
