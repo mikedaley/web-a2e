@@ -703,6 +703,10 @@ class AppleIIeEmulator {
       this.printerManager.updateSlots(this.slotConfigWindow.installedCards());
     }
 
+    // Every debug view is shaped by the machine it is looking at, so they all
+    // hear about the change rather than each being named here.
+    this.windowManager?.notifyMachineChanged();
+
     await this.updateMouseHandlerState();
     if (this.diskManager) this.diskManager.syncWithEmulatorState?.();
     if (this.hardDriveManager) this.hardDriveManager.syncWithEmulatorState();

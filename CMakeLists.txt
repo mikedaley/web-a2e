@@ -225,6 +225,7 @@ if(EMSCRIPTEN)
                 \"_setRegDBR\", \
                 \"_setRegDirectPage\", \
                 \"_getTraceEntrySize\", \
+                \"_formatTraceRange\", \
                 \"_getSP\", \
                 \"_getA\", \
                 \"_getX\", \

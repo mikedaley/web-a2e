@@ -6,61 +6,7 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
-import { getSymbolInfo } from "./symbols.js";
-
-/**
- * Cached opcode mnemonics from WASM disassembler (populated on first use)
- */
-let MNEMONICS = null;
-let ADDR_MODES = null;
-
-// AddrMode enum values matching disassembler.hpp
-const MODE_IMP = 0;
-const MODE_ACC = 1;
-const MODE_IMM = 2;
-const MODE_ZP  = 3;
-const MODE_ZPX = 4;
-const MODE_ZPY = 5;
-const MODE_ABS = 6;
-const MODE_ABX = 7;
-const MODE_ABY = 8;
-const MODE_IND = 9;
-const MODE_IZX = 10;
-const MODE_IZY = 11;
-const MODE_REL = 12;
-const MODE_ZPI = 13;
-const MODE_AIX = 14;
-const MODE_ZPR = 15;
-
-async function getMnemonicTable(wasmModule) {
-  if (MNEMONICS) return MNEMONICS;
-  MNEMONICS = new Array(256);
-  // Batch all 256 mnemonic pointer reads
-  const batchCalls = [];
-  for (let i = 0; i < 256; i++) {
-    batchCalls.push(['_getOpcodeMnemonic', i]);
-  }
-  const ptrs = await wasmModule.batch(batchCalls);
-  for (let i = 0; i < 256; i++) {
-    MNEMONICS[i] = ptrs[i] ? await wasmModule.UTF8ToString(ptrs[i]) : "???";
-  }
-  return MNEMONICS;
-}
-
-async function getAddrModeTable(wasmModule) {
-  if (ADDR_MODES) return ADDR_MODES;
-  if (!wasmModule._getOpcodeAddressingMode) return null;
-  ADDR_MODES = new Uint8Array(256);
-  const batchCalls = [];
-  for (let i = 0; i < 256; i++) {
-    batchCalls.push(['_getOpcodeAddressingMode', i]);
-  }
-  const results = await wasmModule.batch(batchCalls);
-  for (let i = 0; i < 256; i++) {
-    ADDR_MODES[i] = results[i];
-  }
-  return ADDR_MODES;
-}
+import { machineProcessor } from "../machine/machine-profile.js";
 
 /**
  * TracePanelWindow - Displays instruction trace from the WASM ring buffer
@@ -101,7 +47,7 @@ export class TracePanelWindow extends BaseWindow {
           <span class="trace-col-bytes">Bytes</span>
           <span class="trace-col-mnemonic">Mnem</span>
           <span class="trace-col-operand">Operand</span>
-          <span class="trace-col-regs">A  X  Y  SP NV-BDIZC</span>
+          <span class="trace-col-regs" id="trace-regs-legend">A  X  Y  SP NV-BDIZC</span>
         </div>
         <div class="trace-scroll-container" id="trace-scroll">
           <div class="trace-scroll-spacer" id="trace-spacer"></div>
@@ -109,6 +55,28 @@ export class TracePanelWindow extends BaseWindow {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * The register legend, which names the flags this processor has.
+   *
+   * A 65816's two width flags sit where a 6502's unused bit and Break are,
+   * and its registers are twice as wide, so the columns are wider too.
+   */
+  applyProcessor() {
+    const legend = this.contentElement?.querySelector("#trace-regs-legend");
+    if (!legend) return;
+    const processor = machineProcessor();
+    const wide = processor.registerBits > 8;
+    const pad = wide ? "    " : "  ";
+    legend.textContent =
+      `A${pad}X${pad}Y${pad}SP ` + (processor.hasModes ? "NVmxDIZC" : "NV-BDIZC");
+  }
+
+  /** The machine changed, and with it the processor the columns describe. */
+  onMachineChanged() {
+    this.applyProcessor();
+    this.renderVisibleRows();
   }
 
   setupContentEventListeners() {
@@ -143,6 +111,7 @@ export class TracePanelWindow extends BaseWindow {
 
   create() {
     super.create();
+    this.applyProcessor();
     this.setupContentEventListeners();
   }
 
@@ -168,144 +137,83 @@ export class TracePanelWindow extends BaseWindow {
     await this.renderVisibleRows();
   }
 
-  formatOperand(mode, op1, op2, pc, len) {
-    const b = this.hex2(op1);
-    const w = this.hex2(op2) + this.hex2(op1);
-    switch (mode) {
-      case MODE_IMP: return "";
-      case MODE_ACC: return "A";
-      case MODE_IMM: return `#$${b}`;
-      case MODE_ZP:  return `$${b}`;
-      case MODE_ZPX: return `$${b},X`;
-      case MODE_ZPY: return `$${b},Y`;
-      case MODE_ABS: return `$${w}`;
-      case MODE_ABX: return `$${w},X`;
-      case MODE_ABY: return `$${w},Y`;
-      case MODE_IND: return `($${w})`;
-      case MODE_IZX: return `($${b},X)`;
-      case MODE_IZY: return `($${b}),Y`;
-      case MODE_REL: {
-        const offset = op1 < 128 ? op1 : op1 - 256;
-        const target = (pc + len + offset) & 0xFFFF;
-        return `$${this.hex4(target)}`;
-      }
-      case MODE_ZPI: return `($${b})`;
-      case MODE_AIX: return `($${w},X)`;
-      case MODE_ZPR: {
-        const offset = op2 < 128 ? op2 : op2 - 256;
-        const target = (pc + len + offset) & 0xFFFF;
-        return `$${b},$${this.hex4(target)}`;
-      }
-      default: return "";
-    }
-  }
-
   async renderVisibleRows() {
     const container = this.contentElement.querySelector("#trace-scroll");
     const spacer = this.contentElement.querySelector("#trace-spacer");
     const rowsEl = this.contentElement.querySelector("#trace-rows");
     if (!container || !spacer || !rowsEl) return;
-    if (!this.wasmModule._getTraceCount || !this.wasmModule._getTraceBuffer) return;
+    if (!this.wasmModule._getTraceCount) return;
 
-    const [count, head, capacity, bufPtr] = await this.wasmModule.batch([
-      ['_getTraceCount'],
-      ['_getTraceHead'],
-      ['_getTraceCapacity'],
-      ['_getTraceBuffer'],
-    ]);
-
-    if (!bufPtr || count === 0) {
+    const count = await this.wasmModule._getTraceCount();
+    if (!count) {
       spacer.style.height = "0px";
       rowsEl.innerHTML = '<div class="trace-empty">No trace data</div>';
       return;
     }
 
-    const totalHeight = count * this.ROW_HEIGHT;
-    spacer.style.height = totalHeight + "px";
+    spacer.style.height = count * this.ROW_HEIGHT + "px";
 
     const containerHeight = container.clientHeight;
     const firstVisible = Math.floor(this.scrollTop / this.ROW_HEIGHT);
     const visibleCount = Math.ceil(containerHeight / this.ROW_HEIGHT) + 1;
     const startIdx = Math.max(0, firstVisible);
     const endIdx = Math.min(count, startIdx + visibleCount);
-
-    // TraceEntry is 16 bytes (packed struct):
-    // uint16_t pc; uint8_t opcode, a, x, y, sp, p;
-    // uint8_t operand1, operand2, instrLen, padding;
-    // uint32_t cycle;
-    const ENTRY_SIZE = 16;
-    const modes = await getAddrModeTable(this.wasmModule);
-    const mnemonics = await getMnemonicTable(this.wasmModule);
-
-    // Read all visible trace entries in one bulk read
-    // We need to handle ring buffer indexing, so compute all byte ranges needed
-    const entriesToRead = endIdx - startIdx;
-    if (entriesToRead <= 0) {
-      rowsEl.innerHTML = '';
+    if (endIdx <= startIdx) {
+      rowsEl.innerHTML = "";
       return;
     }
 
-    // Collect all ring buffer offsets and read them
-    const ringIndices = [];
-    for (let i = startIdx; i < endIdx; i++) {
-      ringIndices.push(count < capacity ? i : (head + i) % capacity);
-    }
-
-    // Read all entry data via heapRead calls
-    const entryDataPromises = ringIndices.map(ringIdx =>
-      this.wasmModule.heapRead(bufPtr + ringIdx * ENTRY_SIZE, ENTRY_SIZE)
+    // One round trip for the whole visible window, already formatted. This
+    // used to be one heap read per row plus a copy of the opcode table, the
+    // addressing modes and the operand syntax in this file — a second
+    // formatter to be wrong, and one that only knew the 65C02.
+    const blob = await this.wasmModule.callString(
+      "_formatTraceRange",
+      startIdx,
+      endIdx - startIdx,
     );
-    const entryDataArrays = await Promise.all(entryDataPromises);
 
-    let html = "";
     rowsEl.style.transform = `translateY(${startIdx * this.ROW_HEIGHT}px)`;
+    let html = "";
+    for (const line of blob ? blob.split("\n") : []) {
+      const f = line.split("\t");
+      if (f.length < 10) continue;
+      const [cycle, address, bytes, text, a, x, y, sp, p, widths] = f;
+      const space = text.indexOf(" ");
+      const mnemonic = space >= 0 ? text.slice(0, space) : text;
+      const operand = space >= 0 ? text.slice(space + 1) : "";
 
-    for (let idx = 0; idx < entryDataArrays.length; idx++) {
-      const heap = entryDataArrays[idx];
-      const pc = heap[0] | (heap[1] << 8);
-      const opcode = heap[2];
-      const a = heap[3];
-      const x = heap[4];
-      const y = heap[5];
-      const sp = heap[6];
-      const p = heap[7];
-      const op1 = heap[8];
-      const op2 = heap[9];
-      const len = heap[10];
-      const cycle = heap[12] | (heap[13] << 8) |
-                    (heap[14] << 16) | (heap[15] << 24);
-
-      const mnemonic = mnemonics[opcode] || "???";
-      let bytesStr = this.hex2(opcode);
-      if (len >= 2) bytesStr += " " + this.hex2(op1);
-      if (len >= 3) bytesStr += " " + this.hex2(op2);
-
-      const mode = modes ? modes[opcode] : MODE_IMP;
-      const operand = this.formatOperand(mode, op1, op2, pc, len);
-      const flags = this.flagsStr(p);
-
-      html += `<div class="trace-row">` +
-        `<span class="trace-col-cycle">${(cycle >>> 0).toString()}</span>` +
-        `<span class="trace-col-pc">${this.hex4(pc)}</span>` +
-        `<span class="trace-col-bytes">${bytesStr.padEnd(8)}</span>` +
+      html +=
+        `<div class="trace-row">` +
+        `<span class="trace-col-cycle">${cycle}</span>` +
+        `<span class="trace-col-pc">${address}</span>` +
+        `<span class="trace-col-bytes">${bytes.padEnd(11)}</span>` +
         `<span class="trace-col-mnemonic">${mnemonic}</span>` +
         `<span class="trace-col-operand">${operand}</span>` +
-        `<span class="trace-col-regs">${this.hex2(a)} ${this.hex2(x)} ${this.hex2(y)} ${this.hex2(sp)} ${flags}</span>` +
+        `<span class="trace-col-regs">${a} ${x} ${y} ${sp} ` +
+        `${this.flagsStr(parseInt(p, 16), parseInt(widths, 16))}</span>` +
         `</div>`;
     }
-
     rowsEl.innerHTML = html;
   }
 
   hex2(v) { return v.toString(16).toUpperCase().padStart(2, "0"); }
   hex4(v) { return v.toString(16).toUpperCase().padStart(4, "0"); }
 
-  flagsStr(p) {
+  /**
+   * The status register as letters.
+   *
+   * Bits 5 and 4 are the unused bit and Break on a 6502, and the accumulator
+   * and index widths on a 65816 in native mode — which the trace records per
+   * instruction, because it is what decides how long an immediate was.
+   */
+  flagsStr(p, widths) {
+    const native = widths !== undefined && (widths & 0x01) === 0;
     return (
       ((p & 0x80) ? "N" : ".") +
       ((p & 0x40) ? "V" : ".") +
-      "-" +
-      ((p & 0x10) ? "B" : ".") +
+      (native ? ((p & 0x20) ? "M" : ".") : "-") +
+      ((p & 0x10) ? (native ? "X" : "B") : ".") +
       ((p & 0x08) ? "D" : ".") +
       ((p & 0x04) ? "I" : ".") +
       ((p & 0x02) ? "Z" : ".") +

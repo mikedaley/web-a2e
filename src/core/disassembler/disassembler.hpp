@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace a2e {
@@ -139,6 +140,16 @@ enum class FlowType : uint8_t {
  * Get the flow type of an instruction
  */
 FlowType getFlowType(uint8_t opcode);
+
+/**
+ * The operand as a programmer writes it: "#$12", "($10),Y", "$1234,X".
+ *
+ * Formatting an operand from a decoded instruction rather than from a live
+ * address is what a trace needs — the bytes are already in hand and the
+ * machine has moved on since. It exists here so there is one operand
+ * formatter per processor rather than one per place that wants one.
+ */
+std::string formatOperand(const DisasmInstruction &instruction);
 
 /**
  * Disassemble using recursive descent / control flow analysis

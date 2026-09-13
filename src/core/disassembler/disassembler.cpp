@@ -288,6 +288,45 @@ int getMnemonicCount() {
   return static_cast<int>(sizeof(MNEMONICS) / sizeof(MNEMONICS[0]));
 }
 
+namespace {
+std::string hexDigits(uint32_t value, int digits) {
+  static const char *DIGITS = "0123456789ABCDEF";
+  std::string out(static_cast<size_t>(digits), '0');
+  for (int i = digits - 1; i >= 0; i--) {
+    out[static_cast<size_t>(i)] = DIGITS[value & 0x0F];
+    value >>= 4;
+  }
+  return out;
+}
+} // namespace
+
+std::string formatOperand(const DisasmInstruction &in) {
+  const uint8_t low = in.operand1;
+  const uint16_t word =
+      static_cast<uint16_t>(in.operand1 | (in.operand2 << 8));
+  switch (static_cast<AddrMode>(in.mode)) {
+  case AddrMode::IMP: return "";
+  case AddrMode::ACC: return "A";
+  case AddrMode::IMM: return "#$" + hexDigits(low, 2);
+  case AddrMode::ZP: return "$" + hexDigits(low, 2);
+  case AddrMode::ZPX: return "$" + hexDigits(low, 2) + ",X";
+  case AddrMode::ZPY: return "$" + hexDigits(low, 2) + ",Y";
+  case AddrMode::ABS: return "$" + hexDigits(word, 4);
+  case AddrMode::ABX: return "$" + hexDigits(word, 4) + ",X";
+  case AddrMode::ABY: return "$" + hexDigits(word, 4) + ",Y";
+  case AddrMode::IND: return "($" + hexDigits(word, 4) + ")";
+  case AddrMode::IZX: return "($" + hexDigits(low, 2) + ",X)";
+  case AddrMode::IZY: return "($" + hexDigits(low, 2) + "),Y";
+  case AddrMode::ZPI: return "($" + hexDigits(low, 2) + ")";
+  case AddrMode::AIX: return "($" + hexDigits(word, 4) + ",X)";
+  case AddrMode::REL: return "$" + hexDigits(in.target, 4);
+  case AddrMode::ZPR:
+    // BBR and BBS: a zero page address to test, and where to go if it holds.
+    return "$" + hexDigits(low, 2) + ",$" + hexDigits(in.target, 4);
+  }
+  return "";
+}
+
 DisasmInstruction disassembleInstruction(const uint8_t *data, size_t size,
                                           uint16_t address) {
   DisasmInstruction instr = {};

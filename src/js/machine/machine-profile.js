@@ -47,6 +47,18 @@ const APPLE_IIE_FALLBACK = Object.freeze({
     romSize: 16384,
     charRomSize: 8192,
   }),
+  // What the processor has to show. A //e's is an 8-bit CPU with 16-bit
+  // addresses and no banks, which is the fallback because it is the only
+  // machine that existed when this module was written.
+  processor: Object.freeze({
+    addressBits: 16,
+    registerBits: 8,
+    hasBanks: false,
+    hasDirectPage: false,
+    hasModes: false,
+    flags: "NV-BDIZC",
+    nativeFlags: "",
+  }),
   display: Object.freeze({
     dotsPerLine: 560,
     width: 560,
@@ -128,6 +140,8 @@ async function callWithString(wasmModule, fn, text) {
   }
 }
 
+const FALLBACK_PROCESSOR = APPLE_IIE_FALLBACK.processor;
+
 /** The machine currently being emulated. Never null. */
 export function getMachineProfile() {
   return current;
@@ -165,6 +179,50 @@ export function applyMachineAspectToDocument() {
 export function machineTextArea() {
   const d = current.display;
   return d.text || { left: 0, top: 0, width: d.width, height: d.height };
+}
+
+/**
+ * What the machine's processor has to show: how wide an address is, how wide
+ * a register is, whether there are banks, a direct page and a second mode,
+ * and what its status flags are called.
+ *
+ * A debug view reads this rather than assuming a 6502. A profile from an
+ * older core that does not describe its processor is taken to be a //e's,
+ * which is what it would have been.
+ */
+export function machineProcessor() {
+  return current.processor || FALLBACK_PROCESSOR;
+}
+
+/** How many hex digits an address needs: four, or six where there are banks. */
+export function machineAddressDigits() {
+  return machineProcessor().addressBits > 16 ? 6 : 4;
+}
+
+/**
+ * An address as this machine writes one.
+ *
+ * A //e's is four hex digits. A machine with banks gets the bank, a slash and
+ * the offset — "00/FF69" — which is how its own monitor and its diagnostics
+ * write one, and is the form the core's disassembler emits.
+ */
+export function formatMachineAddress(address) {
+  const value = address >>> 0;
+  if (machineProcessor().addressBits <= 16) {
+    return (value & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+  }
+  const bank = (value >>> 16) & 0xff;
+  const offset = value & 0xffff;
+  return (
+    bank.toString(16).toUpperCase().padStart(2, "0") +
+    "/" +
+    offset.toString(16).toUpperCase().padStart(4, "0")
+  );
+}
+
+/** The highest address the machine has, for validating what a user typed. */
+export function machineAddressMask() {
+  return machineProcessor().addressBits > 16 ? 0xffffff : 0xffff;
 }
 
 /** Shorthand for the machine's cycle timing. */

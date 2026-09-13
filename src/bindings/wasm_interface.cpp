@@ -2303,6 +2303,94 @@ uint32_t getTraceCapacity() {
   return static_cast<uint32_t>(machineDebug()->traceCapacity());
 }
 
+// The visible rows of the trace, formatted here rather than in the host.
+//
+// The host used to read one entry per row out of the heap and format it in
+// JavaScript, which meant a copy of the opcode table, the addressing modes and
+// the operand syntax living there — a second formatter to be wrong, and one
+// that knew only the 65C02. It is one round trip and one formatter now.
+//
+// Each line is tab-separated: cycle, address, bytes, instruction text, A, X,
+// Y, SP, P, widths. The registers are hex at the machine's own width, so a
+// 65816's sixteen-bit A is four digits and a 6502's is two.
+EMSCRIPTEN_KEEPALIVE
+const char *formatTraceRange(uint32_t startIndex, uint32_t count) {
+  static std::string buffer;
+  buffer.clear();
+  a2e::MachineDebug *dbg = machineDebug();
+  if (!dbg) return buffer.c_str();
+
+  const size_t total = dbg->traceCount();
+  const size_t capacity = dbg->traceCapacity();
+  if (total == 0 || capacity == 0) return buffer.c_str();
+  const a2e::MachineDebug::TraceEntry *entries = dbg->traceBuffer();
+  const size_t head = dbg->traceHead();
+  const bool wide = g_iigs != nullptr;
+  const int registerDigits = wide ? 4 : 2;
+
+  auto hex = [](uint32_t value, int digits) {
+    char text[10];
+    snprintf(text, sizeof text, "%0*X", digits, value);
+    return std::string(text);
+  };
+
+  for (uint32_t i = 0; i < count; i++) {
+    const size_t index = startIndex + i;
+    if (index >= total) break;
+    // The ring has not wrapped until it is full; after that the oldest entry
+    // is wherever the write position now points.
+    const size_t ring = total < capacity ? index : (head + index) % capacity;
+    const a2e::MachineDebug::TraceEntry &e = entries[ring];
+
+    if (i > 0) buffer.push_back('\n');
+    buffer += std::to_string(e.cycle);
+    buffer.push_back('\t');
+
+    // The address, and the instruction as the machine's own disassembler
+    // writes it.
+    std::string text;
+    if (wide) {
+      buffer += hex((e.pc >> 16) & 0xFF, 2) + "/" + hex(e.pc & 0xFFFF, 4);
+      const uint8_t bytes[4] = {e.opcode, e.operand1, e.operand2, e.operand3};
+      const a2e::Disasm816Instruction in = a2e::disassemble816(
+          bytes, 4, e.pc, (e.widths & a2e::MachineDebug::WIDTH_A8) != 0,
+          (e.widths & a2e::MachineDebug::WIDTH_INDEX8) != 0);
+      text = std::string(in.mnemonic);
+      const std::string operand = a2e::formatOperand816(in);
+      if (!operand.empty()) text += " " + operand;
+    } else {
+      buffer += hex(e.pc & 0xFFFF, 4);
+      const uint8_t bytes[3] = {e.opcode, e.operand1, e.operand2};
+      const a2e::DisasmInstruction in = a2e::disassembleInstruction(
+          bytes, 3, static_cast<uint16_t>(e.pc & 0xFFFF));
+      text = std::string(in.mnemonic);
+      const std::string operand = a2e::formatOperand(in);
+      if (!operand.empty()) text += " " + operand;
+    }
+    buffer.push_back('\t');
+
+    for (int b = 0; b < e.instrLen && b < 4; b++) {
+      if (b > 0) buffer.push_back(' ');
+      buffer += hex(b == 0 ? e.opcode : (&e.operand1)[b - 1], 2);
+    }
+    buffer.push_back('\t');
+    buffer += text;
+    buffer.push_back('\t');
+    buffer += hex(e.a, registerDigits);
+    buffer.push_back('\t');
+    buffer += hex(e.x, registerDigits);
+    buffer.push_back('\t');
+    buffer += hex(e.y, registerDigits);
+    buffer.push_back('\t');
+    buffer += hex(e.sp, registerDigits);
+    buffer.push_back('\t');
+    buffer += hex(e.p, 2);
+    buffer.push_back('\t');
+    buffer += hex(e.widths, 2);
+  }
+  return buffer.c_str();
+}
+
 // How many bytes one entry is. The host asks rather than assuming, because the
 // entry grew when it had to hold a 65816's registers and a reader that had the
 // old size baked in would have walked the ring in the wrong steps — and shown

@@ -28,6 +28,25 @@ export class WindowManager {
   /**
    * Register a window with the manager
    */
+  /**
+   * Tell every window the machine changed.
+   *
+   * A debug view is shaped by the machine it is looking at — how wide an
+   * address is, which registers exist, how many scanlines there are — so
+   * switching machines has to reach all of them. Broadcasting beats naming
+   * each window at the call site: a window added later is included without
+   * anyone remembering to add it.
+   */
+  notifyMachineChanged() {
+    for (const window of this.windows.values()) {
+      try {
+        window.onMachineChanged?.();
+      } catch (error) {
+        console.warn(`${window.id}: machine change handler failed`, error);
+      }
+    }
+  }
+
   register(window) {
     this.windows.set(window.id, window);
 
