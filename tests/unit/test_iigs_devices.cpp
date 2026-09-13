@@ -627,23 +627,27 @@ TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
     REQUIRE(loudest(quieter) > 0.0f);
   }
 
-  SECTION("and so does the amplifier's nibble in $C03C, once it has settled") {
-    // The volume control is analogue and takes some twenty milliseconds to
-    // follow a step, so a program's flips around a transfer are a slope
-    // rather than a chop. Give it a tenth of a second.
+  SECTION("and the amplifier's nibble in $C03C does not touch it") {
+    // Deliberately. On the real machine the amplifier attenuates this chip
+    // too, and modelling that sounded wrong: firmware and sound tools drop
+    // the nibble to about 5 and put it back to 15 around every burst of DOC
+    // access, in flips lasting well under ten milliseconds, so scaling the
+    // chip by it turns a steady note into one wobbling at whatever rate the
+    // software happens to be transferring at. The host's volume control is
+    // the amplifier instead, which is what GSSquared does and for the same
+    // reason. The speaker keeps the nibble, because the ROM's bell fades by
+    // walking it down — test_iigs_boot.cpp pins that.
+    const float atFull = loudest(samples);
     sound.writeControl(0x05);
-    std::vector<float> quieter(512 * 2, 0.0f);
-    for (int i = 0; i < 10; i++) render(sound, quieter, 512);
-    REQUIRE(quieter[0] != 0.0f);
-    // Against the taper rather than against a number copied out of it: what
-    // is being pinned is that the chip's output is scaled by the amplifier's
-    // gain, whatever curve that gain follows.
-    REQUIRE(loudest(quieter) ==
-            Approx(loudest(samples) * amplifierGain(5)).epsilon(0.1));
-    REQUIRE(loudest(quieter) < loudest(samples));
+    std::vector<float> flipped(512 * 2, 0.0f);
+    for (int i = 0; i < 10; i++) render(sound, flipped, 512);
+    REQUIRE(loudest(flipped) == Approx(atFull).epsilon(0.02));
+
+    // Even at zero, which is what a game playing through a stereo card sets
+    // it to: the chip is still heard.
     sound.writeControl(0x00);
-    for (int i = 0; i < 20; i++) render(sound, quieter, 512);
-    REQUIRE(loudest(quieter) < 0.001f);
+    for (int i = 0; i < 10; i++) render(sound, flipped, 512);
+    REQUIRE(loudest(flipped) == Approx(atFull).epsilon(0.02));
   }
 
   SECTION("a program that uses one speaker is heard through both") {

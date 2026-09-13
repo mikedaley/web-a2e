@@ -302,10 +302,34 @@ every step in between is ordered so the ROM's bell still fades down it — and
 puts the machine's own default within 3dB of the other machines rather than
 9.5dB below them.
 
-The alternative was GSSquared's, which does not apply the nibble to the DOC at
-all, with a comment saying the real amp uses it but that applying it
-double-attenuates against the host's volume. That loses the bell's fade, which
-is modelled here and pinned by a test, so the taper was preferred.
+### And Not to the Ensoniq at All
+
+Scaling the synthesiser by the nibble sounds wrong whatever the curve, and the
+reason is what the nibble is used for in practice rather than what it is for
+on paper. Firmware and sound tools drop it to about 5 and put it back to 15
+around every burst of DOC access, in flips lasting well under ten
+milliseconds. Scale the chip by that and a steady note wobbles at whatever
+rate the software happens to be transferring at; apply the flips without the
+slew and the waveform is chopped instead. Either way the average level is low.
+
+So the chip plays at its own level and the host's volume control is the
+amplifier. GSSquared does the same and names two more reasons: a stereo card
+taps these channels ahead of the volume control, and at least one game (Alien
+Mind) sets the nibble to zero while playing through one. The speaker keeps the
+nibble, so the bell still fades.
+
+Measured, with one oscillator at full volume playing a square wave:
+
+| | Peak | dBFS |
+|---|---|---|
+| Nibble applied as a ratio, at the firmware's 5 | 0.041 | -27.6 |
+| Nibble applied as a taper, at 5 | 0.086 | -21.3 |
+| Nibble not applied | 0.124 | -18.1 |
+
+The last of those is the same eighth of full scale GSSquared produces, and one
+oscillator is an eighth because the chip's mixer leaves headroom for eight
+channels. Four oscillators together reach 0.496, which is about where a //e's
+speaker sits.
 
 **Why not just turn it up in the Control Panel, as you would on the machine?**
 Because you cannot: the Control Panel hotkey is not implemented, and battery

@@ -184,9 +184,14 @@ inline constexpr int DOC_OSCILLATOR_COUNT = 32;
 /**
  * The amplifier's gain, from the volume nibble in $C03C.
  *
- * One amplifier carries both of this machine's sound sources — the speaker and
- * the Ensoniq — so both ask this, and the ROM's bell still fades because the
- * nibble's own changes still move it.
+ * **The speaker asks this and the Ensoniq does not**, which is not the
+ * machine's topology — one amplifier really does carry both — but is what
+ * sounds right. Sound software drops the nibble to about 5 and puts it back
+ * to 15 around every burst of DOC access, in flips lasting well under ten
+ * milliseconds; scaling the synthesiser by that wobbles a steady note at
+ * whatever rate the software is transferring at. The speaker keeps it because
+ * the ROM's bell fades by walking it down, which is audible and right. See
+ * the note in IIgsSound::scan(), where the chip writes its frame.
  *
  * **It is not a straight amplitude ratio, and that is a measurement rather
  * than a preference.** The nibble drives an analogue attenuator whose taper is

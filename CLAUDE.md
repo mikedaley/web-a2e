@@ -434,26 +434,35 @@ here does not have, and the Y byte's is button 0. The same button in both
 was two presses to the firmware, and the Finder opened a folder on a single
 click.
 
-**The volume nibble in `$C03C` is one amplifier, and it is not a ratio.**
-Both of the machine's sound sources go through it, so both ask
-`amplifierGain()` in `iigs_spec.hpp`. It is a cube-root taper rather than
-`nibble / 15`, and that is a measurement rather than a preference: the
-attenuator is analogue and its taper is in no document, and assuming a
-straight ratio put the machine 9.5dB below a //e for the same speaker click
-at the setting its own firmware boots with — 0.150 peak against 0.450 — with
-a single Ensoniq oscillator at -27dBFS. A machine sold on its sound does not
-arrive quieter than a //e, and there is no way to turn it up from inside: the
-Control Panel hotkey is not implemented, and the firmware rewrites battery
-RAM's volume byte (`$1E`) whenever its checksum does not match. The taper
-keeps everything the nibble is for — silence at zero, full output at fifteen,
-every step ordered so the ROM's bell still fades — and puts the default within
-3dB of the other machines. **The nibble also reads back as it was written**,
-which it did not: `readControl()` forced it to 15, so the Control Panel's
-volume setting and the toolbox's `SetSoundVolume`, which all change it by
-reading the register and writing it back, were working from a machine that
-claimed to be at full volume. `test_iigs_devices.cpp` pins the taper and the
-readback, and `test_iigs_boot.cpp` pins the speaker's level at the firmware's
-own volume.
+**The volume nibble in `$C03C` reaches the speaker and not the Ensoniq.** One
+amplifier really does carry both on the machine, and modelling that sounded
+wrong: sound software drops the nibble to about 5 and puts it back to 15
+around every burst of DOC access, in flips lasting well under ten
+milliseconds, so scaling the synthesiser by it wobbles a steady note at
+whatever rate the software happens to be transferring at, and leaves the
+average level low as well. The host's volume control is the amplifier for the
+Ensoniq instead. GSSquared does the same, for the same reason, and names two
+more: a stereo card taps the DOC's channels ahead of the volume control, and
+at least one game sets the nibble to zero while playing through one. The
+speaker keeps the nibble, because the ROM's bell fades by walking it down.
+
+**Where the nibble is applied it is a taper, not a ratio.**
+`amplifierGain()` in `iigs_spec.hpp` is a cube root, and that came out of a
+measurement: `nibble / 15` put the machine 9.5dB below a //e for the same
+speaker click at the setting its own firmware boots with, 0.150 peak against
+0.450. There is no turning it up from inside either, because the Control Panel
+hotkey is not implemented and the firmware rewrites battery RAM's volume byte
+(`$1E`) whenever its checksum does not match. The taper keeps what the nibble
+is for — silence at zero, full output at fifteen, every step ordered — and
+puts the default within 3dB of the other machines.
+
+**The nibble also reads back as it was written**, which it did not:
+`readControl()` forced it to 15, so the Control Panel's volume setting and the
+toolbox's `SetSoundVolume`, which all change it by reading the register and
+writing it back, were working from a machine that claimed to be at full
+volume. `test_iigs_devices.cpp` pins the taper, the readback and the
+Ensoniq's independence from the nibble; `test_iigs_boot.cpp` pins the
+speaker's level at the firmware's own volume.
 
 **A IIgs has a speaker as well as an Ensoniq.** `$C030` is a Mega II address, so
 `IIgsMachine` owns an `Audio` toggled on the slow clock and adds the Ensoniq's

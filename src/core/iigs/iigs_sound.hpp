@@ -224,10 +224,6 @@ private:
   // The chip's clock, carried between advances, in ticks of DOC_CLOCK_HZ.
   double ticks_ = 0.0;
 
-  // The amplifier's volume as heard, following the nibble with a time
-  // constant: the real volume control is analogue and smooths the steps.
-  float heardVolume_ = 0.0f;
-
   // What the oscillators have produced and the host has not yet taken: stereo
   // frames at the chip's own rate. Sized for the fastest the chip can run for
   // longer than any host buffer.

@@ -23,7 +23,6 @@ void IIgsSound::reset() {
   control_ = 0;
   latch_ = 0;
   ticks_ = 0.0;
-  heardVolume_ = 0.0f;
   ring_.assign(RING_FRAMES * 2, 0.0f);
   produced_ = 0;
   consumed_ = 0.0;
@@ -302,19 +301,32 @@ void IIgsSound::scan() {
   if (heardLeft == 0 && heardRight > 0) left = right;
   if (heardRight == 0 && heardLeft > 0) right = left;
 
-  // The amplifier follows the volume nibble through an analogue control, so
-  // the steps firmware makes around a transfer are heard as a slope rather
-  // than a chop: about twenty milliseconds to settle.
-  const float alpha = static_cast<float>(8.0 * (oscillatorsEnabled_ + 2) /
-                                         (DOC_CLOCK_HZ * 0.020));
-  heardVolume_ += alpha * (static_cast<float>(amplifierGain(volume())) - heardVolume_);
-
+  // **The $C03C volume nibble is deliberately not applied here.**
+  //
+  // On the real machine the amplifier attenuates everything, this chip
+  // included, and this used to model that. It sounds wrong, and the reason is
+  // what the nibble is used for in practice rather than what it is for on
+  // paper: firmware and sound tools drop it to about 5 and put it back to 15
+  // around every burst of DOC access, in flips lasting well under ten
+  // milliseconds. Scaling the chip's output by that turns a steady note into
+  // one wobbling at the rate the software happens to be transferring at, and
+  // leaves the average level low into the bargain. Applying the flips
+  // instantly is worse still: it chops the waveform.
+  //
+  // So the chip plays at its own level and the host's volume control is the
+  // amplifier. GSSquared does the same, for the same reason, and notes two
+  // more: a stereo card taps these channels ahead of the volume control, and
+  // at least one game (Alien Mind) sets the nibble to zero while playing
+  // through one. The speaker keeps the nibble — see IIgsMachine — because the
+  // ROM's bell fades by walking it down, and that is audible and right.
+  //
   // Eight bits of sample by eight of volume, and the chip's own mixer divides
-  // by eight: one full-volume oscillator is an eighth of full scale.
+  // by eight: one full-volume oscillator is an eighth of full scale. That
+  // eighth is the same one GSSquared uses.
   constexpr float SCALE = 1.0f / (128.0f * 255.0f * 8.0f);
   const size_t slot = static_cast<size_t>(produced_ % RING_FRAMES) * 2;
-  ring_[slot] = left * SCALE * heardVolume_;
-  ring_[slot + 1] = right * SCALE * heardVolume_;
+  ring_[slot] = left * SCALE;
+  ring_[slot + 1] = right * SCALE;
   produced_++;
 }
 
