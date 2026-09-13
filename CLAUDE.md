@@ -81,7 +81,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `video/ntsc.cpp` - NTSC composite demodulation, the ideal/RGB digital decoders, and the calibrated 16-colour palette they all share
 - `audio/audio.cpp` - Speaker emulation from $C030 toggles
 - `disk-image/` - Disk image format support (DSK/DO/PO/NIB/WOZ). `gcr_encoding` holds the one copy of the GCR encode/decode routines and the DOS/ProDOS sector interleave tables that both image classes and the filesystem readers use; plus `disk_converter` — converts a loaded image between save formats (DOS order, ProDOS order, WOZ), including encoding a sector image to a WOZ bit stream
-- `disassembler/` - 65C02 instruction disassembler
+- `disassembler/` - instruction disassemblers: `disassembler.*` is the 65C02's, `disassembler65816.*` the 65816's. They are separate because a 65816 has no illegal opcodes, 24-bit addresses, modes a 6502 never had, and instruction lengths that depend on the M and X flags — so the processor's state is an input to disassembly. Its table is read off `cpu65816_dispatch.cpp` rather than a datasheet, and `test_disassembler65816.cpp` executes every opcode on the CPU in both widths and both modes and checks the distance the program counter moved against the length reported
 - `assembler/` - Merlin-compatible 65C02 assembler (see Assembler below)
 - `input/keyboard.cpp` - Keyboard input handling
 - `input/joyport.cpp` - Sirius Joyport (two Atari-style digital sticks on the game connector)
@@ -104,7 +104,7 @@ Test suites cover CPU (6502/65C02), memory (MMU, slots), video, audio, disk imag
 - `basic/` - Applesoft and Integer BASIC detokenizer, tokenizer, token tables, and
   variable representation (`applesoft_vars` — MBF floats, name/type decoding,
   VARTAB/ARYTAB walking)
-- `debug/` - Condition evaluator for breakpoint expressions (supports BV/BA/BA2 for BASIC variable/array reads), and `debug_log` (host-installed log sink; the core never writes to a console itself)
+- `debug/` - `machine_debug.*` (breakpoints, watchpoints, the trace ring, beam breakpoints — shared by both machines; see Debugging any machine), the condition evaluator for breakpoint expressions (supports BV/BA/BA2 for BASIC variable/array reads, and takes a `MachineView` so either machine can answer), and `debug_log` (host-installed log sink; the core never writes to a console itself)
 - `noslot_clock.cpp` - DS1215 No-Slot Clock (ProDOS RTC at $C300)
 - `emulator.cpp` - Core coordinator
 - `emulator/emulator_state.cpp` - State serialization (exportState/importState)
@@ -1430,6 +1430,65 @@ Built-in debug windows accessible via Debug menu:
 - Mouse Card: PIA registers, position, mode, interrupt state, protocol activity
 - BASIC Program Viewer: view, load, and tokenize BASIC programs from memory, line heat map, trace toggle, statement-level breakpoints, conditional breakpoints on variables/arrays, condition-only rules, variable inspector, run/stop/pause/step controls
 - Rule Builder: complex conditional breakpoints with C-style expressions, supports CPU registers/memory and BASIC variables/arrays as subjects
+
+### Debugging any machine
+
+**Every debug question is asked once, at the widest shape, and a machine
+answers as much of it as it has.** A 6502's answer is a 65816's with the high
+halves zero and no banks, so addresses are 24 bits throughout the debug layer
+and A/X/Y/SP are 16. What a machine does not have — a program bank, a data
+bank, a direct page, a second mode — reads as zero rather than as an error,
+because "this machine has none" is the answer. The alternative was a second
+set of exports and a second set of windows, and two of everything to keep in
+step.
+
+- **`MachineDebug` (`core/debug/machine_debug.*`) is the mechanism**, owned by
+  both `Emulator` and `IIgsMachine`: breakpoints (with the temporary one
+  behind step over and step out), watchpoints, the trace ring and beam
+  breakpoints. None of them is about an instruction set, so none belongs to a
+  machine. `beamPosition()` is the beam arithmetic, which both derive from
+  their own profile's timing. The //e's older 16-bit methods forward to it.
+- **Two things are deliberately not shared.** Cycle profiling is a counter per
+  address — 256KB for a 6502 and 64MB for a 65816 — so it stays //e-only and
+  the host's heat overlay simply switches itself off. The call-stack summary is
+  built by the //e's run loop as it executes JSRs and the IIgs machine keeps no
+  such list, so it reports none rather than showing a //e's.
+- **A watchpoint on a IIgs is checked on the processor's bus, not inside the
+  memory.** That is the difference between the program touching an address and
+  anything touching it: the Mega II's video reads the text page on every one of
+  192 lines, and a watchpoint there that fired for the scanner would stop the
+  machine before a program had run.
+- **`ConditionEvaluator` takes a `MachineView`** — a peek function and the
+  registers — rather than a `const Emulator&`. Before that, a conditional
+  breakpoint on a IIgs was evaluated against a machine that did not exist: it
+  silently never fired and every expression read zero.
+- **The profile describes the processor** (`processor` in the JSON: address
+  bits, register bits, whether there are banks, a direct page and modes, and
+  the two sets of flag names a 65816 has), and the host builds its panels from
+  it. `machineProcessor()`, `formatMachineAddress()` and `machineAddressMask()`
+  in `src/js/machine/machine-profile.js` are how; `BaseWindow.formatAddr()`
+  goes through the same formatter so every window writes an address the same
+  way — four digits, or a bank and a slash as the machine's own monitor writes
+  it. A machine change reaches every window through
+  `WindowManager.notifyMachineChanged()`, so a window added later is included
+  without anyone remembering.
+- **Disassembly is chosen by the core, not the host**, because only something
+  holding the live processor can walk a 65816's code stream: its instruction
+  lengths depend on the M and X flags. `_disassembleRange` emits three
+  tab-separated fields — address, bytes, text — rather than one fixed-width
+  string the caller sliced by column, which stopped working the moment an
+  address needed six digits and would have failed silently.
+- **The trace's rows are formatted in the core** (`_formatTraceRange`), which
+  is one round trip for the visible window instead of one heap read per row,
+  and one operand formatter per processor rather than one per place that wants
+  one. `_getTraceEntrySize` is asked for rather than assumed, because the entry
+  grew when it had to hold a 65816's registers.
+- **What only covers part of a IIgs says so.** The heat map tracks the Mega
+  II's MMU — the side where the video, the firmware's workspace and Applesoft
+  live — and its titles name the banks and note that fast RAM is not covered,
+  rather than letting a sparse map read as an idle machine. The zero page watch
+  shows the direct page register and marks it when it has moved, because its
+  addresses are absolute bank-zero ones.
 
 ## Keyboard Shortcuts
 

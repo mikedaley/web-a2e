@@ -160,6 +160,52 @@ The profile's `text` rectangle says where the text screen landed, and the
 host's text selection maps through it. The shared framebuffer slot is sized
 for this frame, the largest of any machine's.
 
+## Debugging It
+
+A debug window is shaped by the machine it is looking at, and every one of
+them had been written for a //e: two-digit registers, a four-digit program
+counter, `NV-BDIZC`, 262 scanlines, and a disassembly parsed by slicing fixed
+columns. On a IIgs they showed a machine that was not there — registers and
+memory read zero, and the machine could not even be paused, because
+`IIgsMachine` had no pause state at all.
+
+The approach is one set of questions at the widest shape:
+
+- **Addresses are 24 bits and registers 16, throughout.** A 6502's answer is a
+  65816's with the high halves zero and no banks, so the wider shape describes
+  both. What a machine has not got — a program bank, a data bank, a direct
+  page, a second mode — reads as zero rather than as an error.
+- **`MachineDebug` is the mechanism, and both machines own one.** Breakpoints,
+  watchpoints, the trace ring and beam breakpoints are the same question on
+  either processor. The //e's fifteen debug tests pass through it untouched,
+  which is what made the move safe.
+- **A 65816 needs its own disassembler**, because all 256 opcodes are
+  instructions and an immediate's length depends on the M and X flags. Its
+  table is read off `cpu65816_dispatch.cpp` — verified against 5.1 million
+  recorded hardware states — and the test executes every opcode on the CPU and
+  checks the distance the program counter moved.
+- **The profile describes the processor**, so the host builds its panels from
+  the machine: sixteen-bit registers, `FF/A5A8` for a program counter, the
+  bank and direct page rows revealed, and `M` and `X` in place of the unused
+  bit and Break whenever the processor is in native mode.
+
+Three things about this machine in particular:
+
+- **A watchpoint is checked on the processor's bus**, not inside the memory.
+  The Mega II's video reads the text page on every one of 192 lines, and a
+  watchpoint there that fired for the scanner would stop the machine before a
+  program had touched anything.
+- **Step over knows a long call is four bytes** where a JSR is three, and step
+  out reads a bank off the stack when the return is an RTL. Which kind of
+  return is on the stack is not knowable from the stack, so the instruction
+  the machine is sitting on decides.
+- **What covers only part of the machine says so.** The heat map tracks the
+  Mega II's MMU — the side where the video, the firmware's workspace and
+  Applesoft live, and the same `MMU` class a //e is built from — and names the
+  banks rather than letting a sparse map read as an idle machine. Fast RAM is
+  not tracked. Cycle profiling stays //e-only: one counter per address is
+  256KB for a 6502 and 64MB for a 65816.
+
 ## The Two Clocks
 
 A IIgs runs at 2.8MHz until it reaches across to the Mega II, and then it runs at the Mega II's 1.023MHz for that access. So the machine is not "a //e at 2.8MHz": how fast a program goes depends on where it is reading.
