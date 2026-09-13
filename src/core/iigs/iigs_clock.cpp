@@ -153,7 +153,9 @@ void IIgsClock::transferData(bool toChip) {
   if (toChip) {
     switch (target_) {
     case Target::BatteryRam:
-      batteryRam_[address] = data_;
+      // Through setBatteryRam so the host hears about it: this is the path
+      // the Control Panel's settings actually take.
+      setBatteryRam(address, data_);
       break;
     case Target::Seconds: {
       const int shift = address * 8;

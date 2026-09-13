@@ -553,13 +553,41 @@ int IIgsMachine::handleRawKeyDown(int browserKeycode, bool shift, bool ctrl,
   const int key = keyboard_->handleKeyDown(browserKeycode, shift, ctrl, alt,
                                            meta, capsLock, keyLocation);
   memory_->adb().setAnyKeyDown(keyboard_->isAnyKeyDown());
+  reportModifiers(shift, ctrl, capsLock, browserKeycode);
   return key;
+}
+
+void IIgsMachine::reportModifiers(bool shift, bool ctrl, bool capsLock,
+                                  int browserKeycode) {
+  // $C025 is which modifier keys are down, and the Event Manager reads it on
+  // every event: without it there is no shift-click, no command-key menu
+  // shortcut, and no way to reach the Control Panel, whose hotkey is
+  // Control-Open-Apple-Escape.
+  //
+  // The Apple keys come from the Keyboard, which already tracks them for the
+  // pushbuttons a //e reads at $C061-$C062; the rest come with the event.
+  uint8_t modifiers = 0;
+  if (shift) modifiers |= IIgsADB::MOD_SHIFT;
+  if (ctrl) modifiers |= IIgsADB::MOD_CONTROL;
+  if (capsLock) modifiers |= IIgsADB::MOD_CAPS_LOCK;
+  if (keyboard_->isOpenApplePressed()) modifiers |= IIgsADB::MOD_APPLE;
+  if (keyboard_->isClosedApplePressed()) modifiers |= IIgsADB::MOD_OPTION;
+  // The keypad bit says the key that came with this event was one of the
+  // numeric keypad's, which is a property of the key rather than of the
+  // modifiers, and the browser tells us by its location.
+  if (browserKeycode >= 96 && browserKeycode <= 111) {
+    modifiers |= IIgsADB::MOD_KEYPAD;
+  }
+  memory_->adb().setModifiers(modifiers);
 }
 
 void IIgsMachine::handleRawKeyUp(int browserKeycode, bool shift, bool ctrl,
                                  bool alt, bool meta, int keyLocation) {
   keyboard_->handleKeyUp(browserKeycode, shift, ctrl, alt, meta, keyLocation);
   memory_->adb().setAnyKeyDown(keyboard_->isAnyKeyDown());
+  // A key-up changes the set as much as a key-down does; the browser reports
+  // the state after the event, so releasing Control arrives with ctrl false.
+  reportModifiers(shift, ctrl, false, browserKeycode);
 }
 
 void IIgsMachine::keyDown(int keycode) {

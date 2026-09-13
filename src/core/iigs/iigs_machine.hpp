@@ -302,6 +302,9 @@ private:
 
   void recordTrace();
 
+  /** Tell the ADB which modifier keys are down. See $C025. */
+  void reportModifiers(bool shift, bool ctrl, bool capsLock, int browserKeycode);
+
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;
   bool frameReady_ = false;

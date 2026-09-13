@@ -6,6 +6,10 @@
  */
 
 // CSS imports - bundled by Vite with content hashes for cache busting
+import {
+  restoreBatteryRam,
+  watchBatteryRam,
+} from "./machine/iigs-battery-ram.js";
 import "../css/base.css";
 import "../css/layout.css";
 import "../css/monitor.css";
@@ -146,6 +150,11 @@ class AppleIIeEmulator {
       // the screenshot canvas, the selection overlay, the printer's screen
       // dump — reads the answer instead of assuming a //e.
       this.machine = await loadMachineProfile(this.wasmModule);
+      // A IIgs's 256 bytes of settings, put back before the machine runs:
+      // the firmware reads them on the way up and rewrites them the moment it
+      // does not trust what it finds.
+      await restoreBatteryRam(this.wasmModule);
+      watchBatteryRam(this.wasmModule);
 
       // How much memory a IIgs has is the user's choice too, and the core has
       // to be told before one is built rather than after: RAM cannot grow
@@ -534,6 +543,9 @@ class AppleIIeEmulator {
         wasmModule: this.wasmModule,
         onMachineChanged: async (profile) => {
           this.machine = profile;
+          // The core has been rebuilt, so its battery RAM is empty again.
+          await restoreBatteryRam(this.wasmModule);
+          watchBatteryRam(this.wasmModule);
           this.renderer.setMachineDisplay(profile.display);
           applyMachineAspectToDocument();
           this.screenWindow?.setAspect(machineAspect());

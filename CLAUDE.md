@@ -383,6 +383,42 @@ and the Ensoniq's `$E0` *last*, so `$C038-$C03B` must answer RR3 with nothing
 pending until something is, and register `$E0` reads active-low "none" —
 either one wrong is *Unclaimed Sound Interrupt*. `$C071-$C07F` map the ROM's vector firmware into the I/O page.
 
+**The 256 bytes of battery RAM are the host's to keep**, because a real
+machine's battery keeps them and the Control Panel's settings only mean
+anything if they survive. `src/js/machine/iigs-battery-ram.js` restores them
+before the machine runs and writes them back when the core says they changed
+(`_batteryRamChanged()`, one boolean, rather than comparing 256 bytes).
+**They go out and come back exactly as the firmware wrote them, checksum
+included**: the firmware validates that checksum before trusting the contents
+and its algorithm has not been worked out here, but it never needs to be as
+long as nothing alters the bytes. Alter one and the firmware writes its own
+defaults over the lot, which is what a machine with a dead battery does on
+every start and is what this machine did before. GSSquared keeps its battery
+RAM in a file the same way and also does not compute the checksum.
+`test_iigs_boot.cpp` proves the firmware then leaves them alone: not one byte
+written on the second start.
+
+**`$C025` says which modifier keys are down**, and it used to read zero
+whatever was held. The Event Manager reads it on every event, so a machine
+answering zero has no shift-click and no command-key menu shortcut.
+`IIgsMachine::reportModifiers` fills it in from the browser's own flags plus
+the Apple keys the `Keyboard` already tracks for a //e's pushbuttons, and the
+latch in bit 5 comes up on any change and clears on a read, which is how a
+program tells "nothing held" from "pressed and released between two polls".
+
+**The Control Panel's hotkey still does not work, and the reason is now
+known rather than guessed.** Control-Open-Apple-Escape reaches the machine
+correctly — the modifiers read `$A2` and the key latches as `$9B` — but
+nothing running looks at it. Measured under ProDOS with a program polling for
+a key: `$C000` read 111,899 times while the hotkey was held, `$C025` read
+zero times. The ADB microcontroller is not the answer either: `$C026`'s
+sequence-detect bits are Control-Command-Reset and Control-Command-Delete and
+there is no bit for Escape (Table 6-3 of the Hardware Reference). That leaves
+the firmware's interrupt-driven Desk Manager, which never starts here — the
+ADB status register reads `$00` after boot, so the keyboard interrupt it would
+need was never enabled. Finding what enables it is where the next attempt
+should start.
+
 **How much fast RAM a IIgs has is a user choice**, from 256K to 8M, in the
 Machine menu and remembered in localStorage. `_setIIgsMemoryKB` rebuilds the
 machine, as switching machines does, and `main.js` applies the remembered size

@@ -227,6 +227,10 @@ if(EMSCRIPTEN)
                 \"_getTraceEntrySize\", \
                 \"_formatTraceRange\", \
                 \"_getMemoryBanksJSON\", \
+                \"_getBatteryRam\", \
+                \"_getBatteryRamSize\", \
+                \"_setBatteryRam\", \
+                \"_batteryRamChanged\", \
                 \"_getSP\", \
                 \"_getA\", \
                 \"_getX\", \

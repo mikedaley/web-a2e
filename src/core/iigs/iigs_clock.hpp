@@ -64,7 +64,47 @@ public:
 
   uint8_t batteryRam(uint8_t address) const { return batteryRam_[address]; }
   void setBatteryRam(uint8_t address, uint8_t value) {
+    if (batteryRam_[address] == value) return;
     batteryRam_[address] = value;
+    batteryRamChanged_ = true;
+  }
+
+  /**
+   * All 256 bytes, for a host that wants to keep them.
+   *
+   * A real machine's battery does exactly this, and the settings only mean
+   * anything if they survive: without it the firmware finds its checksum
+   * wrong on every start and writes its own defaults back, so the Control
+   * Panel could be reached and still forget everything.
+   *
+   * **The bytes are saved and restored as they are, checksum included.** The
+   * firmware validates that checksum before trusting the contents, and the
+   * algorithm is not one this project has worked out — but it never needs to
+   * be, as long as nothing here alters the bytes the firmware itself wrote.
+   * GSSquared keeps its battery RAM in a file the same way.
+   */
+  const uint8_t *batteryRamBytes() const { return batteryRam_.data(); }
+  static constexpr size_t batteryRamSize() { return BATTERY_RAM_SIZE; }
+
+  void loadBatteryRam(const uint8_t *bytes, size_t size) {
+    if (!bytes) return;
+    const size_t count = size < BATTERY_RAM_SIZE ? size : BATTERY_RAM_SIZE;
+    for (size_t i = 0; i < count; i++) batteryRam_[i] = bytes[i];
+    // Restoring is not a change worth writing back out again.
+    batteryRamChanged_ = false;
+  }
+
+  /**
+   * Whether anything has written to it since this was last asked.
+   *
+   * The host polls this rather than comparing 256 bytes: the firmware writes
+   * the whole of it on a start it does not trust, and after that only the
+   * Control Panel touches it.
+   */
+  bool takeBatteryRamChanged() {
+    const bool changed = batteryRamChanged_;
+    batteryRamChanged_ = false;
+    return changed;
   }
 
   /**
@@ -101,6 +141,7 @@ private:
   void transferData(bool toChip);
 
   std::array<uint8_t, BATTERY_RAM_SIZE> batteryRam_{};
+  bool batteryRamChanged_ = false;
   uint32_t seconds_ = 0;
 
   uint8_t data_ = 0;

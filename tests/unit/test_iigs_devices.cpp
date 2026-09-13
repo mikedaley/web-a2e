@@ -229,6 +229,87 @@ TEST_CASE("The controller fills in the //e's keyboard registers",
 // Sound
 // ---------------------------------------------------------------------------
 
+TEST_CASE("$C025 says which modifier keys are down", "[iigs][adb][keyboard]") {
+  // The Event Manager reads this on every event, and it used to read zero
+  // whatever was held: no shift-click, no command-key menu shortcut, and
+  // nothing that could recognise Control-Open-Apple-Escape.
+  IIgsADB adb;
+  REQUIRE(adb.peekModifiers() == 0);
+
+  adb.setModifiers(IIgsADB::MOD_CONTROL | IIgsADB::MOD_APPLE);
+  // The latch comes up with the change, which is what it is for.
+  REQUIRE((adb.peekModifiers() & IIgsADB::MOD_CONTROL) != 0);
+  REQUIRE((adb.peekModifiers() & IIgsADB::MOD_APPLE) != 0);
+  REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) != 0);
+
+  SECTION("and a read clears the latch, leaving the keys that are still held") {
+    const uint8_t read = adb.readModifiers();
+    REQUIRE((read & IIgsADB::MOD_LATCH) != 0);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) == 0);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_CONTROL) != 0);
+  }
+
+  SECTION("setting the same keys again does not raise the latch") {
+    adb.readModifiers();
+    adb.setModifiers(IIgsADB::MOD_CONTROL | IIgsADB::MOD_APPLE);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) == 0);
+  }
+
+  SECTION("and letting one go is a change like any other") {
+    adb.readModifiers();
+    adb.setModifiers(IIgsADB::MOD_CONTROL);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) != 0);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_APPLE) == 0);
+  }
+
+  SECTION("a peek does not clear it, so a debugger can look") {
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) != 0);
+    REQUIRE((adb.peekModifiers() & IIgsADB::MOD_LATCH) != 0);
+  }
+}
+
+TEST_CASE("Battery RAM can be kept and put back", "[iigs][clock][battery]") {
+  // A real machine's battery does this, and the settings only mean anything
+  // if they survive: the firmware writes its own defaults over the lot
+  // whenever it does not trust the checksum, which is what a machine with a
+  // dead battery does on every start.
+  IIgsClock clock;
+  REQUIRE(clock.batteryRamSize() == 256);
+
+  SECTION("a write is noticed once, and only once") {
+    REQUIRE_FALSE(clock.takeBatteryRamChanged());
+    clock.setBatteryRam(0x1E, 0x0F);
+    REQUIRE(clock.takeBatteryRamChanged());
+    REQUIRE_FALSE(clock.takeBatteryRamChanged());
+  }
+
+  SECTION("writing the same byte back is not a change") {
+    clock.setBatteryRam(0x1E, 0x0F);
+    clock.takeBatteryRamChanged();
+    clock.setBatteryRam(0x1E, 0x0F);
+    REQUIRE_FALSE(clock.takeBatteryRamChanged());
+  }
+
+  SECTION("the whole of it goes out and comes back") {
+    std::vector<uint8_t> kept(clock.batteryRamSize());
+    for (size_t i = 0; i < kept.size(); i++) {
+      kept[i] = static_cast<uint8_t>(0xA0 + (i & 0x0F));
+    }
+    clock.loadBatteryRam(kept.data(), kept.size());
+    for (size_t i = 0; i < kept.size(); i++) {
+      REQUIRE(clock.batteryRam(static_cast<uint8_t>(i)) == kept[i]);
+    }
+    // Putting settings back is not a change to write out again.
+    REQUIRE_FALSE(clock.takeBatteryRamChanged());
+  }
+
+  SECTION("and it outlives a reset, which is what a battery is for") {
+    clock.setBatteryRam(0x1E, 0x0C);
+    clock.reset();
+    REQUIRE(clock.batteryRam(0x1E) == 0x0C);
+  }
+}
+
 TEST_CASE("The amplifier's gain is a taper, not a ratio",
           "[iigs][sound][volume]") {
   // One amplifier carries the speaker and the Ensoniq, and the nibble in

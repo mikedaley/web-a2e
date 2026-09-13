@@ -500,7 +500,7 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
   case REG_ADB_DATA:
     return 0x00;
   case REG_ADB_MODIFIERS:
-    return adb_.readModifiers();
+    return adb_.peekModifiers();
   case REG_ADB_STATUS:
     return adb_.readStatus();
   case REG_SOUND_CONTROL:

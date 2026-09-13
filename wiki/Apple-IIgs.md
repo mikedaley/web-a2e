@@ -13,6 +13,7 @@ It takes about ten seconds of emulated time to get through the diagnostics, so t
 - [The SCC](#the-scc)
 - [The Raster](#the-raster)
 - [Debugging It](#debugging-it)
+- [Battery RAM, and the Control Panel That Cannot Be Reached](#battery-ram-and-the-control-panel-that-cannot-be-reached)
 - [The Two Clocks](#the-two-clocks)
 - [The Drive](#the-drive)
 - [The Colours the Machine Draws In](#the-colours-the-machine-draws-in)
@@ -218,6 +219,61 @@ Three things about this machine in particular:
   banks rather than letting a sparse map read as an idle machine. Fast RAM is
   not tracked. Cycle profiling stays //e-only: one counter per address is
   256KB for a 6502 and 64MB for a 65816.
+
+## Battery RAM, and the Control Panel That Cannot Be Reached
+
+The 256 bytes beside the clock hold everything the Control Panel sets: the
+boot slot, the speed, the screen and border colours, the printer port, the
+volume. A real machine's battery keeps them, and the host keeps them here —
+restored before the machine runs, written back when the core reports a change.
+
+**They go out and come back exactly as the firmware wrote them, checksum
+included.** The firmware validates that checksum before trusting the contents,
+and its algorithm has not been worked out here: one exact sample was not
+enough to identify it against fourteen plausible variants. It never needs to
+be worked out, as long as nothing alters the bytes — alter one and the
+firmware writes its own defaults over the lot, which is exactly what a machine
+with a dead battery does on every start, and what this machine did before.
+GSSquared keeps its battery RAM in a file the same way and also does not
+compute the checksum. `test_iigs_boot.cpp` proves the firmware then leaves
+them alone: not one byte written on the second start.
+
+**`$C025` now says which modifier keys are down.** It read zero whatever was
+held, which is worth more than it sounds: the Event Manager reads it on every
+event, so the machine had no shift-click and no command-key menu shortcut. The
+Apple keys come from the `Keyboard` that already tracks them for a //e's
+pushbuttons; the rest arrive with the browser's event. Bit 5 is a latch that
+comes up on any change and clears on a read, which is how a program tells
+"nothing held" from "pressed and released between two polls".
+
+### What Stopped the Hotkey
+
+Control-Open-Apple-Escape reaches the machine correctly now: the modifiers
+read `$A2` and Escape latches as `$9B`. Nothing running looks at it. Measured
+under ProDOS, with Bitsy Bye polling for a key and the hotkey held down:
+
+| Register | Reads while the hotkey was held |
+|---|---|
+| `$C000`, the keyboard | 111,899 |
+| `$C025`, the modifiers | 0 |
+
+So no code that is running checks for the combination. Two mechanisms are
+ruled out:
+
+- **The ADB microcontroller does not detect it.** It detects
+  Control-Command-Reset and Control-Command-Delete, and `$C026`'s bits 5 and 4
+  report them; Table 6-3 of the Hardware Reference lists every bit and there
+  is none for Escape.
+- **Nothing polls for it**, per the measurement above — at the boot-failure
+  prompt or with a program running.
+
+That leaves the firmware's interrupt-driven Desk Manager, which never starts
+here: the ADB status register reads `$00` after boot, so the keyboard
+interrupt such a handler would need has never been enabled. Either our ADB is
+missing a command the firmware uses to enable it, or the Desk Manager is only
+brought up by something we do not run. **Finding what enables that interrupt
+is where the next attempt should start** — not with the keyboard path, which
+is now known to be correct.
 
 ## The Two Clocks
 

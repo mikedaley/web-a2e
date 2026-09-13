@@ -54,7 +54,32 @@ public:
   uint8_t readMouseData();
 
   /** $C025: which modifier keys are down. */
-  uint8_t readModifiers() const { return modifiers_; }
+  /**
+   * $C025: which modifier keys are down.
+   *
+   * The Event Manager reads this on every event, so a machine that always
+   * answered zero had no shift-click, no command-key menu shortcut and no way
+   * to reach the Control Panel: its hotkey is Control-Open-Apple-Escape and
+   * two thirds of that is in here.
+   */
+  uint8_t readModifiers() {
+    const uint8_t value = modifiers_;
+    modifiers_ &= static_cast<uint8_t>(~MOD_LATCH);
+    return value;
+  }
+
+  /** The same, without clearing the latch, for a debugger. */
+  uint8_t peekModifiers() const { return modifiers_; }
+
+  // The bits, from Figure 6-6 of the Hardware Reference.
+  static constexpr uint8_t MOD_SHIFT = 0x01;
+  static constexpr uint8_t MOD_CONTROL = 0x02;
+  static constexpr uint8_t MOD_CAPS_LOCK = 0x04;
+  static constexpr uint8_t MOD_REPEAT = 0x08;
+  static constexpr uint8_t MOD_KEYPAD = 0x10;
+  static constexpr uint8_t MOD_LATCH = 0x20; // A modifier has changed
+  static constexpr uint8_t MOD_OPTION = 0x40;
+  static constexpr uint8_t MOD_APPLE = 0x80;
 
   /** $C026: the controller's answers on the way out, commands on the way in. */
   uint8_t readData();
@@ -132,7 +157,22 @@ public:
 
   /** Whether there is a mouse report waiting or in the middle of being read. */
   bool hasMouseData() const;
-  void setModifiers(uint8_t modifiers) { modifiers_ = modifiers; }
+  /**
+   * The modifier keys are held down or they are not, and the host says which.
+   *
+   * The latch bit is raised whenever the set changes and stays up until the
+   * register is read, which is what it is for: a program polling the register
+   * can tell "nothing is held" from "something was pressed and let go again
+   * between two polls".
+   */
+  void setModifiers(uint8_t modifiers) {
+    if ((modifiers & ~MOD_LATCH) != (modifiers_ & ~MOD_LATCH)) {
+      modifiers |= MOD_LATCH;
+    } else {
+      modifiers |= modifiers_ & MOD_LATCH;
+    }
+    modifiers_ = modifiers;
+  }
 
   // ===== State, for tests =====
 

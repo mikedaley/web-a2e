@@ -1267,6 +1267,44 @@ void writeMemory(uint32_t address, uint8_t value) {
   g_emulator->writeMemory(static_cast<uint16_t>(address & 0xFFFF), value);
 }
 
+// ===========================================================================
+// Battery RAM
+//
+// The 256 bytes beside the clock, which a real machine's battery keeps alive
+// and which hold everything the Control Panel sets. The host keeps them so
+// they survive a reload: without that the firmware finds its checksum wrong on
+// every start and writes its own defaults back over the lot.
+//
+// The bytes go out and come back exactly as they are, checksum included. The
+// firmware checks that checksum before trusting the contents and its algorithm
+// is not one this project has worked out — but it never needs to be, as long
+// as nothing alters the bytes the firmware itself wrote.
+// ===========================================================================
+
+EMSCRIPTEN_KEEPALIVE
+const uint8_t *getBatteryRam() {
+  if (!g_iigs) return nullptr;
+  return g_iigs->memory().clock().batteryRamBytes();
+}
+
+EMSCRIPTEN_KEEPALIVE
+int getBatteryRamSize() {
+  return g_iigs ? static_cast<int>(a2e::iigs::IIgsClock::batteryRamSize()) : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setBatteryRam(const uint8_t *bytes, int size) {
+  if (!g_iigs || !bytes || size <= 0) return;
+  g_iigs->memory().clock().loadBatteryRam(bytes, static_cast<size_t>(size));
+}
+
+/** Whether anything has written to it since this was last asked. */
+EMSCRIPTEN_KEEPALIVE
+bool batteryRamChanged() {
+  if (!g_iigs) return false;
+  return g_iigs->memory().clock().takeBatteryRamChanged();
+}
+
 // The machine's memory banks, so a memory view can offer the ones that exist
 // rather than 256 of which most answer nothing. One JSON string, asked for
 // once: a //e has a single bank, and a IIgs has its fast RAM, the Mega II's

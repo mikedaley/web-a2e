@@ -749,6 +749,62 @@ TEST_CASE("The firmware services an oscillator interrupt and comes back",
   REQUIRE(machine.cpu().getPBR() == 0xFF);      // back in the firmware's prompt loop
 }
 
+TEST_CASE("The firmware accepts battery RAM that was kept for it",
+          "[iigs][boot][battery]") {
+  // The point of keeping the 256 bytes is that the machine believes them. The
+  // firmware validates a checksum before trusting the contents and writes its
+  // own defaults over the lot if it does not — which is what a machine with a
+  // dead battery does on every start, and what this machine did before the
+  // host kept them.
+  //
+  // Nothing here computes that checksum, and nothing needs to: the bytes go
+  // out and come back exactly as the firmware wrote them, so the checksum
+  // that comes back is the one that went out. What the test proves is that
+  // the firmware then leaves them alone.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the battery RAM test");
+    return;
+  }
+
+  constexpr int SAMPLES = 2048;
+  std::vector<float> buffer(SAMPLES * 2);
+  std::vector<uint8_t> kept(IIgsClock::batteryRamSize());
+
+  // A machine with a flat battery: the firmware writes its defaults.
+  {
+    IIgsMachine machine;
+    machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+                 roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+    for (int i = 0; i < 500; i++) {
+      machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+    }
+    REQUIRE(machine.memory().clock().takeBatteryRamChanged());
+    const uint8_t *bytes = machine.memory().clock().batteryRamBytes();
+    for (size_t i = 0; i < kept.size(); i++) kept[i] = bytes[i];
+    // The volume is in there, which is the setting that sent us looking.
+    REQUIRE(kept[0x1E] == machine.memory().sound().volume());
+  }
+
+  // A machine handed those bytes back before it runs.
+  {
+    IIgsMachine machine;
+    machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+                 roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+    machine.memory().clock().loadBatteryRam(kept.data(), kept.size());
+    for (int i = 0; i < 500; i++) {
+      machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+    }
+    // Not one byte written: the firmware read the checksum, believed it, and
+    // left the settings where they were.
+    REQUIRE_FALSE(machine.memory().clock().takeBatteryRamChanged());
+    for (size_t i = 0; i < kept.size(); i++) {
+      INFO("battery RAM byte $" << std::hex << i);
+      REQUIRE(machine.memory().clock().batteryRam(static_cast<uint8_t>(i)) ==
+              kept[i]);
+    }
+  }
+}
+
 TEST_CASE("The speaker is as loud as the other machines at the machine's own "
           "volume",
           "[iigs][boot][audio]") {
