@@ -26,6 +26,7 @@ set(CORE_SOURCES
     src/core/input/mouse_iou.cpp
     src/core/input/keyboard.cpp
     src/core/disassembler/disassembler.cpp
+    src/core/disassembler/disassembler65816.cpp
     src/core/cards/mockingboard/ay8910.cpp
     src/core/debug/debug_log.cpp
     src/core/cards/mockingboard/via6522.cpp
@@ -786,6 +787,14 @@ else()
     add_catch2_test(test_disassembler
         tests/unit/test_disassembler.cpp
         src/core/disassembler/disassembler.cpp
+    )
+
+    # The 65816 disassembler, checked against the 65816 itself.
+    add_catch2_test(test_disassembler65816
+        tests/unit/test_disassembler65816.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
     )
 
     # Assembler (only assembler.cpp + disassembler for opcode table)
