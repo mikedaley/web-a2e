@@ -824,39 +824,73 @@ TEST_CASE("A swapped pair hand over to each other, and say so", "[iigs][sound][i
   }
 }
 
-TEST_CASE("Oscillators are split between the two speakers", "[iigs][sound]") {
-  // Channel bit 0 picks the speaker; the stereo cards of the day put the odd
-  // channels on the left, so channel 1 is left and channel 0 is right.
+TEST_CASE("Oscillators on different channels are summed, not split",
+          "[iigs][sound]") {
+  // The chip has one analogue output pin. It visits its channels in turn and
+  // puts each one's sample on that same pin, with the channel strobes saying
+  // which channel is on it; a stock machine low-pass filters the pin and
+  // hears the sum. Only a stereo card in a slot uses the strobes to pull the
+  // channels apart, and there is none here.
+  //
+  // Splitting by the channel field instead put a game's bass in one speaker
+  // and its melody in the other: Spy Hunter played one or the other rather
+  // than both.
   IIgsSound sound;
   sound.writeControl(0x0F);
   putSquareWave(sound, 0x0100, 256);
-  // Three enabled, the third halted: the last enabled oscillator is heard
-  // three times over, and that would tilt the comparison.
+  // Three enabled, the third halted: the uppermost enabled oscillator is
+  // heard three times over on the real silicon, and that would tilt the
+  // comparison below.
   setDocRegister(sound, IIgsSound::DOC_OSCILLATOR_ENABLE, 4);
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 2), IIgsSound::OSC_HALT);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 2),
+                 IIgsSound::OSC_HALT);
 
+  // One voice on channel 1 and one on channel 0, which is how a game assigns
+  // a bass and a melody.
   setDocRegister(sound, IIgsSound::DOC_WAVE_POINTER, 0x01);
   setDocRegister(sound, IIgsSound::DOC_VOLUME, 0xFF);
   setDocRegister(sound, IIgsSound::DOC_FREQUENCY_HIGH, 0x08);
   setDocRegister(sound, IIgsSound::DOC_CONTROL, 0x10); // channel 1
-  // A second voice on channel 0, at a different volume so the two sides can
-  // be told apart: with both sides in use the program is asking for stereo.
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x00);
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_WAVE_POINTER + 1), 0x01);
-  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0x40);
+  setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_VOLUME + 1), 0xFF);
   setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_FREQUENCY_HIGH + 1), 0x08);
 
   std::vector<float> samples(2048 * 2, 0.0f);
-  for (int i = 0; i < 4; i++) render(sound, samples, 2048); // let the amplifier settle
+  for (int i = 0; i < 4; i++) render(sound, samples, 2048);
 
   float left = 0.0f, right = 0.0f;
   for (size_t i = 0; i < samples.size(); i += 2) {
     left = std::max(left, std::abs(samples[i]));
     right = std::max(right, std::abs(samples[i + 1]));
   }
+  // Both voices, in both speakers, at the same level.
   REQUIRE(left > 0.0f);
-  REQUIRE(right > 0.0f);
-  REQUIRE(left > right * 2.0f); // channel 1's full-volume voice is the left one
+  REQUIRE(left == Approx(right));
+
+  SECTION("and moving one to the other channel changes nothing") {
+    const float before = left;
+    setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1), 0x10);
+    for (int i = 0; i < 4; i++) render(sound, samples, 2048);
+    float after = 0.0f;
+    for (size_t i = 0; i < samples.size(); i += 2) {
+      after = std::max(after, std::abs(samples[i]));
+    }
+    REQUIRE(after == Approx(before));
+  }
+
+  SECTION("and two voices are louder than one") {
+    // The sum is the point: silencing one has to be audible as a drop.
+    setDocRegister(sound, static_cast<uint8_t>(IIgsSound::DOC_CONTROL + 1),
+                   IIgsSound::OSC_HALT);
+    for (int i = 0; i < 4; i++) render(sound, samples, 2048);
+    float alone = 0.0f;
+    for (size_t i = 0; i < samples.size(); i += 2) {
+      alone = std::max(alone, std::abs(samples[i]));
+    }
+    REQUIRE(alone < left * 0.75f);
+    REQUIRE(alone > 0.0f);
+  }
 }
 
 TEST_CASE("The ADB controller interrupts only when asked to, and only for what it has",

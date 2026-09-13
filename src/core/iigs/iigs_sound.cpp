@@ -241,10 +241,18 @@ void IIgsSound::haltOscillator(int index, bool fromEnd, uint8_t newControl) {
 }
 
 void IIgsSound::scan() {
-  float left = 0.0f;
-  float right = 0.0f;
-  int heardLeft = 0;
-  int heardRight = 0;
+  // Everything the oscillators produce is summed, because the chip has one
+  // analogue output pin: it visits its channels in turn and puts each one's
+  // sample on that same pin, with the channel strobes saying which channel is
+  // on it at the time. A stock machine low-pass filters the pin and hears the
+  // sum of all of them; only a stereo card in a slot uses the strobes to pull
+  // the channels apart, and there is no such card here.
+  //
+  // Splitting by the channel field instead — odd channels one side, even the
+  // other — is what a stereo card would do, and it put a game's bass in one
+  // speaker and its melody in the other. Spy Hunter played one or the other
+  // rather than both.
+  float mono = 0.0f;
 
   for (int index = 0; index < oscillatorsEnabled_; index++) {
     Voice &v = voices_[index];
@@ -280,26 +288,13 @@ void IIgsSound::scan() {
       // The chip's own quirk: the last enabled oscillator is heard three
       // times over.
       const float weight = (index == oscillatorsEnabled_ - 1) ? 3.0f : 1.0f;
-      // Channel bit 0 picks the speaker, and the stereo cards of the day put
-      // odd channels on the left.
-      if ((v.control >> 4) & 1) {
-        left += sample * weight;
-        heardLeft++;
-      } else {
-        right += sample * weight;
-        heardRight++;
-      }
+      // Which channel it is assigned to makes no difference without a card to
+      // separate them: it reaches the same pin either way.
+      mono += sample * weight;
     }
 
     if (position >= length - 1) haltOscillator(index, true, v.control);
   }
-
-  // A machine without a stereo card hears everything through one speaker,
-  // and a program written for one puts every voice on the same channel. Only
-  // a program that uses both sides is asking for stereo; give the rest both
-  // speakers, or a mono game plays in one ear.
-  if (heardLeft == 0 && heardRight > 0) left = right;
-  if (heardRight == 0 && heardLeft > 0) right = left;
 
   // **The $C03C volume nibble is deliberately not applied here.**
   //
@@ -325,8 +320,10 @@ void IIgsSound::scan() {
   // eighth is the same one GSSquared uses.
   constexpr float SCALE = 1.0f / (128.0f * 255.0f * 8.0f);
   const size_t slot = static_cast<size_t>(produced_ % RING_FRAMES) * 2;
-  ring_[slot] = left * SCALE;
-  ring_[slot + 1] = right * SCALE;
+  // The one signal goes to both speakers, which is what a mono machine's
+  // output does when the host plays it in stereo.
+  ring_[slot] = mono * SCALE;
+  ring_[slot + 1] = mono * SCALE;
   produced_++;
 }
 

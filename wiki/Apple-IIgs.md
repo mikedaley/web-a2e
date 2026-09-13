@@ -379,11 +379,11 @@ buffer from that interrupt never keeps up.
 byte has the interrupt bit set raises one when it halts; a long sample is played
 by a swapped pair, each half refilled from the interrupt the other half's end
 raises. The resampler runs at the chip's rate over the host's, nudged by up to
-half a percent to hold the backlog near four milliseconds; a program with every
-voice on one channel is heard through both speakers, as on a machine without a
-stereo card; and the `$C03C` volume nibble reaches the chip through a
-twenty-millisecond slew, because the real control is analogue and firmware
-flips it around every transfer. `IIgsMemory::interruptPending()` includes the chip, register `$E0`
+half a percent to hold the backlog near four milliseconds; every oscillator is summed
+whatever channel it is assigned to, because the chip has one analogue output
+pin and only a stereo card would pull the channels apart; and the uppermost
+enabled oscillator is heard three times over, which is real silicon and is
+MAME's note. `IIgsMemory::interruptPending()` includes the chip, register `$E0`
 reports the first waiting oscillator active low and clears it on the read, and
 the line stays down while another waits. `test_iigs_boot.cpp` plays a one-shot
 from the firmware's prompt and checks the ROM's manager takes the interrupt and

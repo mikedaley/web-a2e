@@ -485,11 +485,16 @@ oscillator below, one scan per `8 × (oscillators + 2)` ticks of 7.16MHz.
 `IIgsMachine::step` feeds `advance()` the slow clock and the chip produces a
 frame per scan into a ring that `generateSamples()` resamples to the host at
 the chip's rate over the host's, nudged by up to half a percent to hold the
-backlog near four milliseconds. A program that puts every voice on one
-channel is heard through both speakers, as on a machine with no stereo card;
-only a program using both sides is asking for stereo. The `$C03C` volume
-nibble reaches the chip through a twenty-millisecond slew, because the real
-control is analogue and firmware flips it around every transfer. An
+backlog near four milliseconds. **Every oscillator is summed, whatever channel it
+is assigned to**, because the chip has one analogue output pin: it visits its
+channels in turn and puts each one's sample on that same pin, with the channel
+strobes saying which channel is on it. A stock machine filters the pin and
+hears the sum; only a stereo card in a slot uses the strobes to pull the
+channels apart, and there is no such card here. Splitting by the channel field
+instead put a game's bass in one speaker and its melody in the other — Spy
+Hunter played one or the other rather than both. **The uppermost enabled
+oscillator is heard three times over**, which is real silicon and is MAME's
+note. An
 oscillator with its interrupt bit set raises one when it halts; `$E0` names it
 active low and clears it on the read; `IIgsMemory::interruptPending()` includes
 the chip. The sound tools play every sample through swapped pairs refilled
