@@ -277,6 +277,48 @@ is drawn by the //e's own `Video` from the //e's own memory.
 
 ## Sound
 
+### One Amplifier, and What Its Nibble Means
+
+The volume nibble in `$C03C` is the motherboard amplifier's, and both sound
+sources go through it, so both ask `amplifierGain()` in `iigs_spec.hpp`. Two
+things about it were wrong, and the second was found by measuring rather than
+by reading:
+
+- **It did not read back.** `readControl()` returned `control_ | 0x0F`, so the
+  register always reported full volume however quiet the machine was set. That
+  is not harmless: the Control Panel's volume setting and the toolbox's
+  `SetSoundVolume` both change the volume by reading the register, altering the
+  nibble and writing it back.
+- **It was applied as a straight amplitude ratio.** The firmware boots the
+  machine at 5 of 15, so everything came out at a third. Measured against a
+  //e running the same speaker loop: 0.150 peak against 0.450, which is 9.5dB,
+  about a laptop volume control's worth. A single Ensoniq oscillator at that
+  setting was -27dBFS.
+
+The attenuator is analogue and its taper is in no document I can find, so
+something has to be assumed either way. A cube-root taper is the assumption
+now: it keeps what the nibble is for — zero is silence, fifteen is full output,
+every step in between is ordered so the ROM's bell still fades down it — and
+puts the machine's own default within 3dB of the other machines rather than
+9.5dB below them.
+
+The alternative was GSSquared's, which does not apply the nibble to the DOC at
+all, with a comment saying the real amp uses it but that applying it
+double-attenuates against the host's volume. That loses the bell's fade, which
+is modelled here and pinned by a test, so the taper was preferred.
+
+**Why not just turn it up in the Control Panel, as you would on the machine?**
+Because you cannot: the Control Panel hotkey is not implemented, and battery
+RAM cannot be seeded to do it instead — the firmware rewrites byte `$1E` with
+its own default whenever the checksum does not match, and that checksum's
+algorithm has not been worked out. Implementing the hotkey and persisting
+battery RAM is the faithful fix and is still worth doing.
+
+The Ensoniq's own scaling is not part of this. One oscillator at full volume
+is an eighth of full scale, which is headroom for the chip's eight channels,
+and it is the same eighth GSSquared uses.
+
+
 A IIgs has two sound sources and one amplifier, and it needs both. The Ensoniq
 is the famous one; the other is **the speaker at `$C030`**, which is a Mega II
 address and the same one-bit speaker every Apple II has. A machine given only

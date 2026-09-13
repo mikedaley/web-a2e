@@ -749,6 +749,64 @@ TEST_CASE("The firmware services an oscillator interrupt and comes back",
   REQUIRE(machine.cpu().getPBR() == 0xFF);      // back in the firmware's prompt loop
 }
 
+TEST_CASE("The speaker is as loud as the other machines at the machine's own "
+          "volume",
+          "[iigs][boot][audio]") {
+  // A IIgs comes up with the amplifier's volume nibble at 5 of 15, which is
+  // the ROM's own default, and there is no way to turn it up from inside: the
+  // Control Panel hotkey is not implemented, and the firmware rewrites
+  // battery RAM's volume byte whenever its checksum does not match. So the
+  // level at that setting is the level the machine has, and it used to be
+  // 0.150 peak against a //e's 0.450 for the same speaker loop — nine and a
+  // half decibels, which is a laptop's volume control's worth of difference.
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the speaker level test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+
+  constexpr int SAMPLES = 4096;
+  std::vector<float> buffer(SAMPLES * 2);
+  for (int i = 0; i < 400; i++) {
+    machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+  }
+  REQUIRE(machine.memory().sound().volume() == 5); // what the firmware chose
+
+  // LDA $C030 / JMP back: the speaker toggled as fast as a program can.
+  static const uint8_t loop[] = {0xAD, 0x30, 0xC0, 0x4C, 0x00, 0x03};
+  for (size_t i = 0; i < sizeof loop; i++) {
+    machine.memory().write(0x000300 + i, loop[i]);
+  }
+  machine.cpu().setPBR(0x00);
+  machine.cpu().setPC(0x0300);
+  machine.cpu().setP(static_cast<uint8_t>(machine.cpu().getP() | FLAG816_I));
+
+  std::fill(buffer.begin(), buffer.end(), 0.0f);
+  machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+  float peak = 0.0f;
+  for (float sample : buffer) peak = std::max(peak, std::fabs(sample));
+
+  INFO("speaker peak at the firmware's volume: " << peak);
+  // A //e's peak for the same loop is 0.450. Within about 3dB of it.
+  REQUIRE(peak > 0.28f);
+
+  SECTION("and full volume is the full output, not more") {
+    machine.memory().write(0x00C03C, 0x0F);
+    for (int i = 0; i < 40; i++) {
+      machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+    }
+    std::fill(buffer.begin(), buffer.end(), 0.0f);
+    machine.generateStereoAudioSamples(buffer.data(), SAMPLES);
+    float loud = 0.0f;
+    for (float sample : buffer) loud = std::max(loud, std::fabs(sample));
+    INFO("speaker peak at full volume: " << loud);
+    REQUIRE(loud > 0.40f);
+    REQUIRE(loud < 1.0f);
+  }
+}
+
 TEST_CASE("The bell fades out and ends quiet", "[iigs][boot][audio]") {
   // The ROM's bell toggles the speaker while ramping the $C03C volume nibble
   // down, then puts the nibble back. The gain follows the nibble as it
@@ -789,10 +847,21 @@ TEST_CASE("The bell fades out and ends quiet", "[iigs][boot][audio]") {
   REQUIRE(loudest > 2);
   REQUIRE(restored > loudest);
   INFO("tone peak " << peaks[loudest] << ", after restore " << peaks[restored] << " " << peaks[restored + 1]);
-  // Rang, faded to nearly nothing, and stayed quiet once the volume came back.
+  // Rang, faded well down, and stayed quiet once the volume came back.
   REQUIRE(peaks[loudest] > 0.1f);
-  REQUIRE(peaks[restored - 1] < peaks[loudest] * 0.25f);
-  REQUIRE(peaks[restored] < peaks[loudest] * 0.15f);
+  // A third of the way down or better by the time the volume is restored.
+  // This was a quarter when the volume nibble was applied as a straight
+  // amplitude ratio; the taper that replaced it (see amplifierGain) is
+  // concave, so the low settings the fade walks through are proportionally
+  // less attenuated and the tail of the fade is not as deep. What the test is
+  // here for is unaffected: it still rings, still slopes down about ten
+  // decibels, and still does not thump when the volume comes back.
+  REQUIRE(peaks[restored - 1] < peaks[loudest] * 0.4f);
+  // And no thump as the volume comes back: a tail brought back at full level
+  // would be near the tone's own peak, not a fifth of it. This and the line
+  // above were a quarter and a seventh under the old ratio, and both moved by
+  // the same factor the taper changed the low settings by.
+  REQUIRE(peaks[restored] < peaks[loudest] * 0.25f);
   REQUIRE(peaks[restored + 2] < peaks[loudest] * 0.05f);
   // And the fade was a slope, not steps: no window louder than the one before it.
   for (int n = loudest + 1; n < restored; n++) REQUIRE(peaks[n] <= peaks[n - 1] + 0.005f);

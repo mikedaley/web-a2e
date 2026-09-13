@@ -307,7 +307,7 @@ void IIgsSound::scan() {
   // than a chop: about twenty milliseconds to settle.
   const float alpha = static_cast<float>(8.0 * (oscillatorsEnabled_ + 2) /
                                          (DOC_CLOCK_HZ * 0.020));
-  heardVolume_ += alpha * (static_cast<float>(volume()) / 15.0f - heardVolume_);
+  heardVolume_ += alpha * (static_cast<float>(amplifierGain(volume())) - heardVolume_);
 
   // Eight bits of sample by eight of volume, and the chip's own mixer divides
   // by eight: one full-volume oscillator is an eighth of full scale.

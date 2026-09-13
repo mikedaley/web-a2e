@@ -229,6 +229,34 @@ TEST_CASE("The controller fills in the //e's keyboard registers",
 // Sound
 // ---------------------------------------------------------------------------
 
+TEST_CASE("The amplifier's gain is a taper, not a ratio",
+          "[iigs][sound][volume]") {
+  // One amplifier carries the speaker and the Ensoniq, and the nibble in
+  // $C03C sets it. Treating it as a straight amplitude ratio put the machine
+  // 9.5dB below a //e for the same speaker click at the volume its own
+  // firmware boots with, which is not a machine sold on its sound; the taper
+  // is the assumption in its place. What must not change is what the nibble
+  // is for: silence at zero, full output at fifteen, and every step between
+  // in order, because the ROM's bell fades by walking down it.
+  REQUIRE(amplifierGain(0) == 0.0);
+  REQUIRE(amplifierGain(15) == Approx(1.0));
+  for (uint8_t n = 1; n < 15; n++) {
+    INFO("nibble " << int(n));
+    REQUIRE(amplifierGain(n) < amplifierGain(static_cast<uint8_t>(n + 1)));
+  }
+
+  SECTION("the setting the firmware boots with is within 3dB of full") {
+    // 0.693 is -3.2dB, which is where a //e's speaker sits relative to a
+    // IIgs at full volume. A ratio would have put it at -9.5dB.
+    REQUIRE(amplifierGain(5) == Approx(0.693).margin(0.01));
+  }
+
+  SECTION("only the low nibble counts") {
+    // The bits above it are the chip's, not the amplifier's.
+    REQUIRE(amplifierGain(0xF5) == amplifierGain(0x05));
+  }
+}
+
 TEST_CASE("The volume nibble reads back as it was written",
           "[iigs][sound][volume]") {
   // $C03C's bottom four bits are the amplifier's volume, and reading the
@@ -607,8 +635,12 @@ TEST_CASE("An oscillator plays what is in the sound RAM", "[iigs][sound]") {
     std::vector<float> quieter(512 * 2, 0.0f);
     for (int i = 0; i < 10; i++) render(sound, quieter, 512);
     REQUIRE(quieter[0] != 0.0f);
-    REQUIRE(loudest(quieter) < loudest(samples) * 0.4f);
-    REQUIRE(loudest(quieter) > loudest(samples) * 0.25f);
+    // Against the taper rather than against a number copied out of it: what
+    // is being pinned is that the chip's output is scaled by the amplifier's
+    // gain, whatever curve that gain follows.
+    REQUIRE(loudest(quieter) ==
+            Approx(loudest(samples) * amplifierGain(5)).epsilon(0.1));
+    REQUIRE(loudest(quieter) < loudest(samples));
     sound.writeControl(0x00);
     for (int i = 0; i < 20; i++) render(sound, quieter, 512);
     REQUIRE(loudest(quieter) < 0.001f);

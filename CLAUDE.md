@@ -434,6 +434,27 @@ here does not have, and the Y byte's is button 0. The same button in both
 was two presses to the firmware, and the Finder opened a folder on a single
 click.
 
+**The volume nibble in `$C03C` is one amplifier, and it is not a ratio.**
+Both of the machine's sound sources go through it, so both ask
+`amplifierGain()` in `iigs_spec.hpp`. It is a cube-root taper rather than
+`nibble / 15`, and that is a measurement rather than a preference: the
+attenuator is analogue and its taper is in no document, and assuming a
+straight ratio put the machine 9.5dB below a //e for the same speaker click
+at the setting its own firmware boots with — 0.150 peak against 0.450 — with
+a single Ensoniq oscillator at -27dBFS. A machine sold on its sound does not
+arrive quieter than a //e, and there is no way to turn it up from inside: the
+Control Panel hotkey is not implemented, and the firmware rewrites battery
+RAM's volume byte (`$1E`) whenever its checksum does not match. The taper
+keeps everything the nibble is for — silence at zero, full output at fifteen,
+every step ordered so the ROM's bell still fades — and puts the default within
+3dB of the other machines. **The nibble also reads back as it was written**,
+which it did not: `readControl()` forced it to 15, so the Control Panel's
+volume setting and the toolbox's `SetSoundVolume`, which all change it by
+reading the register and writing it back, were working from a machine that
+claimed to be at full volume. `test_iigs_devices.cpp` pins the taper and the
+readback, and `test_iigs_boot.cpp` pins the speaker's level at the firmware's
+own volume.
+
 **A IIgs has a speaker as well as an Ensoniq.** `$C030` is a Mega II address, so
 `IIgsMachine` owns an `Audio` toggled on the slow clock and adds the Ensoniq's
 samples on top. Without it the machine is silent through every beep and click.

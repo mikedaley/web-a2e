@@ -634,7 +634,8 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
       while (change < volumeChanges_.size() && volumeChanges_[change].cycle <= at) {
         speakerNibble_ = volumeChanges_[change++].nibble;
       }
-      speakerGain_ += SLEW * (static_cast<float>(speakerNibble_) / 15.0f - speakerGain_);
+      speakerGain_ += SLEW * (static_cast<float>(amplifierGain(speakerNibble_)) -
+                              speakerGain_);
       buffer[i * 2] *= speakerGain_;
       buffer[i * 2 + 1] *= speakerGain_;
     }

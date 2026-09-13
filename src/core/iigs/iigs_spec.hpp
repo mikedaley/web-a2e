@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 
 namespace a2e::iigs {
@@ -179,6 +180,34 @@ static_assert(RASTER_HEIGHT == 480);
 // ----------------------------------------------------------------------------
 inline constexpr size_t SOUND_RAM_SIZE = 64 * 1024;
 inline constexpr int DOC_OSCILLATOR_COUNT = 32;
+
+/**
+ * The amplifier's gain, from the volume nibble in $C03C.
+ *
+ * One amplifier carries both of this machine's sound sources — the speaker and
+ * the Ensoniq — so both ask this, and the ROM's bell still fades because the
+ * nibble's own changes still move it.
+ *
+ * **It is not a straight amplitude ratio, and that is a measurement rather
+ * than a preference.** The nibble drives an analogue attenuator whose taper is
+ * in no document I can find, so something has to be assumed; assuming
+ * `nibble / 15` put the machine 9.5dB below a //e for the same speaker click
+ * at the setting the machine's own firmware boots with (0.150 peak against
+ * 0.450), and a single Ensoniq oscillator at -27dBFS. A machine sold on its
+ * sound does not arrive quieter than a //e out of the box, and there is no way
+ * to turn it up from inside: the Control Panel hotkey is not implemented and
+ * the firmware rewrites battery RAM's volume byte whenever its checksum does
+ * not match.
+ *
+ * A cube-root taper is the assumption instead. It keeps everything the nibble
+ * is for — zero is silence, fifteen is full output, and every step between is
+ * ordered, so the bell's ramp down still fades — and puts the default within
+ * 3dB of the other machines. Change the exponent here and both sources follow.
+ */
+inline double amplifierGain(uint8_t nibble) {
+  const double setting = static_cast<double>(nibble & 0x0F) / 15.0;
+  return setting <= 0.0 ? 0.0 : std::cbrt(setting);
+}
 
 // ----------------------------------------------------------------------------
 // Battery RAM
