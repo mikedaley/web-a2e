@@ -6,6 +6,28 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
+import { machineProcessor } from "../machine/machine-profile.js";
+
+// The registers a IIgs has and no other Apple II does.
+//
+// They are bytes rather than one-bit switches, so they cannot join the packed
+// switch word: each is read by peeking its address, which a debugger may do
+// without disturbing the machine, and shown as a value. Between them they are
+// most of what makes a IIgs a IIgs rather than a fast //e.
+const IIGS_REGISTERS = [
+  { addr: 0xc029, name: "NEWVIDEO", desc: "Super Hi-Res on (bit 7), linear video memory" },
+  { addr: 0xc022, name: "TCOLOR", desc: "Text foreground and background colour" },
+  { addr: 0xc034, name: "BORDER", desc: "Border colour, low nibble (the clock has the high)" },
+  { addr: 0xc035, name: "SHADOW", desc: "Shadowing off per region — a set bit is off" },
+  { addr: 0xc036, name: "CYAREG", desc: "Fast speed (bit 7), slot motor detect (bits 0-3)" },
+  { addr: 0xc068, name: "STATEREG", desc: "Eight of the //e's memory switches in one byte" },
+  { addr: 0xc02d, name: "SLOTREG", desc: "Slots answering with a card rather than the firmware" },
+  { addr: 0xc023, name: "VGCINT", desc: "VGC interrupt enables and flags" },
+  { addr: 0xc041, name: "INTEN", desc: "Mega II interrupt enables" },
+  { addr: 0xc046, name: "INTFLAG", desc: "Mega II interrupt flags" },
+  { addr: 0xc02e, name: "VERTCNT", desc: "Vertical counter, as the VGC reports it" },
+  { addr: 0xc02f, name: "HORIZCNT", desc: "Horizontal counter" },
+];
 
 export class SoftSwitchWindow extends BaseWindow {
   constructor(wasmModule) {
@@ -326,8 +348,40 @@ export class SoftSwitchWindow extends BaseWindow {
     ];
   }
 
+  /** The machine's own registers, if it has any beyond the //e's switches. */
+  machineRegisters() {
+    return machineProcessor().hasBanks ? IIGS_REGISTERS : [];
+  }
+
   renderContent() {
     let html = '<div class="softswitch-content">';
+
+    // The machine's own registers first: on a IIgs they decide what the //e
+    // switches below even mean — whether a write is shadowed, which side of
+    // the machine a bank is on, and how fast the processor is going.
+    const registers = this.machineRegisters();
+    if (registers.length) {
+      html += `
+        <div class="switch-group">
+          <div class="switch-group-title">Machine Registers</div>
+          <div class="switch-list">
+      `;
+      for (const reg of registers) {
+        const hex = reg.addr.toString(16).toUpperCase();
+        html += `
+          <div class="switch-item read-only">
+            <span class="switch-addr">$${hex}</span>
+            <span class="switch-badge active" id="reg-${hex}">${reg.name}</span>
+            <span class="switch-value" id="regval-${hex}">--</span>
+            <span class="switch-desc">${reg.desc}</span>
+          </div>
+        `;
+      }
+      html += `
+          </div>
+        </div>
+      `;
+    }
 
     // Render switch groups
     for (const group of this.switchGroups) {
@@ -437,6 +491,28 @@ export class SoftSwitchWindow extends BaseWindow {
     }
     this.lastStateLow = null;
     this.lastStateHigh = null;
+
+    // The machine's own registers, and where their values are shown.
+    this.registerCells = this.machineRegisters()
+      .map((reg) => ({
+        addr: reg.addr,
+        el: this.contentElement.querySelector(
+          `#regval-${reg.addr.toString(16).toUpperCase()}`,
+        ),
+      }))
+      .filter((cell) => cell.el);
+    this.lastRegisterValues = [];
+  }
+
+  /** The machine changed, so the registers it has did too. */
+  onMachineChanged() {
+    // The list is part of the markup, so the window is rebuilt from scratch.
+    this.badges = null;
+    this.registerCells = [];
+    if (this.contentElement) {
+      this.contentElement.innerHTML = this.renderContent();
+      this.onContentRendered?.();
+    }
   }
 
   /**
@@ -452,15 +528,27 @@ export class SoftSwitchWindow extends BaseWindow {
     if (this._updatePending) return;
     this._updatePending = true;
 
-    let stateLow, stateHigh;
+    let stateLow, stateHigh, registerValues = [];
     try {
-      // Get both low and high 32-bit parts of the state
-      [stateLow, stateHigh] = await wasmModule.batch([
+      // The packed switch word and the machine's own registers in one batch:
+      // the registers are peeks, which do not disturb the machine.
+      const cells = this.registerCells ?? [];
+      const results = await wasmModule.batch([
         ['_getSoftSwitchState'],
         ['_getSoftSwitchStateHigh'],
+        ...cells.map((cell) => ['_peekMemory', cell.addr]),
       ]);
+      [stateLow, stateHigh] = results;
+      registerValues = results.slice(2);
     } finally {
       this._updatePending = false;
+    }
+
+    for (let i = 0; i < registerValues.length; i++) {
+      if (registerValues[i] === this.lastRegisterValues[i]) continue;
+      this.lastRegisterValues[i] = registerValues[i];
+      this.registerCells[i].el.textContent =
+        "$" + this.formatHex(registerValues[i], 2);
     }
 
     // Nothing changed — skip the DOM entirely. Without this, re-toggling the

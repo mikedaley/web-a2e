@@ -1643,30 +1643,39 @@ const char *getDiskFilename(int drive) {
 // Memory tracking for debugger heat map
 EMSCRIPTEN_KEEPALIVE
 void enableMemoryTracking(bool enable) {
+  // A IIgs's Mega II is an MMU, the same class a //e is built from, so
+  // tracking works there — and it is the side that matters, since it is where
+  // the video, the firmware's workspace and Applesoft all live. What it does
+  // not cover is the fast RAM on the other side of the machine.
+  if (g_iigs) { g_iigs->memory().megaII().enableTracking(enable); return; }
   REQUIRE_EMULATOR();
   g_emulator->getMMU().enableTracking(enable);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void clearMemoryTracking() {
+  if (g_iigs) { g_iigs->memory().megaII().clearTracking(); return; }
   REQUIRE_EMULATOR();
   g_emulator->getMMU().clearTracking();
 }
 
 EMSCRIPTEN_KEEPALIVE
 void decayMemoryTracking(uint8_t amount) {
+  if (g_iigs) { g_iigs->memory().megaII().decayTracking(amount); return; }
   REQUIRE_EMULATOR();
   g_emulator->getMMU().decayTracking(amount);
 }
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getMemoryReadCounts() {
+  if (g_iigs) return g_iigs->memory().megaII().getReadCounts();
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getMMU().getReadCounts();
 }
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getMemoryWriteCounts() {
+  if (g_iigs) return g_iigs->memory().megaII().getWriteCounts();
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getMMU().getWriteCounts();
 }
@@ -1674,18 +1683,21 @@ const uint8_t* getMemoryWriteCounts() {
 // Direct memory array access for heat map visualization
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getMainRAM() {
+  if (g_iigs) return g_iigs->memory().megaII().getMainRAM();
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getMMU().getMainRAM();
 }
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getAuxRAM() {
+  if (g_iigs) return g_iigs->memory().megaII().getAuxRAM();
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getMMU().getAuxRAM();
 }
 
 EMSCRIPTEN_KEEPALIVE
 const uint8_t* getSystemROM() {
+  if (g_iigs) return g_iigs->memory().megaII().getSystemROM();
   REQUIRE_EMULATOR_OR(nullptr);
   return g_emulator->getMMU().getSystemROM();
 }
@@ -1693,6 +1705,9 @@ const uint8_t* getSystemROM() {
 // Read auxiliary memory directly (for 80-column text selection)
 EMSCRIPTEN_KEEPALIVE
 uint8_t peekAuxMemory(uint16_t address) {
+  if (g_iigs) {
+    return g_iigs->memory().megaII().readRAM(address, true);
+  }
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getMMU().peekAux(address);
 }

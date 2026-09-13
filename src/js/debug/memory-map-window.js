@@ -6,6 +6,20 @@
  */
 
 import { BaseWindow } from "../windows/base-window.js";
+import { machineProcessor } from "../machine/machine-profile.js";
+
+// Which region of bank $00/$01 each bit of a IIgs's $C035 inhibits. A set bit
+// turns shadowing *off*, which is the way round that catches everybody: the
+// register says what is not copied to the Mega II rather than what is.
+const SHADOW_REGIONS = [
+  { bit: 0x01, name: "Text 1" },
+  { bit: 0x02, name: "HiRes 1" },
+  { bit: 0x04, name: "HiRes 2" },
+  { bit: 0x08, name: "SHR" },
+  { bit: 0x10, name: "Aux HiRes" },
+  { bit: 0x20, name: "Text 2" },
+  { bit: 0x40, name: "I/O + LC" },
+];
 
 /**
  * MemoryMapWindow - Visual representation of memory bank configuration
@@ -98,6 +112,17 @@ export class MemoryMapWindow extends BaseWindow {
             <span class="bank-status-label">Write:</span>
             <span class="bank-status-value" id="bank-write-status">Main RAM</span>
           </div>
+          <!-- A IIgs's own memory state: which regions of bank $00/$01 are
+               copied through to the Mega II, and which clock the processor is
+               running on. Hidden on a machine that has neither. -->
+          <div class="bank-status-row" id="bank-shadow-row" hidden>
+            <span class="bank-status-label">Shadow:</span>
+            <span class="bank-status-value" id="bank-shadow-status">--</span>
+          </div>
+          <div class="bank-status-row" id="bank-speed-row" hidden>
+            <span class="bank-status-label">Speed:</span>
+            <span class="bank-status-value" id="bank-speed-status">--</span>
+          </div>
         </div>
       </div>
     `;
@@ -106,14 +131,64 @@ export class MemoryMapWindow extends BaseWindow {
   /**
    * Update the memory bank map visualization
    */
+  /**
+   * The machine changed, so what the two columns are called did too.
+   *
+   * The map itself needs no change on a IIgs: bank $00 and bank $01 obey
+   * exactly the //e's memory switches, which is what makes it a //e inside.
+   * What they are called does change — they are banks rather than a main and
+   * an auxiliary board — and a IIgs has two things a //e has not: shadowing,
+   * and a second clock.
+   */
+  onMachineChanged() {
+    this.applyProcessor();
+  }
+
+  /** Shape the map to the machine: what the two columns are, and what else it has. */
+  applyProcessor() {
+    if (!this.contentElement) return;
+    const banked = machineProcessor().hasBanks;
+
+    // A IIgs's two sides are banks rather than a main and an auxiliary board.
+    for (const el of this.contentElement.querySelectorAll(".bank-region")) {
+      const aux = el.classList.contains("bank-aux");
+      if (!el.dataset.label) el.dataset.label = el.textContent;
+      el.textContent = banked
+        ? el.dataset.label.replace(/^Main\b/, "$00").replace(/^Aux\b/, "$01")
+        : el.dataset.label;
+    }
+    const legend = this.contentElement.querySelectorAll(".bank-legend .legend-item");
+    if (legend.length >= 2) {
+      legend[0].lastChild.textContent = banked ? "Bank $00" : "Main";
+      legend[1].lastChild.textContent = banked ? "Bank $01" : "Aux";
+    }
+
+    // Shadowing and the second clock are a IIgs's alone.
+    for (const id of ["bank-shadow-row", "bank-speed-row"]) {
+      const row = this.contentElement.querySelector(`#${id}`);
+      if (row) row.hidden = !banked;
+    }
+  }
+
+  create() {
+    super.create();
+    this.applyProcessor();
+  }
+
   async update(wasmModule) {
     this.wasmModule = wasmModule;
+    const banked = machineProcessor().hasBanks;
 
-    // Get soft switch states
-    const [stateLow, stateHigh] = await wasmModule.batch([
+    // Get soft switch states, and on a IIgs the two registers that are its
+    // own: the shadow map and the speed register.
+    const results = await wasmModule.batch([
       ['_getSoftSwitchState'],
       ['_getSoftSwitchStateHigh'],
+      ...(banked
+        ? [['_peekMemory', 0xc035], ['_peekMemory', 0xc036]]
+        : []),
     ]);
+    const [stateLow, stateHigh] = results;
     // Bit positions for relevant switches
     const ALTZP = 10;
     const STORE80 = 6;
@@ -190,6 +265,29 @@ export class MemoryMapWindow extends BaseWindow {
       let writeBank = ramwrt ? "Aux RAM" : "Main RAM";
       if (lcwrite) writeBank += " + LC";
       writeStatus.textContent = writeBank;
+    }
+
+    if (banked) {
+      const shadow = results[2];
+      const speed = results[3];
+      const shadowed = SHADOW_REGIONS.filter((r) => (shadow & r.bit) === 0)
+        .map((r) => r.name)
+        .join(", ");
+      const shadowEl = this.contentElement.querySelector("#bank-shadow-status");
+      if (shadowEl) shadowEl.textContent = shadowed || "none";
+      const speedEl = this.contentElement.querySelector("#bank-speed-status");
+      if (speedEl) {
+        // Bit 7 asks for the fast clock; the bottom four bits are slot motor
+        // detect, and a drive turning in an enabled slot holds the whole
+        // machine at the Mega II's speed whatever bit 7 says.
+        const wantsFast = (speed & 0x80) !== 0;
+        const motor = (speed & 0x0f) !== 0;
+        speedEl.textContent = wantsFast
+          ? motor
+            ? "1.02 MHz (slot motor)"
+            : "2.8 MHz"
+          : "1.02 MHz";
+      }
     }
   }
 

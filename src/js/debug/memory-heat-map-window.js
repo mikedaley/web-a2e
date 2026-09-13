@@ -5,6 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+import { machineProcessor } from "../machine/machine-profile.js";
 import { BaseWindow } from "../windows/base-window.js";
 
 // Memory region labels for main memory
@@ -78,18 +79,19 @@ export class MemoryHeatMapWindow extends BaseWindow {
       </div>
       <div class="heatmap-dual-container">
         <div class="heatmap-panel">
-          <div class="heatmap-panel-title">Main RAM + ROM</div>
+          <div class="heatmap-panel-title" id="heatmap-title-main">Main RAM + ROM</div>
           <div class="heatmap-canvas-container">
             <canvas class="heatmap-canvas heatmap-canvas-main" width="256" height="256"></canvas>
           </div>
         </div>
         <div class="heatmap-panel">
-          <div class="heatmap-panel-title">Auxiliary RAM</div>
+          <div class="heatmap-panel-title" id="heatmap-title-aux">Auxiliary RAM</div>
           <div class="heatmap-canvas-container">
             <canvas class="heatmap-canvas heatmap-canvas-aux" width="256" height="256"></canvas>
           </div>
         </div>
       </div>
+      <div class="heatmap-note" id="heatmap-note" hidden></div>
       <div class="heatmap-legend">
         <span class="heatmap-legend-item"><span class="legend-color reads"></span> Reads</span>
         <span class="heatmap-legend-item"><span class="legend-color writes"></span> Writes</span>
@@ -103,7 +105,37 @@ export class MemoryHeatMapWindow extends BaseWindow {
     `;
   }
 
+  /**
+   * Say which memory this is watching.
+   *
+   * A IIgs's two panels are the Mega II's banks — $E0 and $E1 — because that
+   * is the MMU this is tracking, and it is the side that matters: the video,
+   * the firmware's workspace and Applesoft all live there. The fast RAM on
+   * the other side of the machine is not covered, and the titles say so
+   * rather than letting a blank-looking map be read as an idle machine.
+   */
+  applyProcessor() {
+    if (!this.contentElement) return;
+    const banked = machineProcessor().hasBanks;
+    const main = this.contentElement.querySelector("#heatmap-title-main");
+    const aux = this.contentElement.querySelector("#heatmap-title-aux");
+    if (main) main.textContent = banked ? "Bank $E0 + ROM" : "Main RAM + ROM";
+    if (aux) aux.textContent = banked ? "Bank $E1" : "Auxiliary RAM";
+    const note = this.contentElement.querySelector("#heatmap-note");
+    if (note) {
+      note.textContent = banked
+        ? "The Mega II's side only; fast RAM is not tracked."
+        : "";
+      note.hidden = !banked;
+    }
+  }
+
+  onMachineChanged() {
+    this.applyProcessor();
+  }
+
   onContentRendered() {
+    this.applyProcessor();
     this.canvasMain = this.contentElement.querySelector(".heatmap-canvas-main");
     this.canvasAux = this.contentElement.querySelector(".heatmap-canvas-aux");
     this.ctxMain = this.canvasMain.getContext("2d");

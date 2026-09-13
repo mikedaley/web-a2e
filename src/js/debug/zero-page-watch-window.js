@@ -5,6 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+import { machineProcessor } from "../machine/machine-profile.js";
 import { BaseWindow } from "../windows/base-window.js";
 import { showToast } from "../ui/toast.js";
 
@@ -114,13 +115,26 @@ export class ZeroPageWatchWindow extends BaseWindow {
     return `
       <div class="zp-toolbar">
         <button class="zp-add-btn" title="Add custom watch">+ Add Watch</button>
+        <!-- On a 65816 the zero page is wherever the direct page register
+             points, so these absolute addresses are only the processor's zero
+             page while it reads zero. The software these watches are for
+             (Applesoft, DOS, the monitor) runs with it at zero; a program
+             that moved it is reaching somewhere else entirely, and this says
+             so rather than letting the values be read as its own. -->
+        <span class="zp-direct-page" id="zp-direct-page" hidden></span>
       </div>
       <div class="zp-groups"></div>
     `;
   }
 
+  onMachineChanged() {
+    const el = this.contentElement?.querySelector("#zp-direct-page");
+    if (el) el.hidden = !machineProcessor().hasDirectPage;
+  }
+
   onContentRendered() {
     this.groupsDiv = this.contentElement.querySelector(".zp-groups");
+    this.onMachineChanged();
 
     this.contentElement
       .querySelector(".zp-add-btn")
@@ -256,10 +270,27 @@ export class ZeroPageWatchWindow extends BaseWindow {
       if (size === 16) addrsToRead.add((addr + 1) & 0xff);
     }
 
-    // Batch read all addresses
+    // Batch read all addresses. They are absolute bank-zero addresses, which
+    // is where the software these watches describe keeps its variables.
     const addrList = [...addrsToRead];
+    const wantsDirectPage = machineProcessor().hasDirectPage;
     const batchCalls = addrList.map(a => ['_peekMemory', a]);
+    if (wantsDirectPage) batchCalls.push(['_getDirectPage']);
     const results = await wasmModule.batch(batchCalls);
+    if (wantsDirectPage) {
+      const d = results[addrList.length];
+      const el = this.contentElement.querySelector("#zp-direct-page");
+      if (el) {
+        el.hidden = false;
+        el.textContent = `D=$${this.formatHex(d, 4)}`;
+        // A moved direct page means the processor's zero page is not this one.
+        el.classList.toggle("moved", d !== 0);
+        el.title =
+          d === 0
+            ? "The direct page register is zero, so these are the processor's zero page"
+            : "The direct page register has been moved: the processor's zero page is elsewhere";
+      }
+    }
     const memValues = new Map();
     for (let i = 0; i < addrList.length; i++) {
       memValues.set(addrList[i], results[i]);

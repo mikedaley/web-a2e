@@ -74,6 +74,16 @@
     opacity: 0.8;
 }
 
+/* A machine register's live value, next to its name. These are bytes rather
+   than one-bit switches, so they are shown as a number. */
+.switch-value {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent-green);
+    min-width: 26px;
+}
+
 .switch-item.read-only {
     opacity: 0.7;
 }
