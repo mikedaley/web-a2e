@@ -226,6 +226,7 @@ if(EMSCRIPTEN)
                 \"_setRegDirectPage\", \
                 \"_getTraceEntrySize\", \
                 \"_formatTraceRange\", \
+                \"_getMemoryBanksJSON\", \
                 \"_getSP\", \
                 \"_getA\", \
                 \"_getX\", \

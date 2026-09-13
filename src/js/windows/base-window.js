@@ -5,6 +5,8 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+import { formatMachineAddress } from "../machine/machine-profile.js";
+
 /**
  * Returns true when the header is effectively hidden (auto-hide mode).
  */
@@ -791,8 +793,13 @@ export class BaseWindow {
   /**
    * Helper to format a hex address
    */
+  /**
+   * As the machine being debugged writes one: four hex digits, or a bank, a
+   * slash and the offset — "$E1/2000" — on a machine that has banks. Every
+   * window that shows an address agrees, rather than each deciding.
+   */
   formatAddr(value) {
-    return "$" + this.formatHex(value, 4);
+    return "$" + formatMachineAddress(value);
   }
 
   /**

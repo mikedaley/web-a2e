@@ -1246,6 +1246,46 @@ void writeMemory(uint32_t address, uint8_t value) {
   g_emulator->writeMemory(static_cast<uint16_t>(address & 0xFFFF), value);
 }
 
+// The machine's memory banks, so a memory view can offer the ones that exist
+// rather than 256 of which most answer nothing. One JSON string, asked for
+// once: a //e has a single bank, and a IIgs has its fast RAM, the Mega II's
+// two banks and its ROM.
+EMSCRIPTEN_KEEPALIVE
+const char *getMemoryBanksJSON() {
+  static std::string json;
+  json = "[";
+  auto entry = [&](int bank, const char *name) {
+    if (json.size() > 1) json += ",";
+    json += "{\"bank\":" + std::to_string(bank) + ",\"name\":\"" +
+            std::string(name) + "\"}";
+  };
+
+  if (g_iigs) {
+    // Fast RAM, in whole 64K banks from $00 up: how many there are is what
+    // the user chose in the Machine menu.
+    const size_t banks = g_iigs->memory().fastRamSize() / 0x10000;
+    for (size_t i = 0; i < banks; i++) {
+      const std::string name = "Fast RAM";
+      entry(static_cast<int>(i), name.c_str());
+    }
+    entry(a2e::iigs::SLOW_BANK_MAIN, "Mega II main");
+    entry(a2e::iigs::SLOW_BANK_AUX, "Mega II auxiliary");
+    // The ROM fills the top of the address space: a 128KB ROM 01 is two
+    // banks, a 256KB ROM 3 is four.
+    size_t romSize = 0;
+    a2e::Emulator::systemROMFor(g_machineId, romSize);
+    const size_t romBanks = romSize / 0x10000;
+    for (size_t i = 0; i < romBanks; i++) {
+      const int bank = 0x100 - static_cast<int>(romBanks) + static_cast<int>(i);
+      entry(bank, "ROM");
+    }
+  } else {
+    entry(0, "Main");
+  }
+  json += "]";
+  return json.c_str();
+}
+
 // ===========================================================================
 // Disassembly
 //
@@ -2560,11 +2600,15 @@ const void* getCallStackBuffer() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-bool isLikelyReturnAddress(uint16_t addr) {
-  REQUIRE_EMULATOR_OR(false);
-  // Check if it points to code-like regions
-  return (addr >= 0x0800 && addr < 0xC000) ||  // Main RAM (program code)
-         (addr >= 0xD000 && addr <= 0xFFFF);    // ROM
+bool isLikelyReturnAddress(uint32_t addr) {
+  // Somewhere that could plausibly hold code. On a //e that is the RAM above
+  // the screen pages and the ROM; on a IIgs a program's code can be in any
+  // bank at almost any offset, so the only thing ruled out is the zero page
+  // and the stack it would have been pushed from.
+  if (g_iigs) return (addr & 0xFFFF) >= 0x0200;
+  const uint16_t at = static_cast<uint16_t>(addr & 0xFFFF);
+  return (at >= 0x0800 && at < 0xC000) ||  // Main RAM (program code)
+         (at >= 0xD000 && at <= 0xFFFF);    // ROM
 }
 
 // ============================================================================
