@@ -68,6 +68,14 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   // $C022: the VGC's two text colours. The //e's video decodes a text line
   // into them rather than through a receiver, which is what a IIgs's picture
   // does and why its text can be white on blue and still be sharp.
+  // $C029 bit 5: the VGC shows double hi-res in black and white. The early
+  // Finder and the 80-column desktop programs run that way, and decoding
+  // their dots into colour instead fringed every letter they drew.
+  memory_->setNewVideoCallback([this](uint8_t value) {
+    video_->setDoubleHiResMonochrome(
+        (value & IIgsMemory::NEW_VIDEO_MONO_DHGR) != 0);
+  });
+
   memory_->setTextColourCallback([this](uint8_t value) {
     video_->setTextColours(
         IIgsVideo::vgcColourARGB(static_cast<uint8_t>((value >> 4) & 0x0F)),

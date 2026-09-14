@@ -708,7 +708,7 @@ class AppleIIeEmulator {
   async onMachineChanged() {
     // The picture first, so nothing is drawn with the core's defaults.
     if (this.displaySettings) {
-      this.displaySettings.applyAllSettings();
+      this.displaySettings.onMachineChanged();
     }
     if (this.audioDriver) {
       this.audioDriver.applyVolumeToEmulator?.();

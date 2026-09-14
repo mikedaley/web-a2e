@@ -364,3 +364,55 @@ TEST_CASE("The raster is the picture with the border a monitor sees around it",
     REQUIRE(screen.rasterAt(PICTURE_LEFT - 1, MEGAII_TOP) == border);
   }
 }
+
+TEST_CASE("$C029 bit 5 shows double hi-res in black and white",
+          "[iigs][video][colour]") {
+  // The early Finder and the 80-column desktop programs draw a 560-dot
+  // double hi-res picture and set this bit so the VGC shows the dots as they
+  // are. Decoding them into colour instead fringes every letter.
+  IIgsMachine machine;
+  machine.video().setColorMode(VideoColorMode::COMPOSITE);
+
+  // Double hi-res: graphics, hi-res, 80 columns, AN3 off. A lone lit dot
+  // pattern, which any colour decoder turns into a hue.
+  machine.memory().write(bankAddress(0x00, 0xC050), 0x00); // graphics
+  machine.memory().write(bankAddress(0x00, 0xC057), 0x00); // hires
+  machine.memory().write(bankAddress(0x00, 0xC00D), 0x00); // 80 columns
+  machine.memory().write(bankAddress(0x00, 0xC05E), 0x00); // AN3 off: DHGR
+  for (uint16_t at = 0x2000; at < 0x4000; at++) {
+    machine.memory().write(bankAddress(SLOW_BANK_MAIN, at), 0x11);
+    machine.memory().write(bankAddress(SLOW_BANK_AUX, at), 0x11);
+  }
+
+  auto greyOnly = [&](bool mono) {
+    machine.memory().write(bankAddress(0x00, 0xC029),
+                           mono ? IIgsMemory::NEW_VIDEO_MONO_DHGR : 0x00);
+    machine.video().forceRenderFrame();
+    const uint8_t *frame = machine.screen().render();
+    bool grey = true;
+    for (int x = 0; x < 640 && grey; x++) {
+      const size_t at =
+          (static_cast<size_t>(MEGAII_TOP + 4) * RASTER_WIDTH + PICTURE_LEFT + x) * 4;
+      grey = frame[at] == frame[at + 1] && frame[at + 1] == frame[at + 2];
+    }
+    return grey;
+  };
+
+  REQUIRE_FALSE(greyOnly(false)); // colour, as a //e would show it
+  REQUIRE(greyOnly(true));        // the VGC's monochrome double hi-res
+
+  // A monochrome monitor is one phosphor whatever the bit says; the bit
+  // must not turn a green screen white.
+  machine.memory().write(bankAddress(0x00, 0xC029), IIgsMemory::NEW_VIDEO_MONO_DHGR);
+  machine.video().setColorMode(VideoColorMode::MONOCHROME);
+  machine.video().setGreenPhosphor(true);
+  machine.video().forceRenderFrame();
+  const uint8_t *frame = machine.screen().render();
+  bool anyGreen = false;
+  for (int x = 0; x < 640 && !anyGreen; x++) {
+    const size_t at =
+        (static_cast<size_t>(MEGAII_TOP + 4) * RASTER_WIDTH + PICTURE_LEFT + x) * 4;
+    anyGreen = frame[at + 1] > frame[at] && frame[at + 1] > frame[at + 2];
+  }
+  REQUIRE(anyGreen);
+}

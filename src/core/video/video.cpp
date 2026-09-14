@@ -458,6 +458,12 @@ void Video::endScanline(int scanline) {
       colorMode_ != VideoColorMode::MONOCHROME) {
     ntsc::decodeMonochrome(dots_.data(), textForeground_, textBackground_,
                            line);
+  } else if (doubleHiResMono_ && doubleHiResLine_ &&
+             colorMode_ != VideoColorMode::MONOCHROME) {
+    // A IIgs with $C029's monochrome bit set: the VGC shows the dots of a
+    // double hi-res line as they are, white on black, with no colour made
+    // from them. See setDoubleHiResMonochrome.
+    ntsc::decodeMonochrome(dots_.data(), 0xFFFFFFFFu, 0xFF000000u, line);
   } else {
     // Note this passes chromaEnabled_, not burst_. The burst decides whether the
     // machine sends a reference on this line; the killer decides whether the
@@ -529,6 +535,7 @@ void Video::renderScanlineSegment(int scanline, int startCol, int endCol,
     }
   } else if (vs.hires) {
     if (vs.col80 && !vs.an3) {
+      doubleHiResLine_ = true;
       emitDoubleHiResScanline(scanline, startCol, endCol, vs);
     } else {
       emitHiResScanline(scanline, startCol, endCol, vs);
@@ -571,6 +578,7 @@ void Video::renderScanlineWithChanges(int scanline) {
   // line carries one is settled by the state at the end of hblank — before any
   // mid-line switch change can take effect.
   textLine_ = isTextScanline(scanline, currentRenderState_);
+  doubleHiResLine_ = false;
   burst_ = burstForScanline(scanline, currentRenderState_);
   if (burst_) {
     burstSeenThisFrame_ = true;
@@ -669,6 +677,7 @@ void Video::forceRenderFrame() {
   for (int scanline = 0; scanline < visibleScanlines; scanline++) {
     beginScanline();
     textLine_ = isTextScanline(scanline, vs);
+    doubleHiResLine_ = false;
     burst_ = burstForScanline(scanline, vs);
     renderScanlineSegment(scanline, 0, visibleColumns, vs);
     endScanline(scanline);

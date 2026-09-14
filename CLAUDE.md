@@ -278,6 +278,16 @@ readable at all: the controller holds a finished byte for about two bit cells,
 and at 2.8MHz the firmware's poll comes round three times per byte and reads
 half of them twice.
 
+**`$C029` bit 5 shows double hi-res in black and white.** The System 2
+Finder and the 80-column desktop programs draw a 560-dot double hi-res
+picture with Super Hi-Res *off* and this bit *set*, and the VGC shows the dots
+as they are; decoding them into colour instead — which the Mega II's video did,
+knowing only bit 7 — fringed every letter red and green. `IIgsMemory` reports
+the register through `setNewVideoCallback` and `Video::setDoubleHiResMonochrome`
+sends a double hi-res line through the monochrome decoder, white on black; a
+monochrome monitor still has the last word. `test_iigs_video.cpp` pins colour
+without the bit, grey with it, and green on a green screen either way.
+
 **A IIgs's text is drawn, not transmitted.** `$C022` (TCOLOR) holds the two
 colours the VGC substitutes for lit and unlit text dots and the bottom nibble of
 `$C034` holds the border — the top nibble of that address is the clock's, which
@@ -1249,7 +1259,9 @@ demodulator. What the sharp modes do differently is refuse to let that colour
 spread: the background stays pure black and the strokes keep hard edges. Full
 text mode kills the burst, so an all-text screen is still crisp white.
 
-Display Settings (`src/js/display/display-settings-window.js`) leads with a **Monitor preset** — Pixel Exact, Composite Color, RGB Monitor, Monochrome Green, Monochrome Amber — with every individual slider behind an Advanced disclosure. Each preset also carries a `colorMode`, which selects the core decoder above. Presets set only the picture, never the user's brightness/contrast/saturation or bezel; editing a setting a preset owns relabels the selection Custom without changing values.
+Display Settings (`src/js/display/display-settings-window.js`) leads with a **Monitor preset** — Pixel Exact, Composite Color, RGB Monitor, Monochrome Green, Monochrome Amber — with every individual slider behind an Advanced disclosure. Each preset also carries a `colorMode`, which selects the core decoder above. Presets set only the picture, never the user's brightness/contrast/saturation, bezel or screen border; editing a setting a preset owns relabels the selection Custom without changing values.
+
+**Display settings are remembered per machine** (`src/js/display/display-storage.js`, unit-tested): a //e's composite look for games has no business on a IIgs's RGB desktop. Each machine has its own localStorage key; the pre-machine key is read once as the //e's. Each machine's defaults differ in one value, the **Screen Border**: 35% on the 8-bit machines, whose picture fills the frame, and 0 on a IIgs, which draws its own border. Saved display profiles stay global — they are named snapshots any machine may pick.
 
 **Display profiles.** Beyond the built-in presets, the user can save the current
 picture as a named profile (`src/js/display/display-profiles.js`, unit-tested in

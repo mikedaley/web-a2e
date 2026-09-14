@@ -9,6 +9,13 @@ import { BaseWindow } from "../windows/base-window.js";
 import { showConfirm, showPrompt } from "../ui/confirm.js";
 import { showToast } from "../ui/toast.js";
 import { escapeHtml } from "../utils/string-utils.js";
+import { getMachineProfile } from "../machine/machine-profile.js";
+import {
+  LEGACY_DISPLAY_SETTINGS_KEY,
+  defaultScreenBorder,
+  displaySettingsKey,
+  inheritsLegacySettings,
+} from "./display-storage.js";
 import {
   captureProfileValues,
   deleteProfile,
@@ -68,17 +75,17 @@ export class DisplaySettingsWindow extends BaseWindow {
     // sets the whole picture in one go — the sliders underneath are the
     // advanced view of whatever the preset just chose.
     //
-    // Presets deliberately do not touch brightness, contrast, saturation or the
-    // bezel. Those are the user's own calibration and framing, not properties
-    // of the monitor being imitated, and silently resetting them when someone
-    // switches preset would be obnoxious.
+    // Presets deliberately do not touch brightness, contrast, saturation, the
+    // bezel or the screen border. Those are the user's own calibration and
+    // framing, not properties of the monitor being imitated, and silently
+    // resetting them when someone switches preset would be obnoxious.
     this.monitorPresets = [
       {
         id: "flat",
         label: "Pixel Exact",
         description: "No CRT simulation — sharp square pixels.",
         values: {
-          curvature: 0, overscan: 0, scanlines: 0, beamBloom: 60,
+          curvature: 0, scanlines: 0, beamBloom: 60,
           shadowMask: 0, maskType: 0, phosphorGlow: 0, vignette: 0,
           rgbOffset: 0, flicker: 0, staticNoise: 0, jitter: 0,
           horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 0,
@@ -95,7 +102,7 @@ export class DisplaySettingsWindow extends BaseWindow {
           // this preset is for — the composite look is the decoding, and the
           // barrel distortion mostly gets in the way of reading the picture.
           // Curvature is still there under Advanced for anyone who wants it.
-          curvature: 0, overscan: 0, scanlines: 30, beamBloom: 60,
+          curvature: 0, scanlines: 30, beamBloom: 60,
           // A consumer colour set used a dot triad, not a grille.
           shadowMask: 30, maskType: 1, phosphorGlow: 15, vignette: 20,
           rgbOffset: 6, flicker: 0, staticNoise: 0, jitter: 0,
@@ -111,7 +118,7 @@ export class DisplaySettingsWindow extends BaseWindow {
         label: "RGB Monitor",
         description: "Separate colour signals — sharp, no composite artefacts.",
         values: {
-          curvature: 10, overscan: 0, scanlines: 22, beamBloom: 45,
+          curvature: 10, scanlines: 22, beamBloom: 45,
           shadowMask: 22, maskType: 0, phosphorGlow: 8, vignette: 12,
           rgbOffset: 0, flicker: 0, staticNoise: 0, jitter: 0,
           horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 5,
@@ -125,7 +132,7 @@ export class DisplaySettingsWindow extends BaseWindow {
         label: "Monochrome Green",
         description: "P1 phosphor — long persistence, no mask.",
         values: {
-          curvature: 20, overscan: 0, scanlines: 32, beamBloom: 70,
+          curvature: 20, scanlines: 32, beamBloom: 70,
           // A monochrome tube has one continuous phosphor coating and no
           // aperture at all — a mask exists only to keep three beams apart.
           shadowMask: 0, maskType: 0, phosphorGlow: 28, vignette: 25,
@@ -140,7 +147,7 @@ export class DisplaySettingsWindow extends BaseWindow {
         label: "Monochrome Amber",
         description: "P3 phosphor — the warmer of the two mono tubes.",
         values: {
-          curvature: 20, overscan: 0, scanlines: 32, beamBloom: 70,
+          curvature: 20, scanlines: 32, beamBloom: 70,
           shadowMask: 0, maskType: 0, phosphorGlow: 25, vignette: 25,
           rgbOffset: 0, flicker: 0, staticNoise: 0, jitter: 0,
           horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 35,
@@ -164,7 +171,9 @@ export class DisplaySettingsWindow extends BaseWindow {
     ];
 
     // Default values (percentages 0-100 for UI, converted to shader values)
-    // All effects off by default except basic image adjustments
+    // All effects off by default except basic image adjustments. The one
+    // default that differs by machine — the screen border — is filled in by
+    // defaultsFor(), so `defaults` is read through that rather than directly.
     this.defaults = {
       // "flat" reproduces what this window has always shipped with — every
       // effect off — so existing users see no change until they pick a monitor.
@@ -190,7 +199,7 @@ export class DisplaySettingsWindow extends BaseWindow {
       glowingLine: 0,
       ambientLight: 0,
       burnIn: 0,
-      overscan: 0,
+      overscan: 0, // see defaultsFor()
       // True so the shipped defaults are exactly the "flat" preset. With this
       // false the window opened saying Pixel Exact while the pixels were being
       // smoothed by linear filtering, and the label was simply wrong.
@@ -206,8 +215,9 @@ export class DisplaySettingsWindow extends BaseWindow {
       bezelColor: "#c8b89a",
     };
 
-    // Current values
-    this.settings = { ...this.defaults };
+    // Current values, which are the running machine's: every machine keeps
+    // its own (display-storage.js), and a switch loads that machine's.
+    this.settings = this.defaultsFor(getMachineProfile());
 
     // Slider info for rendering. `advanced` sections live behind the
     // disclosure; Image stays visible because it is calibration, not
@@ -920,6 +930,21 @@ export class DisplaySettingsWindow extends BaseWindow {
     this.renderer.setParam("surroundColor", [r, g, b]);
   }
 
+  /** What a machine starts with: the shipped defaults, with its own border. */
+  defaultsFor(profile) {
+    return { ...this.defaults, overscan: defaultScreenBorder(profile) };
+  }
+
+  /**
+   * The machine changed, and the settings are the machine's: load its own
+   * and put them on. The saved profiles are not affected — they are named
+   * snapshots any machine may pick.
+   */
+  onMachineChanged() {
+    this.loadSettings();
+    this.applyAllSettings();
+  }
+
   applyAllSettings() {
     // Apply all slider values to renderer and update UI
     for (const section of this.sliderConfigs) {
@@ -992,7 +1017,8 @@ export class DisplaySettingsWindow extends BaseWindow {
   }
 
   resetToDefaults() {
-    this.settings = { ...this.defaults };
+    this.settings = this.defaultsFor(getMachineProfile());
+    this.profileDirty = false;
     this.applyAllSettings();
     this.saveSettings();
   }
@@ -1000,7 +1026,7 @@ export class DisplaySettingsWindow extends BaseWindow {
   saveSettings() {
     try {
       localStorage.setItem(
-        "a2e-display-settings",
+        displaySettingsKey(getMachineProfile()),
         JSON.stringify({ ...this.settings, profileDirty: this.profileDirty }),
       );
     } catch (e) {
@@ -1008,12 +1034,25 @@ export class DisplaySettingsWindow extends BaseWindow {
     }
   }
 
+  /**
+   * Load the running machine's settings, or start it from its defaults.
+   *
+   * A machine with nothing saved gets its defaults rather than another
+   * machine's settings; the exception is the //e, which takes the settings
+   * saved before there was more than one machine, since those were its.
+   */
   loadSettings() {
+    const machine = getMachineProfile();
+    this.settings = this.defaultsFor(machine);
+    this.profileDirty = false;
     try {
-      const saved = localStorage.getItem("a2e-display-settings");
+      let saved = localStorage.getItem(displaySettingsKey(machine));
+      if (!saved && inheritsLegacySettings(machine)) {
+        saved = localStorage.getItem(LEGACY_DISPLAY_SETTINGS_KEY);
+      }
       if (saved) {
         const parsed = JSON.parse(saved);
-        this.settings = { ...this.defaults, ...parsed };
+        this.settings = { ...this.defaultsFor(machine), ...parsed };
 
         // Settings saved before the core gained a real NTSC decoder have no
         // colorMode. Recover it from the preset they had selected, so someone

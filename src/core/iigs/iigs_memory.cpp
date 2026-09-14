@@ -110,7 +110,7 @@ void IIgsMemory::reset() {
   vblPending_ = quarterSecondPending_ = oneSecondPending_ = false;
   scanLinePending_ = false;
   lastQuarterSecond_ = lastSecond_ = 0;
-  newVideo_ = 0;
+  setNewVideoRegister(0);
   slotSelect_ = 0;
   diskSelect_ = 0;
   adb_.reset();
@@ -472,7 +472,7 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
     setTextColourRegister(value);
     return;
   case REG_NEW_VIDEO:
-    newVideo_ = value;
+    setNewVideoRegister(value);
     return;
   case REG_SHADOW:
     shadow_ = value;
@@ -855,7 +855,7 @@ bool IIgsMemory::deserialize(StateReader &r) {
   remainder_ = r.f64();
   shadow_ = r.u8();
   speed_ = r.u8();
-  newVideo_ = r.u8();
+  setNewVideoRegister(r.u8());
   slotSelect_ = r.u8();
   diskSelect_ = r.u8();
   setTextColourRegister(r.u8()); // through the setter, so the video hears it

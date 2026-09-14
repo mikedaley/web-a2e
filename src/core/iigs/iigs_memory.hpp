@@ -211,7 +211,17 @@ public:
    * its own bits missing afterwards.
    */
   uint8_t newVideoRegister() const { return newVideo_; }
-  void setNewVideoRegister(uint8_t value) { newVideo_ = value; }
+  void setNewVideoRegister(uint8_t value) {
+    newVideo_ = value;
+    if (newVideoChanged_) newVideoChanged_(newVideo_);
+  }
+  bool doubleHiResMonochrome() const { return (newVideo_ & NEW_VIDEO_MONO_DHGR) != 0; }
+
+  /** Told when $C029 changes: the machine's video acts on more than bit 7. */
+  using NewVideoCallback = std::function<void(uint8_t)>;
+  void setNewVideoCallback(NewVideoCallback callback) {
+    newVideoChanged_ = std::move(callback);
+  }
   bool superHiResEnabled() const { return (newVideo_ & NEW_VIDEO_SHR) != 0; }
 
   /**
@@ -440,6 +450,7 @@ public:
   static constexpr uint8_t VGC_ONE_SECOND_PENDING = 0x40;
   static constexpr uint8_t VGC_ANY_PENDING = 0x80;
   static constexpr uint8_t NEW_VIDEO_SHR = 0x80;
+  static constexpr uint8_t NEW_VIDEO_MONO_DHGR = 0x20; // double hi-res in black and white
   static constexpr uint8_t DISK_SELECT_35 = 0x80;
   static constexpr uint8_t DISK_SELECT_DRIVE2 = 0x40;
 
@@ -603,6 +614,7 @@ private:
 
   // Who to tell when the text colours change. See setTextColourCallback.
   TextColourCallback textColourChanged_;
+  NewVideoCallback newVideoChanged_;
   VolumeCallback volumeChanged_;
   BeamQuery beamQuery_;
 };

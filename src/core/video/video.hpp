@@ -93,6 +93,19 @@ public:
   }
   void clearTextColours() { textColoursSet_ = false; }
 
+  /**
+   * Show double hi-res in black and white rather than decoding it.
+   *
+   * A IIgs's $C029 has a bit for this (bit 5): the VGC drops the colour from
+   * a double hi-res picture and shows its 560 dots as they are, which is how
+   * the early Finder and every 80-column desktop program got a crisp screen
+   * out of a mode that is otherwise a colour trick. It applies to double
+   * hi-res lines only — the rest of the screen decodes as before — and a
+   * monochrome monitor still has the last word.
+   */
+  void setDoubleHiResMonochrome(bool mono) { doubleHiResMono_ = mono; }
+  bool isDoubleHiResMonochrome() const { return doubleHiResMono_; }
+
   void setGreenPhosphor(bool green) { greenPhosphor_ = green; }
   bool isGreenPhosphor() const { return greenPhosphor_; }
 
@@ -248,6 +261,8 @@ private:
   // Whether the line being finished is a text line, settled at the end of
   // horizontal blanking alongside the burst.
   bool textLine_ = false;
+  bool doubleHiResLine_ = false; // this line was emitted as double hi-res
+  bool doubleHiResMono_ = false;
 
   // Cycle callback for position calculation
   CycleCallback cycleCallback_;
