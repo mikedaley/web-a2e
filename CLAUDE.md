@@ -1493,6 +1493,20 @@ class ExpansionCard {
 - `SoftCardZ80` (`cards/softcard/`) - Microsoft Z-80 SoftCard with Z80 CPU emulation (`cards/softcard/z80/`)
 - `SSCCard` (`cards/ssc/`) - Super Serial Card with ACIA 6551; drives ImageWriter I and ImageWriter II virtual printers (slots 1–2)
 - `SerialPort` (`cards/serial/`) - One of a //c's two built-in ports: the same ACIA 6551, no DIP switches and no ROM (slots 1 and 2, fixed)
+
+**A GS/OS print is graphics, and the Automatic Line Feed switch nearly ruins
+it.** The ImageWriter driver rasterises the page into 8-dot bands and writes
+`CR`, `ESC T 16`, `LF` before each — 16/144" is exactly eight dots at the head's
+1/72" pitch, so the bands abut. `CItohPrinter` treats `CR`+`LF` as one line
+ending when the switch is on (which plain Applesoft text needs), and that
+pairing has to survive an escape sequence that prints nothing: the driver's
+escape sets the distance for the very `LF` it precedes. With any `ESC` byte
+breaking the pairing, every band fed twice and each line of a real GS/OS print
+came out sliced in half by a 1/8" white stripe. `_inked()` drops the pairing
+whenever a character or a graphics column is laid down, so `CR`, ink, `LF`
+still feeds twice. `tests/js/printer/citoh.test.js` pins the band pitch against
+a byte stream captured from System 6.0.4 printing through ImageWriter/Printer
+v4.2.
 - `ThunderclockCard` (`cards/thunderclock/`) - ProDOS-compatible real-time clock (slots 5, 7)
 - `NoSlotClock` - DS1215 real-time clock piggybacking on $C300 ROM (not a slot card; toggle in Expansion Slots UI)
 

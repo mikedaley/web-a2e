@@ -213,8 +213,17 @@ export class CItohPrinter extends PrinterBase {
         // feed twice — a blank line between rows. A real ImageWriter treats CR+LF
         // as one line ending: coalesce an LF that arrives immediately after a CR
         // (feed once). A standalone LF still feeds normally.
+        //
+        // "Immediately" means with no INK in between, not no bytes: an escape
+        // sequence that prints nothing leaves the pairing armed. The GS/OS
+        // ImageWriter driver writes `CR, ESC T 16, LF` before every 8-dot
+        // graphics band — the escape sets the distance for the very LF that
+        // follows it — so a pairing that any ESC byte broke fed twice per band
+        // and left a 1/8" white stripe through every line of a printed page.
+        // The arm is dropped by anything that lays ink down (_inked) and by a
+        // feed, so `CR, ESC G <data>, LF` still feeds as it should.
         const wasCR = this._lastCR;
-        this._lastCR = false;
+        if (ch !== 0x1B) this._lastCR = false;
         if (ch === 0x1B) {
           this._state = S_ESC;
         } else if (ch === 0x0E) {
@@ -341,6 +350,7 @@ export class CItohPrinter extends PrinterBase {
       case S_IMG_DATA:
         // Graphics column data uses all 8 bits (bit 7 = bottom dot), so feed the
         // raw byte — NOT the high-bit-stripped `ch` used for character codes.
+        this._inked();
         this.emit("printDots", {
           byte:  byte,
           xDot:  this._xDot,
@@ -406,6 +416,7 @@ export class CItohPrinter extends PrinterBase {
 
       case S_VREPEAT:
         // ESC V nnnn c — print column byte c (8-bit) as _numAcc graphics columns.
+        this._inked();
         for (let i = 0; i < this._numAcc; i++) {
           this.emit("printDots", {
             byte:  byte,
@@ -702,7 +713,12 @@ export class CItohPrinter extends PrinterBase {
     return Math.round(this.dpi / CPI[this._pitch]) * (this._doubleWidth ? 2 : 1);
   }
 
+  // Ink has hit the paper, so a CR that came before it is no longer part of a
+  // line ending: a following LF is a real feed. See the CR+LF note above.
+  _inked() { this._lastCR = false; }
+
   _emitChar(code) {
+    this._inked();
     // ESC 1-6 (Table 4-6) queued extra dot spaces are inserted before this glyph
     // at the active column density, then cleared (one-shot).
     if (this._pendingDotSpace) {
