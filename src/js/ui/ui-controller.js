@@ -15,6 +15,11 @@ import { ThemeManager } from "./theme-manager.js";
 import { showConfirm } from "./confirm.js";
 import { FullscreenDrivePopouts } from "./fullscreen-drive-popouts.js";
 import { getMachineProfile } from "../machine/machine-profile.js";
+import { menuAvailability } from "./machine-availability.js";
+import {
+  commandKeyIsOpenApple,
+  setCommandKeyIsOpenApple,
+} from "../input/apple-keys.js";
 
 // Timing constants
 const REMINDER_DISMISS_DELAY_MS = 2000;
@@ -406,7 +411,7 @@ export class UIController {
       coldResetBtn.addEventListener("click", async () => {
         if (this.inputHandler) this.inputHandler.cancelPaste();
         this.wasmModule._reset();
-        await clearStateFromStorage();
+        await clearStateFromStorage(getMachineProfile().key);
         this.refocusCanvas();
       });
     }
@@ -595,6 +600,19 @@ export class UIController {
       });
     }
 
+    // --- ⌘ as Open Apple (per machine; a IIgs has it on by default) ---
+    this.commandAppleBtn = document.getElementById("btn-command-apple-key");
+    if (this.commandAppleBtn) {
+      this.applyAppleKeysMenu();
+      this.commandAppleBtn.addEventListener("click", () => {
+        setCommandKeyIsOpenApple(!commandKeyIsOpenApple());
+        this.applyAppleKeysMenu();
+        this.inputHandler?.applyAppleKeys?.();
+        this.closeAllMenus();
+        this.refocusCanvas();
+      });
+    }
+
     const slotsBtn = document.getElementById("btn-slots");
     if (slotsBtn) {
       slotsBtn.addEventListener("click", () => {
@@ -632,6 +650,59 @@ export class UIController {
     }
   }
 
+
+  /**
+   * Hide what the running machine cannot use.
+   *
+   * Called at startup, after a machine switch, and whenever the cards change,
+   * because each answer is about the machine or about what is fitted to it.
+   * An item is hidden rather than disabled: a greyed "Expansion Slots" on a
+   * //c invites the question of how to enable it, and the answer is a
+   * different computer. A separator left with nothing after it goes too.
+   *
+   * @param {object} installedCards - slot number → card id, fixed slots included
+   */
+  applyMachineMenus(installedCards) {
+    const can = menuAvailability(getMachineProfile(), installedCards);
+    const show = (el, visible) => {
+      if (el) el.hidden = !visible;
+    };
+    show(document.getElementById("btn-slots"), can.slots);
+    show(document.querySelector(".speed-selector-row"), can.speed);
+    show(document.getElementById("btn-hard-drives"), can.hardDrives);
+    show(document.getElementById("btn-serial-port"), can.serialPort);
+    show(document.getElementById("btn-printer"), can.printer);
+    show(document.querySelector('#debug-menu [data-window="mockingboard"]'), can.mockingboard);
+    show(document.querySelector('#debug-menu [data-window="mouse-card"]'), can.mouseCard);
+    show(document.querySelector('#dev-menu [data-window="basic"]'), can.basic);
+    show(document.querySelector('#dev-menu [data-window="assembler"]'), can.assembler);
+    // A menu with nothing left in it goes from the header altogether.
+    show(document.getElementById("dev-menu-container"), can.basic || can.assembler);
+
+    for (const menu of document.querySelectorAll(".header-menu")) {
+      this.tidySeparators(menu);
+    }
+  }
+
+  /** Hide a separator that has no visible item after it, or before it. */
+  tidySeparators(menu) {
+    const items = [...menu.children].filter((el) => !el.hidden || el.classList.contains("header-menu-separator"));
+    let seenItem = false;
+    let pending = null;
+    for (const el of items) {
+      if (el.classList.contains("header-menu-separator")) {
+        // A separator at the top, or straight after another, has nothing to divide.
+        el.hidden = !seenItem || pending !== null;
+        if (!el.hidden) pending = el;
+        continue;
+      }
+      if (el.hidden) continue;
+      seenItem = true;
+      pending = null;
+    }
+    // ...and one at the bottom divides nothing either.
+    if (pending) pending.hidden = true;
+  }
 
   /**
    * Set up debug menu dropdown actions
@@ -1039,7 +1110,7 @@ export class UIController {
         e.stopPropagation();
         if (this.inputHandler) this.inputHandler.cancelPaste();
         this.wasmModule._reset();
-        await clearStateFromStorage();
+        await clearStateFromStorage(getMachineProfile().key);
         this.refocusCanvas();
       });
     }
@@ -1203,6 +1274,11 @@ export class UIController {
    */
   setCursorKeysMenuState(enabled) {
     this.cursorKeysBtn?.classList.toggle("active", enabled);
+  }
+
+  /** The tick follows the running machine's own setting. */
+  applyAppleKeysMenu() {
+    this.commandAppleBtn?.classList.toggle("active", commandKeyIsOpenApple());
   }
 
   /**

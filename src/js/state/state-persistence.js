@@ -22,17 +22,39 @@ const db = createDatabaseManager({
   },
 });
 
+/*
+ * Every record names the machine that made it, and the autosave is kept per
+ * machine. A state only restores into the machine that wrote it, so one
+ * autosave shared by all of them would be overwritten by whichever ran last
+ * and the others would come back to nothing. The record written before there
+ * was more than one machine is a //e's, and is read as that machine's.
+ */
+const LEGACY_MACHINE = "apple2e";
+
+function autosaveKey(machine) {
+  return !machine || machine === LEGACY_MACHINE
+    ? "autosave"
+    : `autosave:${machine}`;
+}
+
 /**
  * Save emulator state to IndexedDB
  * @param {Uint8Array} stateData - The serialized emulator state
  * @param {string|null} [thumbnail] - Optional data URL of screenshot thumbnail
  * @param {string|null} [preview] - Optional data URL of high-res preview
+ * @param {string} [machine] - Key of the machine that wrote the state
  * @returns {Promise<void>}
  */
-export async function saveStateToStorage(stateData, thumbnail, preview) {
+export async function saveStateToStorage(
+  stateData,
+  thumbnail,
+  preview,
+  machine,
+) {
   try {
     const stateRecord = {
-      id: "autosave",
+      id: autosaveKey(machine),
+      machine: machine || LEGACY_MACHINE,
       data: stateData,
       savedAt: Date.now(),
       thumbnail: thumbnail || null,
@@ -47,11 +69,12 @@ export async function saveStateToStorage(stateData, thumbnail, preview) {
 
 /**
  * Load emulator state from IndexedDB
+ * @param {string} [machine] - Which machine's autosave
  * @returns {Promise<Uint8Array | null>}
  */
-export async function loadStateFromStorage() {
+export async function loadStateFromStorage(machine) {
   try {
-    const result = await db.get(STORE_NAME, "autosave");
+    const result = await db.get(STORE_NAME, autosaveKey(machine));
     if (result) {
       console.log("Loaded emulator state from storage");
       return new Uint8Array(result.data);
@@ -65,11 +88,12 @@ export async function loadStateFromStorage() {
 
 /**
  * Clear saved emulator state from IndexedDB
+ * @param {string} [machine] - Which machine's autosave
  * @returns {Promise<void>}
  */
-export async function clearStateFromStorage() {
+export async function clearStateFromStorage(machine) {
   try {
-    await db.remove(STORE_NAME, "autosave");
+    await db.remove(STORE_NAME, autosaveKey(machine));
     console.log("Cleared emulator state from storage");
   } catch (error) {
     console.error("Error clearing emulator state:", error);
@@ -78,11 +102,12 @@ export async function clearStateFromStorage() {
 
 /**
  * Check if there is a saved emulator state
+ * @param {string} [machine] - Which machine's autosave
  * @returns {Promise<boolean>}
  */
-export async function hasSavedState() {
+export async function hasSavedState(machine) {
   try {
-    const result = await db.get(STORE_NAME, "autosave");
+    const result = await db.get(STORE_NAME, autosaveKey(machine));
     return result != null;
   } catch (error) {
     console.error("Error checking for saved state:", error);
@@ -92,11 +117,12 @@ export async function hasSavedState() {
 
 /**
  * Get the timestamp of the last saved state
+ * @param {string} [machine] - Which machine's autosave
  * @returns {Promise<number | null>} Timestamp in milliseconds, or null if no saved state
  */
-export async function getSavedStateTimestamp() {
+export async function getSavedStateTimestamp(machine) {
   try {
-    const result = await db.get(STORE_NAME, "autosave");
+    const result = await db.get(STORE_NAME, autosaveKey(machine));
     return result ? result.savedAt : null;
   } catch (error) {
     console.error("Error getting saved state timestamp:", error);
@@ -106,14 +132,16 @@ export async function getSavedStateTimestamp() {
 
 /**
  * Get autosave summary info (without loading full state data)
- * @returns {Promise<{savedAt: number, thumbnail: string|null}|null>}
+ * @param {string} [machine] - Which machine's autosave
+ * @returns {Promise<{savedAt: number, machine: string, thumbnail: string|null}|null>}
  */
-export async function getAutosaveInfo() {
+export async function getAutosaveInfo(machine) {
   try {
-    const result = await db.get(STORE_NAME, "autosave");
+    const result = await db.get(STORE_NAME, autosaveKey(machine));
     if (result) {
       return {
         savedAt: result.savedAt,
+        machine: result.machine || LEGACY_MACHINE,
         thumbnail: result.thumbnail || null,
         preview: result.preview || null,
       };
@@ -139,12 +167,20 @@ function slotKey(slotNumber) {
  * @param {Uint8Array} stateData - The serialized emulator state
  * @param {string|null} thumbnail - Data URL of screenshot thumbnail
  * @param {string|null} [preview] - Optional data URL of high-res preview
+ * @param {string} [machine] - Key of the machine that wrote the state
  * @returns {Promise<void>}
  */
-export async function saveStateToSlot(slotNumber, stateData, thumbnail, preview) {
+export async function saveStateToSlot(
+  slotNumber,
+  stateData,
+  thumbnail,
+  preview,
+  machine,
+) {
   try {
     const record = {
       id: slotKey(slotNumber),
+      machine: machine || LEGACY_MACHINE,
       data: new Uint8Array(stateData),
       savedAt: Date.now(),
       thumbnail: thumbnail || null,
@@ -159,7 +195,7 @@ export async function saveStateToSlot(slotNumber, stateData, thumbnail, preview)
 /**
  * Load emulator state from a numbered slot
  * @param {number} slotNumber - Slot number (1-5)
- * @returns {Promise<{data: Uint8Array, savedAt: number, thumbnail: string|null}|null>}
+ * @returns {Promise<{data: Uint8Array, savedAt: number, machine: string, thumbnail: string|null}|null>}
  */
 export async function loadStateFromSlot(slotNumber) {
   try {
@@ -168,6 +204,7 @@ export async function loadStateFromSlot(slotNumber) {
       return {
         data: new Uint8Array(result.data),
         savedAt: result.savedAt,
+        machine: result.machine || LEGACY_MACHINE,
         thumbnail: result.thumbnail || null,
       };
     }
@@ -193,7 +230,7 @@ export async function clearSlot(slotNumber) {
 
 /**
  * Get summary info for all 5 slots (without loading full state data)
- * @returns {Promise<Array<{slotNumber: number, savedAt: number, thumbnail: string|null}|null>>}
+ * @returns {Promise<Array<{slotNumber: number, savedAt: number, machine: string, thumbnail: string|null}|null>>}
  */
 export async function getAllSlotInfo() {
   const slots = [];
@@ -204,6 +241,7 @@ export async function getAllSlotInfo() {
         slots.push({
           slotNumber: i,
           savedAt: result.savedAt,
+          machine: result.machine || LEGACY_MACHINE,
           thumbnail: result.thumbnail || null,
           preview: result.preview || null,
         });

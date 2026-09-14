@@ -125,6 +125,19 @@ public:
   // Soft switch state
   const SoftSwitches &getSoftSwitches() const { return switches_; }
 
+  /**
+   * The switches a save state carries, as one word, and how they come back.
+   *
+   * Restoring is done by writing the switches' own addresses rather than
+   * poking the struct, so that everything that watches a switch — the video,
+   * the language card's bank pointers, a machine that has no auxiliary bank
+   * and ignores the whole group — sees the change the way it always does. The
+   * language card takes the double read its write latch needs. Both machines
+   * use this: a IIgs's Mega II is this class, restored the same way.
+   */
+  uint32_t packSwitchesForState() const;
+  void restoreSwitchesFromState(uint32_t packed);
+
   // Callbacks
   void setKeyboardCallback(KeyboardCallback cb) {
     keyboardCallback_ = std::move(cb);

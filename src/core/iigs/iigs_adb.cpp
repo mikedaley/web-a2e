@@ -5,6 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+#include <algorithm>
 #include "iigs_adb.hpp"
 
 namespace a2e::iigs {
@@ -259,6 +260,66 @@ void IIgsADB::completeCommand() {
 
   argumentsExpected_ = 0;
   argumentsSeen_ = 0;
+}
+
+
+namespace {
+template <typename Q> void writeQueue(StateWriter &w, const Q &q) {
+  w.u32(static_cast<uint32_t>(q.size()));
+  for (uint8_t b : q) w.u8(b);
+}
+template <typename Q> void readQueue(StateReader &r, Q &q) {
+  q.clear();
+  const uint32_t n = r.u32();
+  for (uint32_t i = 0; i < n && r.ok(); i++) q.push_back(r.u8());
+}
+} // namespace
+
+void IIgsADB::serialize(StateWriter &w) const {
+  writeQueue(w, response_);
+  writeQueue(w, keyboard_);
+  w.i32(pendingX_);
+  w.i32(pendingY_);
+  w.boolean(buttonChanged_);
+  w.boolean(reportInProgress_);
+  w.u8(reportY_);
+  w.bytes(controllerMemory_.data(), controllerMemory_.size());
+  w.bytes(arguments_.data(), arguments_.size());
+  w.u8(lastCommand_);
+  w.u8(argumentsExpected_);
+  w.u8(argumentsSeen_);
+  w.u8(modifiers_);
+  w.u8(latch_);
+  w.boolean(mouseButton_);
+  w.boolean(anyKeyDown_);
+  w.u8(modes_);
+  w.u8(interruptEnables_);
+  w.bytes(configuration_.data(), configuration_.size());
+}
+
+void IIgsADB::deserialize(StateReader &r) {
+  readQueue(r, response_);
+  readQueue(r, keyboard_);
+  pendingX_ = r.i32();
+  pendingY_ = r.i32();
+  buttonChanged_ = r.boolean();
+  reportInProgress_ = r.boolean();
+  reportY_ = r.u8();
+  if (const uint8_t *p = r.bytes(controllerMemory_.size()))
+    std::copy(p, p + controllerMemory_.size(), controllerMemory_.begin());
+  if (const uint8_t *p = r.bytes(arguments_.size()))
+    std::copy(p, p + arguments_.size(), arguments_.begin());
+  lastCommand_ = r.u8();
+  argumentsExpected_ = r.u8();
+  argumentsSeen_ = r.u8();
+  modifiers_ = r.u8();
+  latch_ = r.u8();
+  mouseButton_ = r.boolean();
+  anyKeyDown_ = r.boolean();
+  modes_ = r.u8();
+  interruptEnables_ = r.u8();
+  if (const uint8_t *p = r.bytes(configuration_.size()))
+    std::copy(p, p + configuration_.size(), configuration_.begin());
 }
 
 } // namespace a2e::iigs

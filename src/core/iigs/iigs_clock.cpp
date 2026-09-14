@@ -5,6 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+#include <algorithm>
 #include "iigs_clock.hpp"
 
 #include <ctime>
@@ -181,6 +182,32 @@ void IIgsClock::transferData(bool toChip) {
   }
   step_ = Step::Command;
   target_ = Target::None;
+}
+
+
+void IIgsClock::serialize(StateWriter &w) const {
+  w.bytes(batteryRam_.data(), batteryRam_.size());
+  w.u32(seconds_);
+  w.u8(data_);
+  w.u8(control_);
+  w.u8(static_cast<uint8_t>(step_));
+  w.u8(static_cast<uint8_t>(target_));
+  w.boolean(reading_);
+  w.u16(address_);
+}
+
+void IIgsClock::deserialize(StateReader &r) {
+  if (const uint8_t *p = r.bytes(batteryRam_.size()))
+    std::copy(p, p + batteryRam_.size(), batteryRam_.begin());
+  seconds_ = r.u32();
+  data_ = r.u8();
+  control_ = r.u8();
+  step_ = static_cast<Step>(r.u8());
+  target_ = static_cast<Target>(r.u8());
+  reading_ = r.boolean();
+  address_ = r.u16();
+  // The host keeps a copy of the battery RAM; a restore has just changed it.
+  batteryRamChanged_ = true;
 }
 
 } // namespace a2e::iigs

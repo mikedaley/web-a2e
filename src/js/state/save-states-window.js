@@ -19,9 +19,10 @@ import {
   clearSlot,
   loadStateFromSlot,
 } from "./state-persistence.js";
+import { parseStateHeader } from "./state-header.js";
+import { getMachineProfile } from "../machine/machine-profile.js";
+import { showConfirm } from "../ui/confirm.js";
 
-// Magic bytes: "A2ES" in little-endian = 0x53324541
-const STATE_MAGIC = 0x53324541;
 const SLOT_COUNT = 5;
 
 export class SaveStatesWindow extends BaseWindow {
@@ -94,11 +95,13 @@ export class SaveStatesWindow extends BaseWindow {
 
   onContentRendered() {
     // Cache autosave row
-    this.autosaveElement = this.contentElement.querySelector('.save-slot-auto');
+    this.autosaveElement = this.contentElement.querySelector(".save-slot-auto");
 
     // Cache slot row elements
     for (let i = 1; i <= SLOT_COUNT; i++) {
-      const row = this.contentElement.querySelector(`.save-slot[data-slot="${i}"]`);
+      const row = this.contentElement.querySelector(
+        `.save-slot[data-slot="${i}"]`,
+      );
       this.slotElements.push(row);
     }
 
@@ -123,20 +126,28 @@ export class SaveStatesWindow extends BaseWindow {
     this.hoverPreview.className = "slot-thumbnail-preview";
     document.body.appendChild(this.hoverPreview);
 
-    this.contentElement.addEventListener("mouseenter", (e) => {
-      const thumb = e.target.closest(".slot-thumbnail");
-      if (!thumb) return;
-      const previewSrc = thumb.dataset.preview;
-      if (!previewSrc) return;
-      this.hoverPreview.innerHTML = `<img src="${previewSrc}" />`;
-      this.hoverPreview.classList.add("visible");
-    }, true);
+    this.contentElement.addEventListener(
+      "mouseenter",
+      (e) => {
+        const thumb = e.target.closest(".slot-thumbnail");
+        if (!thumb) return;
+        const previewSrc = thumb.dataset.preview;
+        if (!previewSrc) return;
+        this.hoverPreview.innerHTML = `<img src="${previewSrc}" />`;
+        this.hoverPreview.classList.add("visible");
+      },
+      true,
+    );
 
-    this.contentElement.addEventListener("mouseleave", (e) => {
-      const thumb = e.target.closest(".slot-thumbnail");
-      if (!thumb) return;
-      this.hoverPreview.classList.remove("visible");
-    }, true);
+    this.contentElement.addEventListener(
+      "mouseleave",
+      (e) => {
+        const thumb = e.target.closest(".slot-thumbnail");
+        if (!thumb) return;
+        this.hoverPreview.classList.remove("visible");
+      },
+      true,
+    );
 
     this.contentElement.addEventListener("mousemove", (e) => {
       if (!this.hoverPreview.classList.contains("visible")) return;
@@ -170,6 +181,33 @@ export class SaveStatesWindow extends BaseWindow {
     this.refreshSlots();
   }
 
+  /** The machines change under the window; a machine change redraws it. */
+  onMachineChanged() {
+    if (this.isVisible) this.refreshSlots();
+  }
+
+  /**
+   * A slot's machine, for the row.
+   *
+   * A slot saved off a different machine is still loadable — loading it puts
+   * that machine in the core — but the row says which, so nobody is surprised
+   * to find the //e gone and a IIgs in its place.
+   */
+  machineLabel(key) {
+    const current = getMachineProfile();
+    if (!key || key === current.key) return "";
+    const known = this.stateManager.machines?.find((m) => m.key === key);
+    return known ? known.shortName || known.name : key;
+  }
+
+  describeSlot(statusEl, status, machineKey) {
+    const other = this.machineLabel(machineKey);
+    statusEl.textContent = other ? `${status} · ${other}` : status;
+    statusEl.title = other
+      ? `Saved on the ${other}; loading it switches machine`
+      : "";
+  }
+
   async refreshSlots() {
     // Refresh autosave row
     await this.refreshAutosaveRow();
@@ -196,7 +234,7 @@ export class SaveStatesWindow extends BaseWindow {
           thumbEl.innerHTML = '<span class="slot-empty-icon">--</span>';
         }
         thumbEl.dataset.preview = info.preview || info.thumbnail || "";
-        statusEl.textContent = "Saved";
+        this.describeSlot(statusEl, "Saved", info.machine);
         statusEl.classList.remove("empty");
         timestampEl.textContent = this.formatTimestamp(info.savedAt);
         loadBtn.disabled = false;
@@ -206,6 +244,7 @@ export class SaveStatesWindow extends BaseWindow {
         thumbEl.innerHTML = '<span class="slot-empty-icon">--</span>';
         delete thumbEl.dataset.preview;
         statusEl.textContent = "Empty";
+        statusEl.title = "";
         statusEl.classList.add("empty");
         timestampEl.textContent = "";
         loadBtn.disabled = true;
@@ -219,7 +258,8 @@ export class SaveStatesWindow extends BaseWindow {
     const row = this.autosaveElement;
     if (!row) return;
 
-    const info = await getAutosaveInfo();
+    // The autosave row is this machine's: each machine keeps its own.
+    const info = await getAutosaveInfo(this.stateManager.currentMachineKey());
     const thumbEl = row.querySelector(".slot-thumbnail");
     const statusEl = row.querySelector(".slot-status");
     const timestampEl = row.querySelector(".slot-timestamp");
@@ -276,7 +316,34 @@ export class SaveStatesWindow extends BaseWindow {
     this.refreshSlots();
   }
 
+  /**
+   * Loading a state saved off another machine means switching to it, which
+   * throws away the machine that is running. Say so first.
+   */
+  async confirmMachineFor(stateData) {
+    const machine = await this.stateManager.machineForState(stateData);
+    if (!machine || machine.key === getMachineProfile().key) return true;
+    if (!machine.runnable) {
+      this.uiController.showNotification(
+        `This state needs the ${machine.name}, whose ROM is not built in`,
+      );
+      return false;
+    }
+    return showConfirm(
+      `This state was saved on the ${machine.name}.\n\n` +
+        `Switch to it? The ${getMachineProfile().name} is rebuilt from ` +
+        "scratch and anything in it is lost.",
+      "Switch and Load",
+    );
+  }
+
   async handleLoad(slot) {
+    const slotData = await loadStateFromSlot(slot);
+    if (!slotData) {
+      this.uiController.showNotification("No data in slot");
+      return;
+    }
+    if (!(await this.confirmMachineFor(slotData.data))) return;
     const ok = await this.stateManager.restoreFromSlot(slot);
     if (ok) {
       this.uiController.showNotification(`Loaded slot ${slot}`);
@@ -299,7 +366,10 @@ export class SaveStatesWindow extends BaseWindow {
       return;
     }
 
-    this.downloadBlob(slotData.data, `apple2e-slot-${slot}.a2state`);
+    this.downloadBlob(
+      slotData.data,
+      `${slotData.machine || "apple2e"}-slot-${slot}.a2state`,
+    );
   }
 
   async handleLoadAutosave() {
@@ -313,13 +383,14 @@ export class SaveStatesWindow extends BaseWindow {
   }
 
   async handleDownloadAutosave() {
-    const data = await loadStateFromStorage();
+    const machine = this.stateManager.currentMachineKey();
+    const data = await loadStateFromStorage(machine);
     if (!data) {
       this.uiController.showNotification("No autosave data");
       return;
     }
 
-    this.downloadBlob(data, "apple2e-autosave.a2state");
+    this.downloadBlob(data, `${machine}-autosave.a2state`);
   }
 
   async downloadBlob(data, filename) {
@@ -330,7 +401,12 @@ export class SaveStatesWindow extends BaseWindow {
       try {
         const handle = await window.showSaveFilePicker({
           suggestedName: filename,
-          types: [{ description: "Apple //e State", accept: { "application/octet-stream": [".a2state"] } }],
+          types: [
+            {
+              description: "Apple II State",
+              accept: { "application/octet-stream": [".a2state"] },
+            },
+          ],
         });
         const writable = await handle.createWritable();
         await writable.write(blob);
@@ -359,16 +435,11 @@ export class SaveStatesWindow extends BaseWindow {
     reader.onload = async () => {
       const data = new Uint8Array(reader.result);
 
-      // Validate magic bytes
-      if (data.length < 8) {
+      if (!parseStateHeader(data)) {
         this.uiController.showNotification("Invalid state file");
         return;
       }
-      const magic = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
-      if ((magic >>> 0) !== STATE_MAGIC) {
-        this.uiController.showNotification("Invalid state file");
-        return;
-      }
+      if (!(await this.confirmMachineFor(data))) return;
 
       const ok = await this.stateManager.restoreFromFileData(data);
       if (ok) {

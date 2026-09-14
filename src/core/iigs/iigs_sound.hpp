@@ -9,6 +9,7 @@
 #pragma once
 
 #include "iigs_spec.hpp"
+#include "../emulator/state_stream.hpp"
 
 #include <array>
 #include <cstdint>
@@ -143,6 +144,14 @@ public:
   bool addressesRam() const { return (control_ & CONTROL_RAM) != 0; }
   bool autoIncrements() const { return (control_ & CONTROL_AUTO_INCREMENT) != 0; }
   uint8_t volume() const { return control_ & CONTROL_VOLUME_MASK; }
+
+  /**
+   * The chip in a save state: its RAM, every oscillator and the registers.
+   * The output ring is not — it is the host's backlog, and a restored chip
+   * starts one afresh.
+   */
+  void serialize(StateWriter &w) const;
+  void deserialize(StateReader &r);
 
   // A DOC register's address space: 32 of each kind, one after another.
   static constexpr uint8_t DOC_FREQUENCY_LOW = 0x00;

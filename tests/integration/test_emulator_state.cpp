@@ -202,3 +202,103 @@ TEST_CASE("Emulator state round-trip leaves BASIC idle at the prompt", "[emulato
     REQUIRE(emu.importState(stateCopy.data(), stateCopy.size()));
     REQUIRE_FALSE(emu.isBasicProgramRunning());
 }
+
+// ---------------------------------------------------------------------------
+// The other machines
+// ---------------------------------------------------------------------------
+
+TEST_CASE("A II+ state round-trips its memory", "[emulator][state][machine]") {
+    Emulator emu(MachineId::AppleIIPlus);
+    emu.init();
+    emu.writeMemory(0x0300, 0x5A);
+
+    size_t size = 0;
+    const uint8_t* data = emu.exportState(&size);
+    std::vector<uint8_t> stateCopy(data, data + size);
+
+    emu.reset();
+    REQUIRE(emu.readMemory(0x0300) != 0x5A);
+    REQUIRE(emu.importState(stateCopy.data(), stateCopy.size()));
+    REQUIRE(emu.readMemory(0x0300) == 0x5A);
+}
+
+TEST_CASE("A //c state keeps its built-in serial port's registers", "[emulator][state][machine]") {
+    Emulator emu(MachineId::AppleIIc);
+    emu.init();
+
+    // The modem port's ACIA control register: baud rate, word length, clock.
+    emu.writeMemory(0xC0AB, 0x1E);
+    REQUIRE(emu.peekMemory(0xC0AB) == 0x1E);
+
+    size_t size = 0;
+    const uint8_t* data = emu.exportState(&size);
+    std::vector<uint8_t> stateCopy(data, data + size);
+
+    emu.reset();
+    REQUIRE(emu.peekMemory(0xC0AB) != 0x1E);
+    REQUIRE(emu.importState(stateCopy.data(), stateCopy.size()));
+    REQUIRE(emu.peekMemory(0xC0AB) == 0x1E);
+}
+
+TEST_CASE("A //c state keeps the mouse's pending movement", "[emulator][state][machine]") {
+    Emulator emu(MachineId::AppleIIc);
+    emu.init();
+    REQUIRE(emu.getMouseIOU() != nullptr);
+    emu.getMouseIOU()->addDelta(7, -3);
+    REQUIRE(emu.getMouseIOU()->pendingX() == 7);
+
+    size_t size = 0;
+    const uint8_t* data = emu.exportState(&size);
+    std::vector<uint8_t> stateCopy(data, data + size);
+
+    emu.reset();
+    REQUIRE(emu.getMouseIOU()->pendingX() == 0);
+    REQUIRE(emu.importState(stateCopy.data(), stateCopy.size()));
+    REQUIRE(emu.getMouseIOU()->pendingX() == 7);
+    REQUIRE(emu.getMouseIOU()->pendingY() == -3);
+}
+
+TEST_CASE("A state refits the cards it was saved with", "[emulator][state][cards]") {
+    Emulator saved;
+    saved.init();
+    REQUIRE(saved.setSlotCard(2, "ssc"));
+    REQUIRE(saved.setSlotCard(1, "parallel"));
+    REQUIRE(saved.setSlotCard(4, "empty")); // the Mockingboard it shipped with, pulled
+
+    size_t size = 0;
+    const uint8_t* data = saved.exportState(&size);
+    std::vector<uint8_t> stateCopy(data, data + size);
+
+    Emulator restored;
+    restored.init();
+    REQUIRE(restored.setSlotCard(5, "thunderclock")); // a card the state does not have
+    REQUIRE(std::string(restored.getSlotCardName(2)) == "empty");
+    REQUIRE(std::string(restored.getSlotCardName(4)) == "mockingboard");
+
+    REQUIRE(restored.importState(stateCopy.data(), stateCopy.size()));
+    REQUIRE(std::string(restored.getSlotCardName(1)) == "parallel");
+    REQUIRE(std::string(restored.getSlotCardName(2)) == "ssc");
+    REQUIRE(std::string(restored.getSlotCardName(4)) == "empty");
+    REQUIRE(std::string(restored.getSlotCardName(5)) == "empty");
+    REQUIRE(std::string(restored.getSlotCardName(6)) == "disk2");
+}
+
+TEST_CASE("A state from another machine is refused", "[emulator][state][machine]") {
+    Emulator iie;
+    iie.init();
+    size_t size = 0;
+    const uint8_t* data = iie.exportState(&size);
+    std::vector<uint8_t> stateCopy(data, data + size);
+
+    Emulator iic(MachineId::AppleIIc);
+    iic.init();
+    iic.writeMemory(0x0300, 0x77);
+    REQUIRE_FALSE(iic.importState(stateCopy.data(), stateCopy.size()));
+    // Refused before anything was touched
+    REQUIRE(iic.readMemory(0x0300) == 0x77);
+
+    // A IIgs's header: the same magic, its own version, its own id.
+    std::vector<uint8_t> iigsHeader = {'A', 'E', '2', 'S', 1, 0, 0, 0, 3, 0, 0, 0};
+    iigsHeader.resize(64, 0);
+    REQUIRE_FALSE(iie.importState(iigsHeader.data(), iigsHeader.size()));
+}

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "../emulator/state_stream.hpp"
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -88,6 +90,10 @@ public:
 
   uint8_t writeRegister(int channel, int reg) const { return channels_[channel].wr[reg & 0x0F]; }
   bool transmitterBusy(int channel) const { return channels_[channel].txBusy; }
+
+  /** Both channels in a save state; the cable is a host setting and is not. */
+  void serialize(StateWriter &w) const;
+  void deserialize(StateReader &r);
 
   static constexpr int CHANNEL_A = 0;
   static constexpr int CHANNEL_B = 1;

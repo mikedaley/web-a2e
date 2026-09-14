@@ -18,104 +18,6 @@ import {
   readMemoryKB,
 } from "./iigs-memory.js";
 
-/*
- * The machines are drawn rather than photographed: a monitor sitting on the
- * wedge case, which is the silhouette anyone who used one recognises straight
- * away. They share that outline deliberately, because these are the same
- * computer eight years apart, and the details that differ are the ones the
- * profile actually models — a //e's three key rows and its two Apple keys
- * against a II+'s shallower deck and two rows, and the //c's drive slot in
- * the flank of the case where the other two have a row of sockets.
- */
-function machineArt({ appleKeys, keyRows, deckTop, driveSlot = false }) {
-  const rows = [];
-  for (let i = 0; i < keyRows; i++) {
-    const y = deckTop + 7 + i * 6;
-    rows.push(`<path d="M${30 + i} ${y} H${132 - i}"/>`);
-  }
-
-  // The //e put an Open and a Closed Apple either side of the space bar. A II+
-  // had neither, which is why its games ask you to press a paddle button.
-  const apples = appleKeys
-    ? `<rect x="56" y="${deckTop + 24}" width="6" height="5" rx="1"
-             stroke="currentColor" stroke-width="1"/>
-       <rect x="100" y="${deckTop + 24}" width="6" height="5" rx="1"
-             stroke="currentColor" stroke-width="1"/>`
-    : "";
-
-  // The //c is the machine with the disk in it. Everything else here is a box
-  // that needs a card and a cable before it can read one, so the slot cut into
-  // the right flank is the whole silhouette's worth of difference.
-  const drive = driveSlot
-    ? `<path d="M137 ${deckTop + 7} L135 ${deckTop + 19}" stroke="currentColor"
-             stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>`
-    : "";
-
-  return `
-    <svg viewBox="0 0 160 116" fill="none" aria-hidden="true">
-      <rect x="33" y="4" width="94" height="66" rx="6"
-            stroke="currentColor" stroke-width="2"/>
-      <rect x="41" y="12" width="78" height="46" rx="3"
-            class="machine-art-screen" stroke="currentColor" stroke-width="1"/>
-      <text x="47" y="34" class="machine-art-prompt"
-            font-family="ui-monospace, monospace" font-size="13">]</text>
-      <path d="M72 70 h16 l3 6 h-22 z" stroke="currentColor" stroke-width="1.5"
-            stroke-linejoin="round"/>
-      <path d="M12 112 L26 ${deckTop} H146 L140 112 Z"
-            stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M26 ${deckTop} H146" stroke="currentColor" stroke-width="1.5" opacity="0.45"/>
-      <g stroke="currentColor" stroke-width="1" opacity="0.7">
-        ${rows.join("\n        ")}
-      </g>
-      <rect x="66" y="${deckTop + 24}" width="28" height="5" rx="2"
-            stroke="currentColor" stroke-width="1" opacity="0.7"/>
-      ${apples}
-      ${drive}
-    </svg>`;
-}
-
-/*
- * A IIgs is not the same shape as the others and cannot be drawn by adding
- * details to their silhouette: the case is a flat slab with the monitor
- * standing on it and the keyboard a separate thing in front, which is the
- * outline of a machine you would recognise across a room as not being a //e.
- */
-function iigsArt() {
-  return `
-    <svg viewBox="0 0 160 116" fill="none" aria-hidden="true">
-      <rect x="36" y="2" width="88" height="62" rx="5"
-            stroke="currentColor" stroke-width="2"/>
-      <rect x="44" y="9" width="72" height="44" rx="3"
-            class="machine-art-screen" stroke="currentColor" stroke-width="1"/>
-      <text x="50" y="30" class="machine-art-prompt"
-            font-family="ui-monospace, monospace" font-size="13">]</text>
-      <path d="M22 70 H138 L142 88 H18 Z" stroke="currentColor" stroke-width="2"
-            stroke-linejoin="round"/>
-      <path d="M120 76 h12" stroke="currentColor" stroke-width="1.5"
-            opacity="0.7"/>
-      <path d="M120 82 h12" stroke="currentColor" stroke-width="1.5"
-            opacity="0.7"/>
-      <rect x="30" y="94" width="100" height="18" rx="2"
-            stroke="currentColor" stroke-width="2"/>
-      <g stroke="currentColor" stroke-width="1" opacity="0.7">
-        <path d="M36 100 H124"/>
-        <path d="M36 105 H124"/>
-      </g>
-    </svg>`;
-}
-
-const MACHINE_ART = {
-  apple2e: machineArt({ appleKeys: true, keyRows: 3, deckTop: 82 }),
-  apple2plus: machineArt({ appleKeys: false, keyRows: 2, deckTop: 86 }),
-  apple2c: machineArt({
-    appleKeys: true,
-    keyRows: 3,
-    deckTop: 84,
-    driveSlot: true,
-  }),
-  apple2gs: iigsArt(),
-};
-
 /** Bytes as the machine's own marketing would have said it. */
 function formatK(bytes) {
   return bytes ? `${Math.round(bytes / 1024)}K` : "";
@@ -279,7 +181,6 @@ export class MachineMenu {
                     ? 'title="Boots DOS 3.3 and ProDOS 8; no 3.5\" drive, Control Panel or GS/OS yet"'
                     : ""
               }>
-        <span class="machine-menu-art">${MACHINE_ART[m.key] || ""}</span>
         <span class="machine-menu-text">
           <span class="machine-menu-name">${m.name}</span>
           <span class="machine-menu-spec">${specLine(m, this.iigsMemoryKB)}</span>
@@ -342,6 +243,23 @@ export class MachineMenu {
       "Switch",
     );
     if (!ok) return;
+    await this.switchTo(key);
+  }
+
+  /**
+   * Put a different machine in the core, no questions asked.
+   *
+   * `choose` asks first because the menu is where a person switches by hand;
+   * a save state that was made on another machine has already answered — it
+   * is asking for that machine back — and goes through here.
+   *
+   * @returns {Promise<boolean>} whether the core now runs that machine
+   */
+  async switchTo(key) {
+    if (this.switching) return false;
+    const target = this.machines.find((m) => m.key === key);
+    if (!target) return false;
+    if (target.key === getMachineProfile().key) return true;
 
     this.switching = true;
     const profile = await switchMachine(this.wasmModule, key);
@@ -349,12 +267,13 @@ export class MachineMenu {
 
     if (!profile) {
       console.warn(`The core refused to switch to ${target.name}.`);
-      return;
+      return false;
     }
 
     this.updateBadge();
     if (this.onMachineChanged) await this.onMachineChanged(profile);
     await this.refresh();
+    return true;
   }
 
   close() {

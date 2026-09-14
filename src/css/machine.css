@@ -15,34 +15,34 @@
  * ------------------------------------------------------------------------- */
 
 .header-menu-trigger.machine-chip {
-    gap: 5px;
-    height: 40px;
-    padding: 0 9px 0 12px;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    background: #4a4a4a; /* Matches the logo tile, in both themes */
-    color: #ffffff;
+  gap: 5px;
+  height: 40px;
+  padding: 0 9px 0 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #4a4a4a; /* Matches the logo tile, in both themes */
+  color: #ffffff;
 }
 
 .header-menu-trigger.machine-chip:hover,
 .header-menu-container.open .header-menu-trigger.machine-chip {
-    background: #565656;
-    border-color: rgba(255, 255, 255, 0.28);
-    color: #ffffff;
+  background: #565656;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
 }
 
 /* The Apple II logotype: heavy, oblique, tightly set. */
 .machine-chip-name {
-    font-weight: 800;
-    font-size: 1.15rem;
-    font-style: italic;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    transform: translateY(-1px);
+  font-weight: 800;
+  font-size: 1.15rem;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  transform: translateY(-1px);
 }
 
 .header-menu-trigger.machine-chip .machine-chip-caret {
-    color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.65);
 }
 
 /* ---------------------------------------------------------------------------
@@ -50,115 +50,77 @@
  * ------------------------------------------------------------------------- */
 
 .machine-menu {
-    min-width: 286px;
-    padding-bottom: 6px;
+  min-width: 286px;
+  padding-bottom: 6px;
 }
 
 .machine-menu-heading {
-    padding: 8px 12px 6px;
-    font-size: 0.625rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
+  padding: 8px 12px 6px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
 }
 
 .machine-menu-item {
-    gap: 10px;
-    align-items: center;
-    justify-content: flex-start;
-    text-align: left;
-    padding: 8px 12px;
-    cursor: pointer;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
 }
 
 .machine-menu-item.unavailable {
-    cursor: default;
-    opacity: 0.5;
-}
-
-.machine-menu-art {
-    flex: 0 0 40px;
-    color: var(--text-muted);
-    line-height: 0;
-}
-
-.machine-menu-art svg {
-    width: 100%;
-    height: auto;
-}
-
-.machine-menu-item.current .machine-menu-art,
-.machine-menu-item:hover:not(.unavailable) .machine-menu-art {
-    color: var(--text-secondary);
-}
-
-.machine-art-screen {
-    fill: var(--bg-primary);
-    opacity: 0.7;
-}
-
-.machine-art-prompt {
-    fill: var(--text-muted);
-    opacity: 0.5;
-}
-
-/* The machine in use has its screen lit, in the green of the Apple logo's
-   first stripe — and of the monochrome monitors these actually shipped with. */
-.machine-menu-item.current .machine-art-screen {
-    fill: color-mix(in srgb, var(--accent-green) 14%, var(--bg-primary));
-    opacity: 1;
-}
-
-.machine-menu-item.current .machine-art-prompt {
-    fill: var(--accent-green);
-    opacity: 1;
+  cursor: default;
+  opacity: 0.5;
 }
 
 .machine-menu-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .machine-menu-name {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .machine-menu-spec {
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .machine-menu-tick {
-    flex: none;
-    width: 13px;
-    height: 13px;
-    color: var(--accent-green);
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--accent-green);
 }
 
 .machine-menu-flag {
-    flex: none;
-    font-size: 0.5625rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--accent-orange);
-    padding: 2px 6px;
-    border: 1px solid var(--accent-orange-border);
-    border-radius: var(--radius-sm);
-    background: var(--accent-orange-bg);
+  flex: none;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-orange);
+  padding: 2px 6px;
+  border: 1px solid var(--accent-orange-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-orange-bg);
 }
 
 /* The memory row under the IIgs.
@@ -166,48 +128,48 @@
    not fit in the width a name and a spec line share, and a row that wrapped
    would read as two rows of unrelated things. */
 .machine-menu-ram {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
 }
 
 .machine-menu-ram-label {
-    flex: none;
-    font-size: 0.5625rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
+  flex: none;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
 }
 
 .machine-menu-ram-chips {
-    display: flex;
-    gap: 3px;
-    flex: 1 1 auto;
+  display: flex;
+  gap: 3px;
+  flex: 1 1 auto;
 }
 
 .machine-menu-ram-chip {
-    flex: 1 1 0;
-    font-family: var(--font-mono);
-    font-size: 0.5625rem;
-    line-height: 1;
-    color: var(--text-secondary);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 4px 0;
-    cursor: pointer;
+  flex: 1 1 0;
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 4px 0;
+  cursor: pointer;
 }
 
 .machine-menu-ram-chip:hover {
-    color: var(--text-primary);
-    border-color: var(--accent-green-border);
+  color: var(--text-primary);
+  border-color: var(--accent-green-border);
 }
 
 /* The size actually fitted, in the same green as the lit screen above it. */
 .machine-menu-ram-chip.on {
-    color: var(--accent-green);
-    border-color: var(--accent-green-border);
-    background: var(--accent-green-bg);
+  color: var(--accent-green);
+  border-color: var(--accent-green-border);
+  background: var(--accent-green-bg);
 }

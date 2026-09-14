@@ -57,6 +57,11 @@ export class CPUDebuggerWindow extends BaseWindow {
     this.beamBreakpoints = []; // Array of { id, scanline, hPos, enabled, mode }
     this.loadBeamBreakpoints();
     this.activeTab = "breakpoints"; // Active tab panel (breakpoints, watch, beam)
+    // The tab panel under the disassembly: how tall the user dragged it, in
+    // pixels, or null for the stylesheet's default; and whether it is folded
+    // down to its tab bar so the disassembly can have the room.
+    this.tabsHeight = null;
+    this.tabsCollapsed = false;
     this._hitBpAddr = -1; // Address of the breakpoint/watchpoint that triggered a pause
     this._lastHitBpAddr = -2; // Previous value for change detection
 
@@ -155,10 +160,12 @@ export class CPUDebuggerWindow extends BaseWindow {
         </div>
 
         <div class="cpu-dbg-tabs">
+          <div class="cpu-dbg-splitter" title="Drag to resize"></div>
           <div class="cpu-dbg-tab-bar">
             <button class="cpu-dbg-tab active" data-tab="breakpoints">Breakpoints <span class="cpu-dbg-tab-count" id="bp-tab-count">0</span></button>
             <button class="cpu-dbg-tab" data-tab="watch">Watch <span class="cpu-dbg-tab-count" id="watch-tab-count">0</span></button>
             <button class="cpu-dbg-tab" data-tab="beam">Beam <span class="cpu-dbg-tab-count" id="beam-tab-count">0</span></button>
+            <button class="cpu-dbg-tab-collapse" id="dbg-tabs-collapse" title="Collapse panel" aria-label="Collapse panel"></button>
           </div>
           <div class="cpu-dbg-tab-content active" data-tab="breakpoints">
             <div class="cpu-dbg-tab-toolbar">
@@ -515,9 +522,12 @@ export class CPUDebuggerWindow extends BaseWindow {
             c.classList.toggle("active", c.dataset.tab === tabName);
           });
         this.activeTab = tabName;
+        // Picking a tab on a folded panel is asking to see it.
+        if (this.tabsCollapsed) this.setTabsCollapsed(false);
         if (this.onStateChange) this.onStateChange();
       });
     }
+    this.setupTabsPanel();
 
     // Watch list event delegation (survives DOM rebuilds from updateWatchList)
     const watchList = this.contentElement.querySelector("#watch-list");
@@ -2360,6 +2370,9 @@ export class CPUDebuggerWindow extends BaseWindow {
 
   // ---- Watch Expressions ----
 
+  /** The tab panel cannot be dragged shorter than its bar and a few rows. */
+  static TABS_MIN_HEIGHT = 90;
+
   static WATCH_STORAGE_KEY = "a2e-watch-expressions";
 
   loadWatchExpressions() {
@@ -2707,9 +2720,93 @@ export class CPUDebuggerWindow extends BaseWindow {
     return 1;
   }
 
+  /**
+   * The tab panel's size and whether it is open.
+   *
+   * The splitter on its top edge drags its height, taken from the
+   * disassembly above; the button at the end of the tab bar folds it to the
+   * bar alone. Both survive in the window state. A drag stops short of
+   * squeezing the disassembly below a few lines, and of the panel's own
+   * minimum, because either would leave a control that cannot be read.
+   */
+  setupTabsPanel() {
+    const tabs = this.contentElement.querySelector(".cpu-dbg-tabs");
+    const splitter = this.contentElement.querySelector(".cpu-dbg-splitter");
+    const collapse = this.contentElement.querySelector("#dbg-tabs-collapse");
+    if (!tabs || !splitter || !collapse) return;
+
+    this.applyTabsPanel();
+
+    collapse.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.setTabsCollapsed(!this.tabsCollapsed);
+    });
+
+    splitter.addEventListener("pointerdown", (e) => {
+      if (this.tabsCollapsed || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startY = e.clientY;
+      const startHeight = tabs.getBoundingClientRect().height;
+      const container = tabs.parentElement;
+      const disasm = container.querySelector(".cpu-dbg-disasm");
+      // What the panel may grow to: everything the disassembly has beyond
+      // its own floor.
+      const disasmMin = 160;
+      const maxHeight = Math.max(
+        CPUDebuggerWindow.TABS_MIN_HEIGHT,
+        startHeight + disasm.getBoundingClientRect().height - disasmMin,
+      );
+      splitter.setPointerCapture(e.pointerId);
+      splitter.classList.add("dragging");
+
+      const onMove = (ev) => {
+        const height = Math.min(
+          maxHeight,
+          Math.max(CPUDebuggerWindow.TABS_MIN_HEIGHT, startHeight - (ev.clientY - startY)),
+        );
+        this.tabsHeight = Math.round(height);
+        this.applyTabsPanel();
+      };
+      const onUp = () => {
+        splitter.classList.remove("dragging");
+        splitter.removeEventListener("pointermove", onMove);
+        splitter.removeEventListener("pointerup", onUp);
+        splitter.removeEventListener("pointercancel", onUp);
+        if (this.onStateChange) this.onStateChange();
+      };
+      splitter.addEventListener("pointermove", onMove);
+      splitter.addEventListener("pointerup", onUp);
+      splitter.addEventListener("pointercancel", onUp);
+    });
+  }
+
+  setTabsCollapsed(collapsed) {
+    this.tabsCollapsed = !!collapsed;
+    this.applyTabsPanel();
+    if (this.onStateChange) this.onStateChange();
+  }
+
+  /** Put the remembered size and fold onto the panel. */
+  applyTabsPanel() {
+    const tabs = this.contentElement?.querySelector(".cpu-dbg-tabs");
+    const collapse = this.contentElement?.querySelector("#dbg-tabs-collapse");
+    if (!tabs) return;
+    tabs.classList.toggle("collapsed", this.tabsCollapsed);
+    tabs.style.height =
+      !this.tabsCollapsed && this.tabsHeight ? `${this.tabsHeight}px` : "";
+    if (collapse) {
+      collapse.title = this.tabsCollapsed ? "Expand panel" : "Collapse panel";
+      collapse.setAttribute("aria-label", collapse.title);
+      collapse.setAttribute("aria-expanded", String(!this.tabsCollapsed));
+    }
+  }
+
   getState() {
     const base = super.getState();
     base.activeTab = this.activeTab;
+    base.tabsHeight = this.tabsHeight;
+    base.tabsCollapsed = this.tabsCollapsed;
     return base;
   }
 
@@ -2717,7 +2814,12 @@ export class CPUDebuggerWindow extends BaseWindow {
     if (state.activeTab) {
       this.activeTab = state.activeTab;
     }
+    if (Number.isFinite(state.tabsHeight) && state.tabsHeight > 0) {
+      this.tabsHeight = state.tabsHeight;
+    }
+    this.tabsCollapsed = !!state.tabsCollapsed;
     super.restoreState(state);
+    this.applyTabsPanel();
     // Apply tab selection to DOM after restoreState calls show()
     if (this.contentElement && this.activeTab) {
       const tabBar = this.contentElement.querySelector(".cpu-dbg-tab-bar");

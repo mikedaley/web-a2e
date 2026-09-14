@@ -5,6 +5,7 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+#include <algorithm>
 #include "iigs_scc.hpp"
 
 namespace a2e::iigs {
@@ -493,6 +494,55 @@ void IIgsSCC::setLoopbackCable(bool fitted) {
 bool IIgsSCC::interruptPending() const {
   if (!(channels_[CHANNEL_A].wr[9] & WR9_MIE)) return false;
   return pendingBits() != 0;
+}
+
+
+void IIgsSCC::serialize(StateWriter &w) const {
+  for (const Channel &ch : channels_) {
+    w.bytes(ch.wr.data(), ch.wr.size());
+    w.i32(ch.pointer);
+    w.bytes(ch.rxFifo.data(), ch.rxFifo.size());
+    w.bytes(ch.rxError.data(), ch.rxError.size());
+    w.i32(ch.rxCount);
+    w.u8(ch.txBuffer);
+    w.boolean(ch.txBufferFull);
+    w.boolean(ch.txBusy);
+    w.u8(ch.txShift);
+    w.i32(ch.txCyclesLeft);
+    w.u8(ch.latchedStatus);
+    w.boolean(ch.extLatched);
+    w.boolean(ch.rxPending);
+    w.boolean(ch.txPending);
+    w.boolean(ch.extPending);
+    w.boolean(ch.rxFirstCharArmed);
+    w.boolean(ch.txUnderrun);
+    w.i32(ch.brgCyclesLeft);
+    w.boolean(ch.zeroCount);
+  }
+}
+
+void IIgsSCC::deserialize(StateReader &r) {
+  for (Channel &ch : channels_) {
+    if (const uint8_t *p = r.bytes(ch.wr.size())) std::copy(p, p + ch.wr.size(), ch.wr.begin());
+    ch.pointer = r.i32();
+    if (const uint8_t *p = r.bytes(ch.rxFifo.size())) std::copy(p, p + ch.rxFifo.size(), ch.rxFifo.begin());
+    if (const uint8_t *p = r.bytes(ch.rxError.size())) std::copy(p, p + ch.rxError.size(), ch.rxError.begin());
+    ch.rxCount = r.i32();
+    ch.txBuffer = r.u8();
+    ch.txBufferFull = r.boolean();
+    ch.txBusy = r.boolean();
+    ch.txShift = r.u8();
+    ch.txCyclesLeft = r.i32();
+    ch.latchedStatus = r.u8();
+    ch.extLatched = r.boolean();
+    ch.rxPending = r.boolean();
+    ch.txPending = r.boolean();
+    ch.extPending = r.boolean();
+    ch.rxFirstCharArmed = r.boolean();
+    ch.txUnderrun = r.boolean();
+    ch.brgCyclesLeft = r.i32();
+    ch.zeroCount = r.boolean();
+  }
 }
 
 } // namespace a2e::iigs

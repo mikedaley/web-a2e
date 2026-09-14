@@ -795,15 +795,94 @@
 .cpu-dbg-tabs {
     display: flex;
     flex-direction: column;
+    position: relative;
     min-height: 140px;
+    flex-shrink: 0;
     overflow: hidden;
     border-top: 1px solid var(--control-border);
+}
+
+/* Folded to its tab bar: the disassembly above takes the rest. */
+.cpu-dbg-tabs.collapsed {
+    min-height: 0;
+    height: auto !important;
+}
+
+.cpu-dbg-tabs.collapsed .cpu-dbg-tab-content,
+.cpu-dbg-tabs.collapsed .cpu-dbg-splitter {
+    display: none;
+}
+
+/* The drag handle along the panel's top edge, over the border. It is wider
+   than the line it sits on so it can be picked up. */
+.cpu-dbg-splitter {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 7px;
+    cursor: row-resize;
+    z-index: 1;
+    touch-action: none;
+}
+
+.cpu-dbg-splitter::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 3px;
+    height: 1px;
+    background: transparent;
+    transition: background 0.12s;
+}
+
+.cpu-dbg-splitter:hover::after,
+.cpu-dbg-splitter.dragging::after {
+    background: var(--accent-blue);
 }
 
 .cpu-dbg-tab-bar {
     display: flex;
     gap: 0;
     flex-shrink: 0;
+    align-items: center;
+}
+
+/* The fold button at the end of the tab bar: a chevron pointing the way the
+   panel will go. */
+.cpu-dbg-tab-collapse {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cpu-dbg-tab-collapse::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform 0.12s;
+}
+
+.cpu-dbg-tabs.collapsed .cpu-dbg-tab-collapse::before {
+    transform: translateY(2px) rotate(-135deg);
+}
+
+.cpu-dbg-tab-collapse:hover {
+    color: var(--text-secondary);
+    background: var(--overlay-white-02);
 }
 
 .cpu-dbg-tab {

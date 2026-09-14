@@ -395,6 +395,20 @@ public:
   uint8_t stateRegister() const;
   void setStateRegister(uint8_t value);
 
+  /**
+   * The whole 24-bit map in a save state: the fast RAM, the Mega II's two
+   * banks and language card, its soft switches, every register that is this
+   * class's rather than a device's, the slow clock, and then the devices —
+   * ADB, clock, SCC and Ensoniq. The cards in the Mega II's slots are the
+   * machine's to save, because the machine chose them.
+   *
+   * A state is refused by `deserialize` if it carries a different amount of
+   * fast RAM than is fitted: banks that answered when it was saved would not
+   * now, and the firmware's memory map would be wrong from the first read.
+   */
+  void serialize(StateWriter &w) const;
+  bool deserialize(StateReader &r);
+
   // Shadow register bits, as the hardware names them. Each *disables*.
   static constexpr uint8_t SHADOW_TEXT_PAGE1 = 0x01;
   static constexpr uint8_t SHADOW_HIRES_PAGE1 = 0x02;

@@ -11,12 +11,28 @@
 // not to spam the worker, short enough that the boost ends promptly.
 const PASTE_POLL_MS = 60;
 
+import { commandKeyIsOpenApple } from "./apple-keys.js";
+
 // Right Alt reports location 2; left reports 1, and 0 means the browser did not
 // say, which we treat as left. Both sides share keyCode 18, so this is the only
 // thing separating Open Apple from Closed Apple.
+const KEY_ALT = 18;
+const KEY_META_LEFT = 91;
+const KEY_META_RIGHT = 93;
+const LOCATION_LEFT = 1;
+const LOCATION_RIGHT = 2;
+
 export class InputHandler {
   constructor(wasmModule) {
     this.wasmModule = wasmModule;
+
+    // Whether ⌘ is the Open Apple key (see apple-keys.js). Read once and again
+    // on every machine change rather than on every keystroke.
+    this.commandIsOpenApple = commandKeyIsOpenApple();
+    // Keys pressed while ⌘ was held. macOS delivers no key-up for a key let go
+    // while ⌘ is down, so they are released when ⌘ is, or they would hold the
+    // Apple II's "any key down" line forever.
+    this.heldUnderCommand = new Set();
 
     // Canvas element for focus management
     this.canvas = null;
@@ -111,30 +127,77 @@ export class InputHandler {
     });
   }
 
+  /** The machine changed, and with it which host key is Open Apple. */
+  applyAppleKeys() {
+    this.commandIsOpenApple = commandKeyIsOpenApple();
+    this.heldUnderCommand.clear();
+    this.wasmModule._releaseModifiers();
+  }
+
+  /**
+   * The key as the core should see it.
+   *
+   * The core knows the Apple keys as the two Alt keys: keycode 18, left for
+   * Open and right for Closed. On a machine whose ⌘ is Open Apple, ⌘ is sent
+   * as the left Alt and either Option as the right, and `alt` says whether
+   * any of them is still held — which is what the core's key-up relies on.
+   * Nothing about ⌘ reaches the core as ⌘, so no key is mistaken for a
+   * browser shortcut.
+   */
+  translateAppleKeys(event, keyCode) {
+    if (!this.commandIsOpenApple) {
+      return { keyCode, alt: event.altKey, meta: event.metaKey, location: event.location || 0 };
+    }
+    if (keyCode === KEY_META_LEFT || keyCode === KEY_META_RIGHT) {
+      return { keyCode: KEY_ALT, alt: true, meta: false, location: LOCATION_LEFT };
+    }
+    if (keyCode === KEY_ALT) {
+      return { keyCode: KEY_ALT, alt: true, meta: false, location: LOCATION_RIGHT };
+    }
+    return {
+      keyCode,
+      alt: event.altKey || event.metaKey,
+      meta: false,
+      location: event.location || 0,
+    };
+  }
+
   handleKeyDown(event) {
-    const keyCode = event.keyCode || event.which;
+    const rawKeyCode = event.keyCode || event.which;
 
     // Get modifier states
     const shift = event.shiftKey;
     const ctrl = event.ctrlKey;
-    const alt = event.altKey;
-    const meta = event.metaKey;
     const capsLock = event.getModifierState && event.getModifierState('CapsLock');
 
     // Don't interfere with browser shortcuts
-    if (ctrl && keyCode === 82) {
+    if (ctrl && rawKeyCode === 82) {
       // Ctrl+R for refresh
       return;
     }
 
+    // A machine that has ⌘ as its Open Apple takes every ⌘ combination the
+    // browser will let go of: ⌘-letter is a menu shortcut on a IIgs, and
+    // handing it to the browser instead would open a bookmark or a find bar
+    // in the middle of it.
+    if (this.commandIsOpenApple && (event.metaKey || rawKeyCode === KEY_META_LEFT || rawKeyCode === KEY_META_RIGHT)) {
+      event.preventDefault();
+      if (event.metaKey && rawKeyCode !== KEY_META_LEFT && rawKeyCode !== KEY_META_RIGHT) {
+        this.heldUnderCommand.add(rawKeyCode);
+      }
+    }
+
+    const { keyCode, alt, meta, location } = this.translateAppleKeys(event, rawKeyCode);
+
     // Alt on its own would otherwise focus the browser menu bar. Combinations
     // are left alone: Ctrl+Alt is AltGr on European layouts, and swallowing it
     // would interfere with typing accented characters.
-    if (keyCode === 18 && !ctrl && !meta) {
+    if (keyCode === KEY_ALT && !ctrl && !meta) {
       event.preventDefault();
     }
-    // Win / Context Menu → block, do nothing
-    if (keyCode === 91 || keyCode === 93) {
+    // Win / Context Menu → block, do nothing. On a machine that takes ⌘ they
+    // have already been translated to an Apple key and do not reach here.
+    if (keyCode === KEY_META_LEFT || keyCode === KEY_META_RIGHT) {
       event.preventDefault();
       return;
     }
@@ -160,22 +223,38 @@ export class InputHandler {
 
     // Send raw keycode to WASM - C++ handles the translation
     this.wasmModule._handleRawKeyDown(
-      keyCode, shift, ctrl, alt, meta, capsLock, event.location || 0,
+      keyCode, shift, ctrl, alt, meta, capsLock, location,
     );
   }
 
   handleKeyUp(event) {
-    const keyCode = event.keyCode || event.which;
+    const rawKeyCode = event.keyCode || event.which;
 
     // Get modifier states
     const shift = event.shiftKey;
     const ctrl = event.ctrlKey;
-    const alt = event.altKey;
-    const meta = event.metaKey;
 
-    // Win / Context Menu → ignore release
-    if (keyCode === 91 || keyCode === 93) {
+    const isMetaKey = rawKeyCode === KEY_META_LEFT || rawKeyCode === KEY_META_RIGHT;
+    if (this.commandIsOpenApple && isMetaKey) {
+      // See heldUnderCommand: the keys let go under ⌘ never said so.
+      for (const held of this.heldUnderCommand) {
+        this.wasmModule._handleRawKeyUp(held, shift, ctrl, event.altKey, false, 0);
+      }
+      this.heldUnderCommand.clear();
+    }
+
+    // Win / Context Menu → ignore release, unless it is an Apple key here
+    if (isMetaKey && !this.commandIsOpenApple) {
       return;
+    }
+
+    let { keyCode, alt, meta, location } = this.translateAppleKeys(event, rawKeyCode);
+    if (this.commandIsOpenApple) {
+      // Whether any Apple key is still down once this one is up. ⌘'s own
+      // key-up still reports metaKey, so it is not asked about itself.
+      const metaStillHeld = event.metaKey && !isMetaKey;
+      const altStillHeld = event.altKey && rawKeyCode !== KEY_ALT;
+      alt = metaStillHeld || altStillHeld;
     }
 
     // Release the joystick axis, then let the key reach the emulator as normal
@@ -186,7 +265,7 @@ export class InputHandler {
 
     // Send raw keycode to WASM
     this.wasmModule._handleRawKeyUp(
-      keyCode, shift, ctrl, alt, meta, event.location || 0,
+      keyCode, shift, ctrl, alt, meta, location,
     );
   }
 

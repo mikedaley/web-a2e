@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "../emulator/state_stream.hpp"
+
 #include <cstdint>
 #include <functional>
 
@@ -121,6 +123,14 @@ public:
     void reset();
 
     // ===== State, for tests and the debugger =====
+
+    /**
+     * The IOU's mouse in a save state: what is enabled, what is pending, and
+     * the steps banked but not yet released — a mouse mid-move must finish
+     * the move after a restore, or the pointer lands short.
+     */
+    void serialize(StateWriter &w) const;
+    void deserialize(StateReader &r);
 
     bool movementInterruptsEnabled() const { return xyEnabled_; }
     bool vblInterruptsEnabled() const { return vblEnabled_; }

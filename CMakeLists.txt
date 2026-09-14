@@ -35,6 +35,7 @@ set(CORE_SOURCES
     src/core/iigs/iigs_memory.cpp
     src/core/iigs/iigs_clock.cpp
     src/core/iigs/iigs_machine.cpp
+    src/core/iigs/iigs_state.cpp
     src/core/disassembler/disassembler65816.cpp
     src/core/iigs/iigs_sound.cpp
     src/core/iigs/iigs_video.cpp
@@ -581,6 +582,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/audio/audio.cpp
         src/core/disk-image/disk_converter.cpp
@@ -674,6 +676,7 @@ else()
     add_catch2_test(test_iigs_video
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
         src/core/disassembler/disassembler65816.cpp
@@ -712,6 +715,7 @@ else()
     add_catch2_test(test_iigs_debug
         tests/unit/test_iigs_debug.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
         src/core/iigs/iigs_memory.cpp
@@ -755,6 +759,44 @@ else()
     add_catch2_test(test_iigs_boot
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_state.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/debug/machine_debug.cpp
+        src/core/disassembler/disassembler65816.cpp
+        src/core/audio/audio.cpp
+        src/core/disk-image/disk_converter.cpp
+        src/core/cards/mockingboard/mockingboard_card.cpp
+        src/core/cards/mockingboard/via6522.cpp
+        src/core/cards/mockingboard/ay8910.cpp
+        src/core/debug/debug_log.cpp
+        src/core/cards/smartport/smartport_card.cpp
+        src/core/cards/smartport/block_device.cpp
+        src/core/cards/disk_controller.cpp
+        src/core/cards/iwm/iwm.cpp
+        src/core/disk-image/dsk_disk_image.cpp
+        src/core/disk-image/woz_disk_image.cpp
+        src/core/disk-image/gcr_encoding.cpp
+        src/core/iigs/iigs_memory.cpp
+        src/core/iigs/iigs_clock.cpp
+        src/core/input/keyboard.cpp
+        src/core/iigs/iigs_sound.cpp
+        src/core/iigs/iigs_video.cpp
+        src/core/iigs/iigs_adb.cpp
+        src/core/iigs/iigs_scc.cpp
+        src/core/cpu/65816/cpu65816.cpp
+        src/core/cpu/65816/cpu65816_dispatch.cpp
+        src/core/mmu/mmu.cpp
+        src/core/video/video.cpp
+        src/core/video/ntsc.cpp
+        src/core/input/mouse_iou.cpp
+        src/core/noslot_clock.cpp
+    )
+
+    # A IIgs saved and restored: the processor, both kinds of RAM, the devices.
+    add_catch2_test(test_iigs_state
+        tests/integration/test_iigs_state.cpp
+        src/core/iigs/iigs_machine.cpp
+        src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
         src/core/disassembler/disassembler65816.cpp

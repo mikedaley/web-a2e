@@ -399,4 +399,53 @@ bool IIgsSound::oscillatorHalted(int index) const {
   return (voices_[index].control & OSC_HALT) != 0;
 }
 
+
+void IIgsSound::serialize(StateWriter &w) const {
+  for (const Voice &v : voices_) {
+    w.u16(v.frequency);
+    w.u8(v.volume);
+    w.u32(v.wavePointer);
+    w.u8(v.control);
+    w.u8(v.sizeCode);
+    w.u8(v.resolution);
+    w.u32(v.accumulator);
+    w.u8(v.data);
+    w.boolean(v.interruptPending);
+  }
+  w.i32(oscillatorsEnabled_);
+  w.u8(enableRegister_);
+  w.u8(interruptRegister_);
+  w.bytes(ram_.data(), ram_.size());
+  w.u16(address_);
+  w.u8(control_);
+  w.u8(latch_);
+  w.f64(ticks_);
+}
+
+void IIgsSound::deserialize(StateReader &r) {
+  for (Voice &v : voices_) {
+    v.frequency = r.u16();
+    v.volume = r.u8();
+    v.wavePointer = r.u32();
+    v.control = r.u8();
+    v.sizeCode = r.u8();
+    v.resolution = r.u8();
+    v.accumulator = r.u32();
+    v.data = r.u8();
+    v.interruptPending = r.boolean();
+  }
+  oscillatorsEnabled_ = r.i32();
+  enableRegister_ = r.u8();
+  interruptRegister_ = r.u8();
+  if (const uint8_t *p = r.bytes(ram_.size())) std::copy(p, p + ram_.size(), ram_.begin());
+  address_ = r.u16();
+  control_ = r.u8();
+  latch_ = r.u8();
+  ticks_ = r.f64();
+  ring_.assign(RING_FRAMES * 2, 0.0f);
+  produced_ = 0;
+  consumed_ = 0.0;
+  lastLeft_ = lastRight_ = 0.0f;
+}
+
 } // namespace a2e::iigs

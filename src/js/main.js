@@ -450,7 +450,9 @@ class AppleIIeEmulator {
         }
       });
 
-      // Start with TV static "no signal" since emulator is off
+      // Start with TV static "no signal" since emulator is off. The screen
+      // names the machine to switch on, so it has to know which one it is.
+      this.renderer.setMachine(this.machine);
       this.renderer.setNoSignal(true);
 
       // Set up text selection for copying screen contents
@@ -461,6 +463,7 @@ class AppleIIeEmulator {
 
       // Set up reminder controller
       this.reminderController = new ReminderController();
+      this.reminderController.setMachineName(this.machine?.name);
 
       // Apply display settings
       this.displaySettings.applyAllSettings();
@@ -509,7 +512,12 @@ class AppleIIeEmulator {
       // Sync interface availability from the already-applied slot config, then
       // keep it live as the user changes cards in Expansion Slots.
       printerManager.updateSlots(slotConfigWindow.installedCards());
-      slotConfigWindow.onSlotsApplied = (assignments) => printerManager.updateSlots(assignments);
+      // The menus follow the cards as well: a Mockingboard window is only
+      // worth offering while there is a Mockingboard.
+      slotConfigWindow.onSlotsApplied = (assignments) => {
+        printerManager.updateSlots(assignments);
+        this.uiController?.applyMachineMenus(assignments);
+      };
 
       // Print Browser — manages the pages auto-captured to IndexedDB by the
       // printer window. Reads the store; can also send a stored job back to the
@@ -535,6 +543,9 @@ class AppleIIeEmulator {
         emulationSpeed: this.emulationSpeed,
       });
       this.uiController.init();
+      // What this machine, with these cards, can use. The slot cards were
+      // restored into the core when the slots window was created above.
+      this.uiController.applyMachineMenus(slotConfigWindow.installedCards());
 
       // The header badge names the machine and is how it is changed. Created
       // after the UI controller so the generic header-menu open/close wiring
@@ -546,7 +557,8 @@ class AppleIIeEmulator {
           // The core has been rebuilt, so its battery RAM is empty again.
           await restoreBatteryRam(this.wasmModule);
           watchBatteryRam(this.wasmModule);
-          this.renderer.setMachineDisplay(profile.display);
+          this.renderer.setMachine(profile);
+          this.reminderController?.setMachineName(profile.name);
           applyMachineAspectToDocument();
           this.screenWindow?.setAspect(machineAspect());
           this.textSelection?.onMachineChanged?.();
@@ -565,6 +577,9 @@ class AppleIIeEmulator {
         reminderController: this.reminderController,
         cpuDebuggerWindow: cpuWindow,
         basicProgramWindow: this.basicProgramWindow,
+        hardDriveManager: this.hardDriveManager,
+        // A state saved off another machine asks for that machine back.
+        switchMachine: (key) => this.machineMenu.switchTo(key),
       });
       this.stateManager.init();
 
@@ -700,6 +715,9 @@ class AppleIIeEmulator {
     }
     if (this.emulationSpeed) this.emulationSpeed.apply();
     if (this.uiController) this.uiController.applyCharacterSet?.();
+    // Which host key is Open Apple is the machine's own choice.
+    this.inputHandler?.applyAppleKeys();
+    this.uiController?.applyAppleKeysMenu?.();
     // A rebuilt core is back on the Apple joystick; the game port is the
     // user's choice, not the machine's.
     this.joystickWindow?.applyGamePort();
@@ -718,6 +736,10 @@ class AppleIIeEmulator {
       if (this.slotConfigWindow) {
         this.printerManager.updateSlots(this.slotConfigWindow.installedCards());
       }
+    }
+    // And the menus: what a //c or a IIgs has nowhere to fit is not offered.
+    if (this.uiController && this.slotConfigWindow) {
+      this.uiController.applyMachineMenus(this.slotConfigWindow.installedCards());
     }
 
     // Every debug view is shaped by the machine it is looking at, so they all

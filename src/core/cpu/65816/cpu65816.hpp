@@ -123,6 +123,20 @@ public:
   uint8_t getP() const { return p_; }
   bool getEmulation() const { return e_; }
 
+  /**
+   * What a save state carries beyond the registers: whether the processor is
+   * stopped or waiting, and the interrupt edges it has latched. There is no
+   * setter for these otherwise, because nothing but a restore has any
+   * business putting a processor into WAI.
+   */
+  void restoreExecutionState(bool stopped, bool waiting, bool irqPending,
+                             bool nmiPending) {
+    stopped_ = stopped;
+    waiting_ = waiting;
+    irqPending_ = irqPending;
+    nmiPending_ = nmiPending;
+  }
+
   void setA(uint16_t v) { a_ = v; }
   void setX(uint16_t v) { x_ = v; }
   void setY(uint16_t v) { y_ = v; }

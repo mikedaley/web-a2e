@@ -40,9 +40,11 @@ from `PrinterBase.setEventSink()`), the Applesoft listing parser, input
 mapping, and the host-side machine profile (that a fetch failure leaves callers
 with a usable //e rather than nothing, that a fetched profile actually reaches
 them, and that a machine key is marshalled into the core's heap as a pointer
-rather than passed as a JavaScript string), and the game port device (that an
+rather than passed as a JavaScript string), the game port device (that an
 edited storage value falls back to the Apple joystick, and that an opposing
-pair of Joyport directions is dropped rather than sent).
+pair of Joyport directions is dropped rather than sent), which menu items each
+machine is offered (`machine-availability`), and the save-state header the
+host reads to tell which machine wrote a state (`state-header`).
 
 ### Consistency checks
 
@@ -643,11 +645,19 @@ arrays the build actually allocates, which are sized for the //e and are
 therefore the ceiling for every machine. `allProfilesValid()` runs both over
 the registry in a `static_assert`, so a broken profile does not compile.
 
-**Save states carry the machine id.** The header is `STATE_VERSION` 8, with the
-id written straight after the version. Everything after that point is laid out
-to the saving machine's shape, so a state restored into a different machine
-would be read as garbage rather than fail; the id is what lets `importState`
-refuse it.
+**Save states carry the machine id, and every machine writes the same header.**
+Twelve bytes — magic, format version, machine id — begin a state whichever
+machine wrote it. Everything after that point is laid out to the saving
+machine's shape, so a state restored into a different machine would be read as
+garbage rather than fail; the id is what lets `importState` refuse it. The
+Apple II family's layout is `STATE_VERSION` 9 in `emulator_state.cpp`; a IIgs's
+is its own (`iigs_state.cpp`, version 1), because the two share nothing after
+the header and have no reason to move together. The host reads the header
+itself (`src/js/state/state-header.js`) and, asked to load a state saved on
+another machine, switches to that machine first rather than let the core
+refuse — a save is a save of a whole machine, and loading one is asking for it
+back. The autosave is kept per machine for the same reason (see State
+Serialization).
 
 **The host asks rather than assumes.** `src/js/machine/machine-profile.js`
 fetches the whole profile as one JSON string through `_getMachineProfileJSON`
@@ -877,6 +887,23 @@ localStorage under `a2e-machine` and restored at startup, before the renderer
 and windows are built, so they are made for the right machine rather than
 rebuilt for it a moment later. A remembered machine the build cannot run is
 ignored rather than honoured.
+
+#### Menus follow the machine
+
+`src/js/ui/machine-availability.js` says which menu items the running machine
+can use, from its profile and the cards fitted, and
+`UIController.applyMachineMenus()` hides the rest — at startup, after a switch,
+and whenever the Expansion Slots window applies a change. Hidden rather than
+disabled: a greyed "Expansion Slots" on a //c invites the question of how to
+enable it, and the answer is a different computer. What goes: Expansion Slots
+on a //c (no sockets) and on a IIgs (its core does not answer `_setSlotCard`;
+its slots' "card or port" choice is not modelled); CPU Speed on a IIgs (the
+multiplier is `Emulator`'s); SmartPort Drives, Serial Port and Printer unless
+something provides them (a IIgs's slot 5 and its two sockets, a //c's ports, or
+a card); the Mockingboard and Mouse Card debug windows unless the card is
+fitted — a //c's "mouse" is the IOU, which has no PIA to show. A separator left
+with nothing after it goes too. `tests/js/ui/machine-availability.test.js` pins
+the table.
 
 #### Adding a machine
 
@@ -1535,7 +1562,43 @@ v4.2.
 
 ## State Serialization
 
-Binary format with versioned header. Includes CPU state, 128KB RAM, Language Card (16KB), soft switches, disk images with modifications, filenames, and debugger state. Autosave slot plus 5 manual save slots. Stored in browser IndexedDB. Window option state (toggles, view modes, mute states) is persisted separately via localStorage.
+Binary format with a versioned header that every machine shares (magic,
+version, machine id — see Machine Profiles). `src/core/emulator/state_stream.hpp`
+is the `StateWriter`/`StateReader` pair every machine writes through, so the
+rules — little-endian, a blob is its length then its bytes, a read past the end
+fails once rather than crashing — are in one place; `drive_state.hpp` is the
+two floppies, image and head position, shared by both machines.
+
+**Apple II family** (`emulator_state.cpp`): CPU, 128KB RAM, both language
+cards, the soft switches (packed and restored by `MMU::packSwitchesForState` /
+`restoreSwitchesFromState`, which writes the switches' own addresses so
+everything watching them sees the change), the keyboard latch and buttons,
+then **every slot by card id with that card's own state** — so a state refits
+the cards it was saved with, through `setSlotCard`, and an SSC, a parallel
+card, a SoftCard, a //c's built-in ports and its IWM's mode register all come
+back — then the disks, the No-Slot Clock, and a //c's IOU mouse with the steps
+it had banked. A card's state is sized in 32 bits because a SmartPort card's
+state is its hard drive images.
+
+**IIgs** (`iigs_state.cpp`): the 65816 — mode first, then the flags, then the
+registers, because `setEmulation` and `setP` each force the widths the mode
+requires — then `IIgsMemory::serialize`: the fast RAM (refused on restore if a
+different amount is fitted), the Mega II's RAM, language card and switches,
+every register of the memory controller, the slow clock, and the devices,
+each with its own `serialize`/`deserialize` — ADB (queues included), the clock
+chip (battery RAM, seconds, a transaction in flight), the SCC's two channels,
+the Ensoniq (RAM, oscillators, registers; not its output ring, which is the
+host's backlog). Then the machine's own counters, the IWM, the floppies and
+the SmartPort with its images. `test_iigs_state.cpp` round-trips each part.
+
+Autosave plus 5 manual save slots, stored in browser IndexedDB, each record
+naming the machine that wrote it. **The autosave is per machine**
+(`autosave:<key>`; the record from before there was more than one machine is
+the //e's), because a state restores only into the machine that wrote it and
+one shared autosave would come back to nothing for every machine but the last.
+The Save States window labels a slot saved on another machine and, on Load,
+asks before switching to it. Window option state (toggles, view modes, mute
+states) is persisted separately via localStorage.
 
 ## Release Process
 
@@ -1551,7 +1614,7 @@ When the user says "release", perform all of the following steps:
 
 Built-in debug windows accessible via Debug menu:
 
-- CPU Debugger: registers (REGS, FLAGS, TIMING, BEAM sections), breakpoints, stepping, disassembly with symbols
+- CPU Debugger: registers (REGS, FLAGS, TIMING, BEAM sections), breakpoints, stepping, disassembly with symbols. The Breakpoints/Watch/Beam panel under the disassembly has a splitter on its top edge and a fold button at the end of its tab bar; its height and whether it is folded live in the window state, and picking a tab on a folded panel opens it
 - Memory Browser: hex/ASCII view of 128KB address space with search
 - Memory Heat Map: real-time memory access visualization (read/write/combined modes)
 - Memory Map: address space layout overview
@@ -1636,6 +1699,20 @@ step.
 | F10              | Step Over                |
 | F11              | Step Into                |
 | Shift+F11        | Step Out                 |
+
+**Which host key is Open Apple is the machine's choice.** On the 8-bit
+machines the two Option keys are the Apple keys — left Open, right Closed — and
+⌘ is left to the browser. A IIgs's keyboard is a Mac's: ⌘ *is* its Open Apple
+and Option its Closed Apple, and GS/OS drives its menus with ⌘-letter, so on
+that machine the emulator takes ⌘ while it has the keyboard. **View > ⌘ as
+Open Apple** is the switch, remembered per machine
+(`src/js/input/apple-keys.js`, default on for the IIgs only, unit-tested). With
+it on, `InputHandler.translateAppleKeys()` sends ⌘ to the core as the left Alt
+and either Option as the right, so the core's Apple-key tracking needs no
+second mapping; every ⌘ combination is `preventDefault`ed (a browser still
+keeps ⌘W, ⌘Q and the like for itself, which is why this is a choice); and
+because macOS delivers no key-up for a key let go while ⌘ is held, the keys
+pressed under ⌘ are released when ⌘ is, or AKD would stay high.
 
 The Joystick window has a **Cursor Keys** toggle that also drives the joystick from the arrow keys (full deflection 0/255 per axis). The arrows keep reaching the emulator's keyboard as normal, so ProDOS selectors, catalog menus and BASIC line editing still work while the toggle is on. When enabled, a "CURSOR KEYS" chip appears in the Monitor title bar. The same toggle is in the View menu (`btn-cursor-keys-joystick`), which is how it is reached in the layouts that have no Monitor title bar; menu item, header switch and state restores are kept in sync through `JoystickWindow.onCursorKeysChanged`. The setting persists via localStorage.
 

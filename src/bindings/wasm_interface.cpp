@@ -1854,16 +1854,21 @@ bool isMonochrome() {
 // State Serialization
 // ============================================================================
 
+// Whichever machine is running writes its own state, behind the same header:
+// the host does not need to know which it has, and each refuses the other's.
 EMSCRIPTEN_KEEPALIVE
 uint8_t *exportState(size_t *size) {
-  if (!g_emulator) { *size = 0; return nullptr; }
-  return const_cast<uint8_t *>(g_emulator->exportState(size));
+  if (g_emulator) return const_cast<uint8_t *>(g_emulator->exportState(size));
+  if (g_iigs) return const_cast<uint8_t *>(g_iigs->exportState(size));
+  *size = 0;
+  return nullptr;
 }
 
 EMSCRIPTEN_KEEPALIVE
 bool importState(const uint8_t *data, size_t size) {
-  REQUIRE_EMULATOR_OR(false);
-  return g_emulator->importState(data, size);
+  if (g_emulator) return g_emulator->importState(data, size);
+  if (g_iigs) return g_iigs->importState(data, size);
+  return false;
 }
 
 // ============================================================================

@@ -109,6 +109,56 @@ MMU::MMU(const MachineProfile &machine)
 
 MMU::~MMU() = default;
 
+uint32_t MMU::packSwitchesForState() const {
+  const auto &sw = switches_;
+  uint32_t packed = 0;
+  const bool bits[] = {sw.text,     sw.mixed,    sw.page2,   sw.hires,
+                       sw.col80,    sw.altCharSet, sw.store80, sw.ramrd,
+                       sw.ramwrt,   sw.intcxrom, sw.altzp,   sw.slotc3rom,
+                       sw.intc8rom, sw.lcram,    sw.lcram2,  sw.lcwrite,
+                       sw.lcprewrite, sw.an0,    sw.an1,     sw.an2,
+                       sw.an3,      sw.ioudis};
+  for (size_t i = 0; i < sizeof(bits) / sizeof(bits[0]); i++) {
+    if (bits[i]) packed |= (1u << i);
+  }
+  return packed;
+}
+
+void MMU::restoreSwitchesFromState(uint32_t packed) {
+  auto bit = [packed](int n) { return (packed & (1u << n)) != 0; };
+
+  write(bit(0) ? 0xC051 : 0xC050, 0);  // TEXT
+  write(bit(1) ? 0xC053 : 0xC052, 0);  // MIXED
+  write(bit(2) ? 0xC055 : 0xC054, 0);  // PAGE2
+  write(bit(3) ? 0xC057 : 0xC056, 0);  // HIRES
+  write(bit(4) ? 0xC00D : 0xC00C, 0);  // 80COL
+  write(bit(5) ? 0xC00F : 0xC00E, 0);  // ALTCHARSET
+  write(bit(6) ? 0xC001 : 0xC000, 0);  // 80STORE
+  write(bit(7) ? 0xC003 : 0xC002, 0);  // RAMRD
+  write(bit(8) ? 0xC005 : 0xC004, 0);  // RAMWRT
+  write(bit(9) ? 0xC007 : 0xC006, 0);  // INTCXROM
+  write(bit(10) ? 0xC009 : 0xC008, 0); // ALTZP
+  write(bit(11) ? 0xC00B : 0xC00A, 0); // SLOTC3ROM
+  // INTC8ROM follows from slot access and is not written directly.
+  write(bit(17) ? 0xC059 : 0xC058, 0); // AN0
+  write(bit(18) ? 0xC05B : 0xC05A, 0); // AN1
+  write(bit(19) ? 0xC05D : 0xC05C, 0); // AN2
+  write(bit(20) ? 0xC05F : 0xC05E, 0); // AN3
+
+  // The language card: which bank, RAM or ROM for reads, and whether writes
+  // reach it. $C080-$C08B are read to select; the write latch needs two reads.
+  const bool lcram = bit(13), lcram2 = bit(14), lcwrite = bit(15);
+  if (lcram) {
+    if (lcram2) {
+      if (lcwrite) { read(0xC083); read(0xC083); } else { read(0xC080); }
+    } else {
+      if (lcwrite) { read(0xC08B); read(0xC08B); } else { read(0xC088); }
+    }
+  } else {
+    read(lcram2 ? 0xC082 : 0xC08A);
+  }
+}
+
 void MMU::reset() {
   // Clear RAM
   mainRAM_.fill(0);

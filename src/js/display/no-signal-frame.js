@@ -67,6 +67,10 @@ const FONT = {
   " ": [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
   // Lowercase is limited to what the model name needs.
   e: [0x00, 0x00, 0x0e, 0x11, 0x1f, 0x10, 0x0e],
+  c: [0x00, 0x00, 0x0e, 0x11, 0x10, 0x11, 0x0e],
+  s: [0x00, 0x00, 0x0f, 0x10, 0x0e, 0x01, 0x1e],
+  g: [0x00, 0x0f, 0x11, 0x11, 0x0f, 0x01, 0x0e],
+  "+": [0x00, 0x04, 0x04, 0x1f, 0x04, 0x04, 0x00],
 };
 
 const GLYPH_W = 5;
@@ -89,9 +93,12 @@ const DIM = [0x8c, 0x8c, 0x8c];
  * @param {number} width  framebuffer width in pixels; callers pass the
  *                         machine's, and the //e's size is the default
  * @param {number} height framebuffer height in pixels (384)
+ * @param {string} machine what to switch on, as the machine's own mark writes
+ *                         it — "//e", "II+", "//c", "IIgs" — since the message
+ *                         must name the machine that is actually there
  * @returns {Uint8Array} RGBA pixel data, width * height * 4 bytes
  */
-export function buildNoSignalFrame(width = 560, height = 384) {
+export function buildNoSignalFrame(width = 560, height = 384, machine = "//e") {
   const buf = new Uint8Array(width * height * 4);
 
   // Opaque black — the shader's vignette and bezel do the rest.
@@ -145,7 +152,7 @@ export function buildNoSignalFrame(width = 560, height = 384) {
   const cellRow = (row) => row * CELL_H;
 
   drawTextCentred("NO SIGNAL", cellRow(9), FG, 2);
-  drawTextCentred("SWITCH ON THE APPLE //e TO START", cellRow(14), DIM);
+  drawTextCentred(`SWITCH ON THE APPLE ${machine} TO START`, cellRow(14), DIM);
 
   return buf;
 }

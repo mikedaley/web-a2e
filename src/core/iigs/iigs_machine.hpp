@@ -292,6 +292,15 @@ public:
   const uint8_t *framebuffer();
   size_t framebufferSize() const;
 
+  // ===== Save states =====
+  //
+  // The same two calls Emulator has, with the same header in front of the
+  // bytes, so the host saves and restores a IIgs exactly as it does a //e and
+  // a state from either machine is refused by the other by its id.
+
+  const uint8_t *exportState(size_t *size);
+  bool importState(const uint8_t *data, size_t size);
+
 private:
   // How many slow cycles an instruction costs. A 65816 access to the Mega II
   // side runs at the slow clock and everything else at the fast one, so the
@@ -345,6 +354,7 @@ private:
   float speakerGain_ = 0.0f;
   uint8_t speakerNibble_ = 0;
   std::vector<uint8_t> frame_;
+  std::vector<uint8_t> stateBuffer_;
 
   void raiseScanLineInterrupts();
 };

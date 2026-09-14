@@ -813,6 +813,21 @@ export class WebGLRenderer {
    * which is the case for every machine modelled so far — the //e and the II+
    * emit the same 560 dots across the same 192 doubled lines.
    */
+  /**
+   * The machine the picture belongs to: its size, and its name for the
+   * powered-off screen, which says which machine to switch on.
+   */
+  setMachine(profile) {
+    if (!profile) return;
+    const name = profile.shortName || "//e";
+    if (name !== this._machineName) {
+      this._machineName = name;
+      this._noSignalFrame = null;
+      if (this._noSignal && this.gl) this.setNoSignal(true);
+    }
+    this.setMachineDisplay(profile.display);
+  }
+
   setMachineDisplay(display) {
     if (!display || !display.width || !display.height) return;
     if (display.width === this.width && display.height === this.height) return;
@@ -835,7 +850,11 @@ export class WebGLRenderer {
     if (!enabled) return;
 
     if (!this._noSignalFrame) {
-      this._noSignalFrame = buildNoSignalFrame(this.width, this.height);
+      this._noSignalFrame = buildNoSignalFrame(
+        this.width,
+        this.height,
+        this._machineName || "//e",
+      );
     }
     this.updateTexture(this._noSignalFrame);
   }

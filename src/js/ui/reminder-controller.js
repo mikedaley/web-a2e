@@ -67,6 +67,12 @@ export class ReminderController {
 
   // Power reminder methods
 
+  /** The reminder says which machine the button starts. */
+  setMachineName(name) {
+    const el = document.getElementById("power-reminder-machine");
+    if (el && name) el.textContent = name;
+  }
+
   repositionPowerReminder() {
     this.positionReminderBelowElement("power-reminder", "btn-power");
   }

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "iigs_spec.hpp"
+#include "../emulator/state_stream.hpp"
 
 #include <array>
 #include <cstdint>
@@ -132,6 +133,14 @@ public:
 
   /** Seconds since 1904 as the host's clock counts them now. */
   static uint32_t hostSecondsSince1904();
+
+  /**
+   * The chip in a save state: its RAM, its seconds and a transaction in
+   * flight. The seconds are the machine's own count rather than the host's,
+   * because a restored program that set the clock must find it set.
+   */
+  void serialize(StateWriter &w) const;
+  void deserialize(StateReader &r);
 
 private:
   enum class Target : uint8_t { None, BatteryRam, Seconds };

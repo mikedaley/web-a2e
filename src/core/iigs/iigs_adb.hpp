@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "../emulator/state_stream.hpp"
+
 #include <array>
 #include <cstdint>
 #include <deque>
@@ -179,6 +181,10 @@ public:
   bool hasResponse() const { return !response_.empty(); }
   size_t responseCount() const { return response_.size(); }
   uint8_t lastCommand() const { return lastCommand_; }
+
+  /** The controller in a save state, queues included. */
+  void serialize(StateWriter &w) const;
+  void deserialize(StateReader &r);
 
   // The layout the ROM's own diagnostic checks: get bit 4 wrong and the
   // machine stops at "Fatal system error-> 0911" before drawing anything.

@@ -306,7 +306,13 @@
     transform: translateY(0);
 }
 
-/* Menu items */
+/* Menu items. The flex display would otherwise win over the browser's own
+   [hidden] rule, which is how the machine's menus hide what it cannot use. */
+.header-menu-item[hidden],
+.header-menu-separator[hidden] {
+    display: none;
+}
+
 .header-menu-item {
     display: flex;
     align-items: center;

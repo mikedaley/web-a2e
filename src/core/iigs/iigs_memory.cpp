@@ -785,4 +785,95 @@ void IIgsMemory::shadowWrite(uint8_t bank, uint16_t offset, uint8_t value) {
   megaII_->writeRAM(offset, value, bank == 0x01);
 }
 
+
+void IIgsMemory::serialize(StateWriter &w) const {
+  w.blob(fastRam_);
+
+  w.bytes(megaII_->getMainRAM(), MAIN_RAM_SIZE);
+  w.bytes(megaII_->getAuxRAM(), AUX_RAM_SIZE);
+  for (bool aux : {false, true}) {
+    w.bytes(megaII_->getLCBank1(aux), 0x1000);
+    w.bytes(megaII_->getLCBank2(aux), 0x1000);
+    w.bytes(megaII_->getLCHighRAM(aux), 0x2000);
+  }
+  w.u32(megaII_->packSwitchesForState());
+
+  w.u64(slowCycles_);
+  w.u64(slowAccesses_);
+  w.f64(remainder_);
+  w.u8(shadow_);
+  w.u8(speed_);
+  w.u8(newVideo_);
+  w.u8(slotSelect_);
+  w.u8(diskSelect_);
+  w.u8(textColour_);
+  w.u8(border_);
+  w.u8(interruptEnable_);
+  w.u8(vgcInterrupt_);
+  w.boolean(vblPending_);
+  w.boolean(scanLinePending_);
+  w.boolean(quarterSecondPending_);
+  w.boolean(oneSecondPending_);
+  w.u64(lastQuarterSecond_);
+  w.u64(lastSecond_);
+
+  adb_.serialize(w);
+  clock_.serialize(w);
+  scc_.serialize(w);
+  sound_.serialize(w);
+}
+
+bool IIgsMemory::deserialize(StateReader &r) {
+  size_t fastSize = 0;
+  const uint8_t *fast = r.blob(fastSize);
+  if (!fast || fastSize != fastRam_.size()) return false;
+  std::copy(fast, fast + fastSize, fastRam_.begin());
+
+  if (const uint8_t *main = r.bytes(MAIN_RAM_SIZE)) {
+    for (uint32_t a = 0; a < MAIN_RAM_SIZE; a++)
+      megaII_->writeRAM(static_cast<uint16_t>(a), main[a], false);
+  }
+  if (const uint8_t *aux = r.bytes(AUX_RAM_SIZE)) {
+    for (uint32_t a = 0; a < AUX_RAM_SIZE; a++)
+      megaII_->writeRAM(static_cast<uint16_t>(a), aux[a], true);
+  }
+  for (bool aux : {false, true}) {
+    const uint8_t *b1 = r.bytes(0x1000);
+    const uint8_t *b2 = r.bytes(0x1000);
+    const uint8_t *hi = r.bytes(0x2000);
+    if (!hi) return false;
+    megaII_->setLCBank1(b1, aux);
+    megaII_->setLCBank2(b2, aux);
+    megaII_->setLCHighRAM(hi, aux);
+  }
+  // The Mega II's switches go through the Mega II, not through this class's
+  // I/O decode: they are //e switches and the MMU knows what each one moves.
+  megaII_->restoreSwitchesFromState(r.u32());
+
+  slowCycles_ = r.u64();
+  slowAccesses_ = r.u64();
+  remainder_ = r.f64();
+  shadow_ = r.u8();
+  speed_ = r.u8();
+  newVideo_ = r.u8();
+  slotSelect_ = r.u8();
+  diskSelect_ = r.u8();
+  setTextColourRegister(r.u8()); // through the setter, so the video hears it
+  border_ = r.u8();
+  interruptEnable_ = r.u8();
+  vgcInterrupt_ = r.u8();
+  vblPending_ = r.boolean();
+  scanLinePending_ = r.boolean();
+  quarterSecondPending_ = r.boolean();
+  oneSecondPending_ = r.boolean();
+  lastQuarterSecond_ = r.u64();
+  lastSecond_ = r.u64();
+
+  adb_.deserialize(r);
+  clock_.deserialize(r);
+  scc_.deserialize(r);
+  sound_.deserialize(r);
+  return r.ok();
+}
+
 } // namespace a2e::iigs

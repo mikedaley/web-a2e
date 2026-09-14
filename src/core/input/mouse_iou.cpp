@@ -215,4 +215,38 @@ bool MouseIOU::isIRQActive() const {
     return vblEnabled_ && vblInt_;
 }
 
+void MouseIOU::serialize(StateWriter &w) const {
+    w.boolean(xyEnabled_);
+    w.boolean(vblEnabled_);
+    w.boolean(xEdgeFalling_);
+    w.boolean(yEdgeFalling_);
+    w.boolean(xInt_);
+    w.boolean(yInt_);
+    w.boolean(vblInt_);
+    w.boolean(x1_);
+    w.boolean(y1_);
+    w.boolean(button_);
+    w.i32(pendingX_);
+    w.i32(pendingY_);
+    w.u64(nextStepCycle_);
+    w.boolean(wasInVbl_);
+}
+
+void MouseIOU::deserialize(StateReader &r) {
+    xyEnabled_ = r.boolean();
+    vblEnabled_ = r.boolean();
+    xEdgeFalling_ = r.boolean();
+    yEdgeFalling_ = r.boolean();
+    xInt_ = r.boolean();
+    yInt_ = r.boolean();
+    vblInt_ = r.boolean();
+    x1_ = r.boolean();
+    y1_ = r.boolean();
+    button_ = r.boolean();
+    pendingX_ = r.i32();
+    pendingY_ = r.i32();
+    nextStepCycle_ = r.u64();
+    wasInVbl_ = r.boolean();
+}
+
 } // namespace a2e

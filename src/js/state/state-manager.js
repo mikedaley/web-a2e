@@ -17,7 +17,12 @@ import {
   saveStateToSlot,
   loadStateFromSlot,
 } from "./state-persistence.js";
-import { machineDisplay } from "../machine/machine-profile.js";
+import {
+  getMachineProfile,
+  listMachineProfiles,
+  machineDisplay,
+} from "../machine/machine-profile.js";
+import { parseStateHeader } from "./state-header.js";
 
 // Constants
 const AUTO_SAVE_INTERVAL_MS = 5000;
@@ -34,6 +39,9 @@ const THUMBNAIL_HEIGHT = 96;
  * @property {Object} diskManager - Disk manager for state sync
  * @property {Object} reminderController - Reminder controller
  * @property {Object} [cpuDebuggerWindow] - CPU debugger window (for resync after import)
+ * @property {Object} [hardDriveManager] - Hard drive manager, told when a state put images back
+ * @property {function(string): Promise<boolean>} [switchMachine] - Puts a different machine in
+ *   the core, for a state that was saved off one
  */
 
 export class StateManager {
@@ -48,6 +56,9 @@ export class StateManager {
     this.reminderController = deps.reminderController;
     this.cpuDebuggerWindow = deps.cpuDebuggerWindow || null;
     this.basicProgramWindow = deps.basicProgramWindow || null;
+    this.hardDriveManager = deps.hardDriveManager || null;
+    this.switchMachine = deps.switchMachine || null;
+    this.machines = null;
 
     this.autoSaveEnabled = false;
     this.autoSaveInterval = null;
@@ -98,7 +109,11 @@ export class StateManager {
 
     // Save state when page becomes hidden (tab switch, minimize, mobile)
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.emulator.isRunning() && this.autoSaveEnabled) {
+      if (
+        document.hidden &&
+        this.emulator.isRunning() &&
+        this.autoSaveEnabled
+      ) {
         this.saveState();
       }
     });
@@ -108,14 +123,21 @@ export class StateManager {
     this.autoSavePending = false;
     this.autoSaveIdleHandle = null;
     this.autoSaveInterval = setInterval(() => {
-      if (this.emulator.isRunning() && !document.hidden && this.autoSaveEnabled && !this.autoSavePending) {
+      if (
+        this.emulator.isRunning() &&
+        !document.hidden &&
+        this.autoSaveEnabled &&
+        !this.autoSavePending
+      ) {
         this.autoSavePending = true;
         const doSave = () => {
           this.autoSavePending = false;
           this.saveState();
         };
         if (typeof requestIdleCallback === "function") {
-          this.autoSaveIdleHandle = requestIdleCallback(doSave, { timeout: AUTO_SAVE_INTERVAL_MS });
+          this.autoSaveIdleHandle = requestIdleCallback(doSave, {
+            timeout: AUTO_SAVE_INTERVAL_MS,
+          });
         } else {
           // Safari <16.4 fallback — setTimeout(0) yields to the render loop
           this.autoSaveIdleHandle = setTimeout(doSave, 0);
@@ -142,6 +164,28 @@ export class StateManager {
         localStorage.setItem("a2e-autosave-state", this.autoSaveEnabled);
       });
     }
+  }
+
+  /** The key of the machine in the core, which is the machine any state is for. */
+  currentMachineKey() {
+    return getMachineProfile().key;
+  }
+
+  /**
+   * Which machine wrote a state, from its header alone.
+   *
+   * Every machine's state starts the same way — magic, version, machine id —
+   * so this needs none of the layout that follows. Returns the profile, or
+   * null if the bytes are not a state or name a machine this build has not
+   * got.
+   */
+  async machineForState(stateData) {
+    const header = parseStateHeader(stateData);
+    if (!header) return null;
+    if (!this.machines) {
+      this.machines = await listMachineProfiles(this.wasmModule);
+    }
+    return this.machines.find((m) => m.id === header.machineId) || null;
   }
 
   /**
@@ -181,6 +225,17 @@ export class StateManager {
       return false;
     }
 
+    // A state only restores into the machine that wrote it, and the core
+    // refuses any other. Rather than fail, put that machine in the core first:
+    // a save is a save of a whole machine, and loading one is asking for that
+    // machine back. The switch rebuilds the core, which is what a restore
+    // wants anyway.
+    const machine = await this.machineForState(stateData);
+    if (machine && machine.key !== this.currentMachineKey()) {
+      if (!this.switchMachine || !machine.runnable) return false;
+      if (!(await this.switchMachine(machine.key))) return false;
+    }
+
     // No power cycle for a machine that is already on. importState() resets the
     // core itself before unpacking, so stopping and restarting here would only
     // rebuild the audio stack — and the AudioWorklet is the emulation clock. A
@@ -202,7 +257,10 @@ export class StateManager {
     await this.wasmModule.heapWrite(statePtr, stateData);
 
     // Import state
-    const success = await this.wasmModule._importState(statePtr, stateData.length);
+    const success = await this.wasmModule._importState(
+      statePtr,
+      stateData.length,
+    );
 
     await this.wasmModule._free(statePtr);
 
@@ -213,6 +271,10 @@ export class StateManager {
       }
       if (this.diskManager) {
         this.diskManager.syncWithEmulatorState();
+      }
+      // The state carried the hard drive images too.
+      if (this.hardDriveManager) {
+        this.hardDriveManager.syncWithEmulatorState();
       }
       // Re-push JS-side breakpoints/watchpoints/beam breakpoints to C++
       // since importState() calls reset() which clears them on the WASM side
@@ -294,7 +356,12 @@ export class StateManager {
       if (stateData) {
         const thumbnail = this.captureScreenshot();
         const preview = this.capturePreview();
-        await saveStateToStorage(stateData, thumbnail, preview);
+        await saveStateToStorage(
+          stateData,
+          thumbnail,
+          preview,
+          this.currentMachineKey(),
+        );
         if (this.onAutosave) this.onAutosave();
       }
     } catch (error) {
@@ -312,7 +379,7 @@ export class StateManager {
     }
 
     try {
-      const stateData = await loadStateFromStorage();
+      const stateData = await loadStateFromStorage(this.currentMachineKey());
       if (!stateData) {
         return false;
       }
@@ -340,7 +407,13 @@ export class StateManager {
 
     const thumbnail = this.captureScreenshot();
     const preview = this.capturePreview();
-    await saveStateToSlot(slotNumber, stateData, thumbnail, preview);
+    await saveStateToSlot(
+      slotNumber,
+      stateData,
+      thumbnail,
+      preview,
+      this.currentMachineKey(),
+    );
     return true;
   }
 
@@ -370,7 +443,7 @@ export class StateManager {
    * @returns {Promise<boolean>}
    */
   async hasSavedState() {
-    return hasSavedState();
+    return hasSavedState(this.currentMachineKey());
   }
 
   /**
