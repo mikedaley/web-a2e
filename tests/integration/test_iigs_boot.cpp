@@ -1061,3 +1061,34 @@ TEST_CASE("A IIgs prints through the port on the back of it",
   // its own setting rather than anything this test asked for.
   if (sent.size() > 3) REQUIRE(sent[3].second == 0x8A);
 }
+
+TEST_CASE("Control-Reset keeps a IIgs's memory and the power switch does not", "[iigs][boot][reset]") {
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the reset test");
+    return;
+  }
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  runToPrompt(machine);
+  REQUIRE(machine.screenText().find("Check startup device") != std::string::npos);
+
+  // A mark in fast RAM, in a bank nothing shadows, and one in the Mega II.
+  machine.memory().write(0x020123, 0xA5);
+  machine.memory().megaII().writeRAM(0x0300, 0x5A, false);
+
+  SECTION("the RESET line leaves both where they were, and the firmware runs again") {
+    machine.warmReset();
+    REQUIRE(machine.cpu().getEmulation());
+    REQUIRE(machine.memory().read(0x020123) == 0xA5);
+    REQUIRE(machine.memory().megaII().readRAM(0x0300, false) == 0x5A);
+    runToPrompt(machine);
+    REQUIRE(machine.screenText().find("Check startup device") != std::string::npos);
+  }
+
+  SECTION("power off and on clears them") {
+    machine.reset();
+    REQUIRE(machine.memory().read(0x020123) == 0x00);
+    REQUIRE(machine.memory().megaII().readRAM(0x0300, false) == 0x00);
+  }
+}

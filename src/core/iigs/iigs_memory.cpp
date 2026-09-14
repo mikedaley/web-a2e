@@ -99,9 +99,27 @@ void IIgsMemory::loadROM(const uint8_t *rom, size_t size) {
 }
 
 void IIgsMemory::reset() {
+  // Power on: nothing in RAM survives, on either side of the machine. The
+  // firmware decides between a cold and a warm start by what it finds at
+  // $03F2, so a reset that kept the fast RAM would make every reboot a warm
+  // one.
+  std::fill(fastRam_.begin(), fastRam_.end(), 0);
+  resetClock();
+  resetRegisters();
+  sound_.reset();
+  megaII_->reset();
+}
+
+void IIgsMemory::warmReset() {
+  // The RESET line, RAM untouched. The clock keeps counting: nothing about a
+  // reset stops the video or the drive.
+  resetRegisters();
+  megaII_->warmReset();
+}
+
+void IIgsMemory::resetRegisters() {
   // Shadowing all on, slow clock: a IIgs comes up pretending to be a //e as
   // hard as it can, and the firmware turns things on from there.
-  resetClock();
   shadow_ = 0;
   speed_ = 0;
   interruptEnable_ = 0;
@@ -114,9 +132,7 @@ void IIgsMemory::reset() {
   slotSelect_ = 0;
   diskSelect_ = 0;
   adb_.reset();
-  clock_.reset();
-  sound_.reset();
-  megaII_->reset();
+  clock_.reset(); // its transaction; the battery RAM and the time survive
 }
 
 // ============================================================================

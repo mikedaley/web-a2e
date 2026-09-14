@@ -169,7 +169,7 @@ void reset() {
 EMSCRIPTEN_KEEPALIVE
 void warmReset() {
   if (g_iigs) {
-    g_iigs->reset(); // A IIgs has no separate warm reset here yet
+    g_iigs->warmReset();
     return;
   }
   REQUIRE_EMULATOR();

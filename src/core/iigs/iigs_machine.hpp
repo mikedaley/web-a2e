@@ -80,6 +80,17 @@ public:
   /** Power-on reset: the CPU comes up in emulation mode, as every 65816 does. */
   void reset();
 
+  /**
+   * Control-Reset: the RESET line, with memory left alone.
+   *
+   * The processor takes the vector from ROM and the registers go back to
+   * their reset values, but the fast RAM, the Mega II's RAM and the disk in
+   * the drive are exactly as they were — so the firmware finds its warm-start
+   * bytes and restarts what was running, as a //e's does. `reset()` is the
+   * power switch; this is the key.
+   */
+  void warmReset();
+
   /** Run for this many cycles of the machine's *slow* side. */
   void runCycles(int slowCycles);
 

@@ -506,6 +506,20 @@ void IIgsMachine::recordTrace() {
   entry->cycle = static_cast<uint32_t>(memory_->slowCycles());
 }
 
+void IIgsMachine::warmReset() {
+  memory_->warmReset();
+  audio_->reset();
+  if (disk_) disk_->stopMotor();
+  linesFinished_ = 0;
+  volumeChanges_.clear();
+  frameReady_ = false;
+  samplesGenerated_ = 0;
+  debug_.reset();
+  paused_ = false;
+  // Emulation mode, the vector from ROM, exactly as at power on.
+  cpu_->reset();
+}
+
 bool IIgsMachine::insertBlockImage(int device, const uint8_t *data, size_t size,
                                    const std::string &filename) {
   return smartPort_ && smartPort_->insertImage(device, data, size, filename);

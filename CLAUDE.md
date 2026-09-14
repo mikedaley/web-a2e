@@ -278,6 +278,17 @@ readable at all: the controller holds a finished byte for about two bit cells,
 and at 2.8MHz the firmware's poll comes round three times per byte and reads
 half of them twice.
 
+**Control-Reset and the power switch are two different things on a IIgs, as
+on a //e.** `IIgsMachine::warmReset()` is the RESET line: the registers, the
+Mega II's switches and the chips that take the line go back to their reset
+values and the CPU takes the vector from ROM, but the fast RAM, the Mega II's
+RAM and the disk in the drive are exactly as they were — so the firmware finds
+its warm-start bytes at `$03F2` and restarts what was running. `reset()` is the
+power switch, and it now clears the *fast* RAM too: it used to leave it, and
+since the firmware decides between a cold and a warm start by what it finds in
+bank `$00`, every "Reboot" was a warm one. `_warmReset` used to call `reset()`
+for a IIgs, so Control-Reset was a reboot. `test_iigs_boot.cpp` pins both.
+
 **`$C029` bit 5 shows double hi-res in black and white.** The System 2
 Finder and the 80-column desktop programs draw a 560-dot double hi-res
 picture with Super Hi-Res *off* and this bit *set*, and the VGC shows the dots

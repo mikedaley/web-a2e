@@ -75,7 +75,17 @@ public:
   void loadROM(const uint8_t *rom, size_t size);
   bool hasROM() const { return romSize_ > 0; }
 
+  /** Power-on: every register to its reset value and all RAM cleared. */
   void reset();
+
+  /**
+   * The RESET line: the registers, the Mega II's switches and the chips that
+   * take the line go back to their reset values, and RAM — fast and slow —
+   * is left exactly as it was. That is what lets the firmware find its
+   * warm-start bytes at $03F2 and restart what was running, which is the
+   * whole difference between Control-Reset and pulling the plug.
+   */
+  void warmReset();
 
   // ===== The bus =====
 
@@ -556,6 +566,7 @@ private:
    * Bank $01 is never redirected — there is nowhere further to go.
    */
   uint8_t effectiveBank(uint8_t bank, uint16_t offset, bool write) const;
+  void resetRegisters(); // what reset() and warmReset() have in common
 
   /** A slot the Control Panel gave to "Your Card", with no card in it. */
   bool slotIsExternalAndEmpty(uint16_t offset) const;
