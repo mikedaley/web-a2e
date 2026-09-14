@@ -230,14 +230,22 @@ struct MachineSlot {
 struct MachineProfile {
   MachineId id;
   const char *key;       // Stable identifier: "apple2e"
-  const char *name;      // "Apple //e Enhanced"
-  const char *shortName; // "//e" — for prose: "Switch to //e"
+  const char *name;      // "Apple IIe Enhanced" — written with "II", as every
+                         // machine's is, so a list of them reads as one family
+  const char *shortName; // "IIe" — for prose: "Switch to IIe"
   // How the model is branded on the machine itself, for the header badge.
   // Distinct from shortName because Apple's own marks are not always what you
   // would write in a sentence: a II Plus is badged "][", and setting the badge
   // from a short name instead renders "II+" in the badge's heavy oblique face
   // as "//+", which is not a designation Apple ever used.
   const char *logotype;
+
+  // The year Apple first sold it. A list of the machines is shown in this
+  // order, because that is the order anyone who knows them expects: the II
+  // Plus before the IIe it was replaced by, the IIgs last. The registry
+  // itself stays in MachineId order, which the ids and the save states rely
+  // on, so this is data for the host to sort by rather than a position.
+  int released;
 
   // Which set of parts the machine is built from, and the first thing the
   // Emulator asks: a family is chosen once, at construction.
@@ -269,9 +277,10 @@ struct MachineProfile {
 inline constexpr MachineProfile APPLE_IIE_PROFILE = {
     MachineId::AppleIIe,
     "apple2e",
-    "Apple //e Enhanced",
+    "Apple IIe Enhanced",
+    "IIe",
     "//e",
-    "//e",
+    1983, // released
     MachineFamily::AppleII,
     CPUVariant::CMOS_65C02,
     // timing
@@ -362,6 +371,7 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
     "Apple II Plus",
     "II+",
     "][+",
+    1979, // released
     MachineFamily::AppleII,
     CPUVariant::NMOS_6502,
     // timing — the same video circuit, so the same numbers as a //e
@@ -469,9 +479,10 @@ inline constexpr MachineProfile APPLE_II_PLUS_PROFILE = {
 inline constexpr MachineProfile APPLE_IIC_PROFILE = {
     MachineId::AppleIIc,
     "apple2c",
-    "Apple //c",
+    "Apple IIc",
+    "IIc",
     "//c",
-    "//c",
+    1984, // released
     MachineFamily::AppleII,
     CPUVariant::CMOS_65C02,
     // timing — the //e's custom chips, so the //e's numbers
@@ -566,6 +577,7 @@ inline constexpr MachineProfile APPLE_IIGS_PROFILE = {
     "IIgs",
     "IIGS",
 
+    1986, // released
     MachineFamily::AppleIIgs,
     CPUVariant::CMOS_65C816,
     // timing — the Mega II's, which is to say the //e's. The 65816 runs at
@@ -595,16 +607,17 @@ inline constexpr MachineProfile APPLE_IIGS_PROFILE = {
         4 * 1024,   // lcBankSize
         8 * 1024,   // lcHighSize
     },
-    // display — the raster a monitor is sent, border included: 53 cycles of
-    // 16 Super Hi-Res pixels across, 240 lines doubled. The picture is 640x200
-    // (or the //e's 192 lines, stretched to the same width) at (96, 38); the
+    // display — the raster a monitor shows, border included: 46 cycles of
+    // 16 Super Hi-Res pixels across, 224 lines doubled. The picture is 640x200
+    // (or the //e's 192 lines, stretched to the same width and centred in the
+    // 200, so at (48, 32)) at (48, 24); the
     // numbers are iigs_spec.hpp's, and iigs_video.cpp asserts they agree.
     {
-        848, // dotsPerLine
-        848, // pixelWidth
-        480, // pixelHeight
+        736, // dotsPerLine
+        736, // pixelWidth
+        448, // pixelHeight
         2,   // lineDoubling
-        96, 38, 640, 384, // the text screen, inside the border
+        48, 32, 640, 384, // the text screen, centred in the picture area
         4, 3,             // the whole raster, which a monitor shows at 4:3
     },
     // caps

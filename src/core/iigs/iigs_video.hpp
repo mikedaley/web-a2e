@@ -40,7 +40,7 @@ class IIgsMemory;
  * programs really did that.
  *
  * The picture is composited into the raster a monitor is sent, border and
- * all: 848x480, with the 640x200 picture (lines doubled) at (96, 38) and the
+ * all: 736x448, with the 640x200 picture (lines doubled) at (48, 24) and the
  * border colour from $C034 around it — the counts are iigs_spec.hpp's. The
  * Mega II's 560x384 goes in the same place, stretched to 640 wide, because a
  * text screen and a Super Hi-Res screen are the same width on the monitor,
@@ -50,7 +50,7 @@ class IIgsVideo {
 public:
   IIgsVideo(Video &megaII, IIgsMemory &memory);
 
-  /** Draw the current screen and return it. RGBA, 848x480. */
+  /** Draw the current screen and return it. RGBA, 736x448. */
   const uint8_t *render();
 
   size_t framebufferSize() const { return frame_.size(); }

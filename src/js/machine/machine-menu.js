@@ -99,9 +99,14 @@ export class MachineMenu {
     if (!this.menuEl) return;
     const currentKey = getMachineProfile().key;
 
+    // In the order Apple sold them, which is the order anyone who knows them
+    // expects. The registry is in id order, which is not that.
+    const machines = [...this.machines].sort(
+      (a, b) => (a.released || 0) - (b.released || 0),
+    );
     this.menuEl.innerHTML =
       `<div class="machine-menu-heading">Machine</div>` +
-      this.machines.map((m) => this.itemHTML(m, currentKey)).join("");
+      machines.map((m) => this.itemHTML(m, currentKey)).join("");
 
     for (const item of this.menuEl.querySelectorAll(".machine-menu-item")) {
       if (item.disabled) continue;

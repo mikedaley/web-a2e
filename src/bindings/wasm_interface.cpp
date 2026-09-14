@@ -258,6 +258,7 @@ std::string machineProfileToJSON(const a2e::MachineProfile &m) {
   json += ",\"name\":\"" + std::string(m.name) + "\"";
   json += ",\"shortName\":\"" + std::string(m.shortName) + "\"";
   json += ",\"logotype\":\"" + std::string(m.logotype) + "\"";
+  json += ",\"released\":" + std::to_string(m.released);
   const char *cpuName = "6502";
   switch (m.cpu) {
   case a2e::CPUVariant::CMOS_65C02: cpuName = "65C02"; break;

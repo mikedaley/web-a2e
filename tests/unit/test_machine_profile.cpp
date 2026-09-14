@@ -291,16 +291,16 @@ TEST_CASE("The IIgs profile describes a machine of a different family",
         // and nothing else. The one place two answers to the same question are
         // both right, and why the "14 dots a column" rule is asked only of the
         // family it belongs to.
-        REQUIRE(m.display.pixelWidth == 848);
-        REQUIRE(m.display.pixelHeight == 480);
+        REQUIRE(m.display.pixelWidth == 736);
+        REQUIRE(m.display.pixelHeight == 448);
         REQUIRE(m.timing.visibleColumns * 14 != m.display.dotsPerLine);
         REQUIRE(iie.timing.visibleColumns * 14 == iie.display.dotsPerLine);
 
         // The text screen sits inside the border, stretched to the picture's
         // width, and the raster is shown at a monitor's 4:3; a //e's frame is
         // its text screen and is shown at its own ratio.
-        REQUIRE(m.display.textLeft == 96);
-        REQUIRE(m.display.textTop == 38);
+        REQUIRE(m.display.textLeft == 48);
+        REQUIRE(m.display.textTop == 32); // centred in the 200-line picture
         REQUIRE(m.display.textWidth == 640);
         REQUIRE(m.display.textHeight == 384);
         REQUIRE(m.display.aspectWidth * 3 == m.display.aspectHeight * 4);
@@ -1303,4 +1303,13 @@ TEST_CASE("The legacy constants still agree with the profile", "[machine]") {
     REQUIRE(m.timing.cyclesPerFrame() == CYCLES_PER_FRAME);
     REQUIRE(m.timing.cyclesPerScanline == CYCLES_PER_SCANLINE);
     REQUIRE(m.timing.scanlinesPerFrame == SCANLINES_PER_FRAME);
+}
+
+TEST_CASE("The machines carry the years they were sold, in the order they were", "[machine]") {
+    // The host lists the machines by this, so it has to say what it means: the
+    // II Plus first, then the IIe that replaced it, the IIc, and the IIgs.
+    REQUIRE(APPLE_II_PLUS_PROFILE.released == 1979);
+    REQUIRE(APPLE_IIE_PROFILE.released == 1983);
+    REQUIRE(APPLE_IIC_PROFILE.released == 1984);
+    REQUIRE(APPLE_IIGS_PROFILE.released == 1986);
 }

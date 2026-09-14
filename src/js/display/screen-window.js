@@ -25,7 +25,7 @@ export class ScreenWindow extends BaseWindow {
     this.textSelection = textSelection;
     this._viewportLocked = false;
     // The shape the monitor shows the frame at, not the frame's pixel count:
-    // a IIgs's raster is 848x480 and is shown at 4:3.
+    // a IIgs's raster is 736x448 and is shown at 4:3.
     this._aspect = machineAspect();
   }
 

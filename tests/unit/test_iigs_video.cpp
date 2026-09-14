@@ -281,11 +281,11 @@ TEST_CASE("$C022 colours the text rather than decoding it",
   IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x0F), fr, fg, fb);
   IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x06), br, bg, bb);
 
-  // The //e's picture is inside the border, stretched to 640 wide: a 14-dot
-  // cell is 16 pixels here.
+  // The //e's picture is inside the border, stretched to 640 wide — a 14-dot
+  // cell is 16 pixels here — and centred in the picture area's 200 lines.
   auto pixel = [&](int x, int y) {
     const size_t at =
-        (static_cast<size_t>(PICTURE_TOP + y) * RASTER_WIDTH + (PICTURE_LEFT + x)) * 4;
+        (static_cast<size_t>(MEGAII_TOP + y) * RASTER_WIDTH + (PICTURE_LEFT + x)) * 4;
     return std::array<uint8_t, 3>{frame[at], frame[at + 1], frame[at + 2]};
   };
 
@@ -307,11 +307,13 @@ TEST_CASE("The raster is the picture with the border a monitor sees around it",
   // What a IIgs sends is 53 cycles across by 240 lines: the picture, and 6
   // cycles of border before it, 7 after, 19 lines above and 21 below — the
   // cycles GSSquared's scanner flags as border. Super Hi-Res is 16 pixels a
-  // cycle, so the raster is 848x480 with the picture at (96, 38).
-  REQUIRE(RASTER_WIDTH == 848);
-  REQUIRE(RASTER_HEIGHT == 480);
-  REQUIRE(PICTURE_LEFT == 96);
-  REQUIRE(PICTURE_TOP == 38);
+  // cycle, and the border drawn is the part a monitor shows — three cycles
+  // either side, twelve lines above and below — so the raster is 736x448
+  // with the picture at (48, 24).
+  REQUIRE(RASTER_WIDTH == 736);
+  REQUIRE(RASTER_HEIGHT == 448);
+  REQUIRE(PICTURE_LEFT == 48);
+  REQUIRE(PICTURE_TOP == 24);
 
   Screen screen;
   screen.machine.memory().write(bankAddress(0x00, 0xC034), 0x06); // blue border
@@ -337,7 +339,7 @@ TEST_CASE("The raster is the picture with the border a monitor sees around it",
     REQUIRE(screen.rasterAt(RASTER_WIDTH - 1, RASTER_HEIGHT - 1) == border);
   }
 
-  SECTION("a //e mode draws 192 lines in the same place, and the last 8 are border") {
+  SECTION("a //e mode draws 192 lines centred in the 200, with border above and below") {
     // Text mode, every cell inverse, so the picture is solid text foreground.
     screen.machine.memory().write(bankAddress(0x00, 0xC029), 0x00);
     screen.machine.memory().write(bankAddress(0x00, 0xC022), 0xF6);
@@ -350,9 +352,15 @@ TEST_CASE("The raster is the picture with the border a monitor sees around it",
     uint8_t fr = 0, fg = 0, fb = 0;
     IIgsVideo::paletteColour(IIgsVideo::vgcColour(0x0F), fr, fg, fb);
     const std::array<uint8_t, 3> white = {fr, fg, fb};
-    REQUIRE(screen.at(0, 0) == white);
-    REQUIRE(screen.at(639, 383) == white); // stretched to the full width
-    REQUIRE(screen.at(0, 384) == border);   // the eight lines a //e never draws
-    REQUIRE(screen.rasterAt(PICTURE_LEFT - 1, PICTURE_TOP) == border);
+    // Four picture lines (eight raster lines) of border above and below the
+    // 192, so the top and bottom borders are the same height.
+    constexpr int GAP = MEGAII_TOP - PICTURE_TOP;
+    REQUIRE(GAP == 8);
+    REQUIRE(screen.at(0, GAP - 1) == border);
+    REQUIRE(screen.at(0, GAP) == white);
+    REQUIRE(screen.at(639, GAP + 383) == white); // stretched to the full width
+    REQUIRE(screen.at(0, GAP + 384) == border);
+    REQUIRE(screen.at(0, 399) == border);
+    REQUIRE(screen.rasterAt(PICTURE_LEFT - 1, MEGAII_TOP) == border);
   }
 }

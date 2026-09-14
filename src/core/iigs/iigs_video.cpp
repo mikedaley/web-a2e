@@ -50,7 +50,7 @@ static_assert(machineProfile(MachineId::AppleIIgs).display.pixelWidth == RASTER_
 static_assert(machineProfile(MachineId::AppleIIgs).display.pixelHeight == RASTER_HEIGHT);
 static_assert(machineProfile(MachineId::AppleIIgs).display.lineDoubling == RASTER_LINE_DOUBLING);
 static_assert(machineProfile(MachineId::AppleIIgs).display.textLeft == PICTURE_LEFT);
-static_assert(machineProfile(MachineId::AppleIIgs).display.textTop == PICTURE_TOP);
+static_assert(machineProfile(MachineId::AppleIIgs).display.textTop == MEGAII_TOP);
 static_assert(machineProfile(MachineId::AppleIIgs).display.textWidth == SHR_PIXELS_PER_LINE);
 static_assert(machineProfile(MachineId::AppleIIgs).display.textHeight ==
               machineProfile(MachineId::AppleIIe).display.pixelHeight);
@@ -131,12 +131,12 @@ const uint8_t *IIgsVideo::render() {
 }
 
 void IIgsVideo::renderMegaII() {
-  // The //e's picture, in the same place on the raster as Super Hi-Res's and
-  // the same width: 40 cycles of 14 dots stretched over 40 cycles of 16
-  // pixels, because that is what the monitor shows. Around it is border, in
-  // the colour the Control Panel set — the bottom nibble of $C034 — and so
-  // are the last eight lines of the picture area, which a //e mode's 192
-  // lines do not reach.
+  // The //e's picture, the same width as Super Hi-Res's — 40 cycles of 14
+  // dots stretched over 40 cycles of 16 pixels, because that is what the
+  // monitor shows — and centred in its 200 lines, since it has 192. Around it
+  // is border, in the colour the Control Panel set (the bottom nibble of
+  // $C034), and so are the four lines of the picture area above and below
+  // it, which is what keeps the top and bottom borders the same height.
   fillFrame(vgcColourARGB(memory_.borderColour()));
 
   const auto &megaIIDisplay = machineProfile(MachineId::AppleIIe).display;
@@ -164,7 +164,7 @@ void IIgsVideo::renderMegaII() {
 
   for (int y = 0; y < sourceHeight; y++) {
     const uint8_t *in = source + static_cast<size_t>(y) * sourceWidth * 4;
-    uint8_t *out = scanline(PICTURE_TOP + y) + static_cast<size_t>(PICTURE_LEFT) * 4;
+    uint8_t *out = scanline(MEGAII_TOP + y) + static_cast<size_t>(PICTURE_LEFT) * 4;
     for (int x = 0; x < PIXELS; x++) {
       const Tap &tap = taps[x];
       const uint8_t *a = in + static_cast<size_t>(tap.dot) * 4;

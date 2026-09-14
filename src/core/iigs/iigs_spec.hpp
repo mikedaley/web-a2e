@@ -139,22 +139,28 @@ inline constexpr int SHR_COLOUR_DEPTH_BITS = 4;
 // overscan hides a cycle or two of border in any case, so the difference is
 // not one a screen would show. The picture's place and size are exact.
 //
-// Super Hi-Res clocks 16 pixels a cycle, so the raster is 848 pixels wide;
+// Super Hi-Res clocks 16 pixels a cycle, so the picture is 640 pixels wide;
 // the //e's 14 dots a cycle cover the same width, and are stretched to it,
 // because on the monitor a text screen and a Super Hi-Res screen are the
 // same width. Lines are doubled, as the picture's are. One cycle in 65 is
 // two dots longer than the rest, inside the blanking, and is not modelled.
-// The raster is 51.9us of a 63.7us line and 240 of 262 lines, which is the
-// NTSC standard's active 52.6us and 242 lines to within a percent: a 4:3
-// monitor shows the whole of it, and that is the shape the profile names.
+//
+// The machine sends border for 13 cycles of every line and 40 lines of every
+// frame — 6 before and 7 after the picture, 19 above and 21 below — and a
+// monitor's bezel hides most of that. What is drawn here is the part a
+// monitor shows: three cycles either side and twelve lines above and below,
+// which keeps the border the same shape and puts it at about the width it
+// has on the glass. Drawing every cycle the machine sent made the border a
+// fifth of the picture's width, which no monitor of the period showed. The
+// profile still names the shape as 4:3, because that is what the monitor is.
 // ----------------------------------------------------------------------------
 inline constexpr int SHR_PIXELS_PER_CYCLE = 16;
 inline constexpr int SHR_PIXELS_PER_LINE = 640;
 inline constexpr int PICTURE_CYCLES = 40;
-inline constexpr int BORDER_LEFT_CYCLES = 6;
-inline constexpr int BORDER_RIGHT_CYCLES = 7;
-inline constexpr int BORDER_TOP_LINES = 19;
-inline constexpr int BORDER_BOTTOM_LINES = 21;
+inline constexpr int BORDER_LEFT_CYCLES = 3;
+inline constexpr int BORDER_RIGHT_CYCLES = 3;
+inline constexpr int BORDER_TOP_LINES = 12;
+inline constexpr int BORDER_BOTTOM_LINES = 12;
 inline constexpr int RASTER_LINE_DOUBLING = 2;
 
 inline constexpr int RASTER_WIDTH =
@@ -166,9 +172,19 @@ inline constexpr int RASTER_HEIGHT = RASTER_LINES * RASTER_LINE_DOUBLING;
 inline constexpr int PICTURE_LEFT = BORDER_LEFT_CYCLES * SHR_PIXELS_PER_CYCLE;
 inline constexpr int PICTURE_TOP = BORDER_TOP_LINES * RASTER_LINE_DOUBLING;
 
+/**
+ * Where a //e-mode picture's top line lands: centred in the 200-line picture
+ * area, since it has 192 lines. The four lines above and below it are border,
+ * so the top and bottom borders come out the same height rather than the
+ * bottom one eight lines deeper.
+ */
+inline constexpr int MEGAII_LINES = 192;
+inline constexpr int MEGAII_TOP =
+    PICTURE_TOP + ((SHR_LINES - MEGAII_LINES) / 2) * RASTER_LINE_DOUBLING;
+
 static_assert(PICTURE_CYCLES * SHR_PIXELS_PER_CYCLE == SHR_PIXELS_PER_LINE);
-static_assert(RASTER_WIDTH == 848);
-static_assert(RASTER_HEIGHT == 480);
+static_assert(RASTER_WIDTH == 736);
+static_assert(RASTER_HEIGHT == 448);
 
 // ----------------------------------------------------------------------------
 // Sound

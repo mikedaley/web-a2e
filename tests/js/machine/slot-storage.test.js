@@ -33,7 +33,7 @@ function fakeStorage(initial = {}) {
 
 const IIE = Object.freeze({
   key: "apple2e",
-  name: "Apple //e Enhanced",
+  name: "Apple IIe Enhanced",
   firstSlot: 1,
   lastSlot: 7,
   slots: [
