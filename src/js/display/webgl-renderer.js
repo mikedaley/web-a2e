@@ -828,8 +828,11 @@ export class WebGLRenderer {
    */
   setMachine(profile) {
     if (!profile) return;
-    // As the machine menu names it, less the make: "IIe Enhanced", "II Plus".
-    const name = (profile.name || "Apple IIe").replace(/^Apple\s+/, "");
+    // As the machine menu names it, less the make and in the capitals the
+    // rest of the message is set in: "IIE ENHANCED", "II PLUS", "IIC", "IIGS".
+    const name = (profile.name || "Apple IIe")
+      .replace(/^Apple\s+/, "")
+      .toUpperCase();
     if (name !== this._machineName) {
       this._machineName = name;
       this._noSignalFrame = null;
@@ -863,7 +866,7 @@ export class WebGLRenderer {
       this._noSignalFrame = buildNoSignalFrame(
         this.width,
         this.height,
-        this._machineName || "IIe",
+        this._machineName || "IIE",
       );
     }
     this.updateTexture(this._noSignalFrame);

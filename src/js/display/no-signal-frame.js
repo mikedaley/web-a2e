@@ -67,16 +67,6 @@ const FONT = {
   " ": [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
   // Lowercase is limited to what the model name needs.
   e: [0x00, 0x00, 0x0e, 0x11, 0x1f, 0x10, 0x0e],
-  c: [0x00, 0x00, 0x0e, 0x11, 0x10, 0x11, 0x0e],
-  n: [0x00, 0x00, 0x16, 0x19, 0x11, 0x11, 0x11],
-  h: [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11],
-  a: [0x00, 0x00, 0x0e, 0x01, 0x0f, 0x11, 0x0f],
-  d: [0x01, 0x01, 0x0d, 0x13, 0x11, 0x11, 0x0f],
-  l: [0x0c, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e],
-  u: [0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0d],
-  s: [0x00, 0x00, 0x0f, 0x10, 0x0e, 0x01, 0x1e],
-  g: [0x00, 0x0f, 0x11, 0x11, 0x0f, 0x01, 0x0e],
-  "+": [0x00, 0x04, 0x04, 0x1f, 0x04, 0x04, 0x00],
 };
 
 const GLYPH_W = 5;
@@ -99,14 +89,14 @@ const DIM = [0x8c, 0x8c, 0x8c];
  * @param {number} width  framebuffer width in pixels; callers pass the
  *                         machine's, and the //e's size is the default
  * @param {number} height framebuffer height in pixels (384)
- * @param {string} machine what to switch on, written as the machine menu
- *                         writes it — "IIe Enhanced", "II Plus", "IIc",
- *                         "IIgs" — since the message must name the machine
- *                         that is actually there, the way it is named
- *                         everywhere else
+ * @param {string} machine what to switch on, as the machine menu names it
+ *                         but in capitals like the rest of the line — "IIE
+ *                         ENHANCED", "II PLUS", "IIC", "IIGS" — since the
+ *                         message must name the machine that is actually
+ *                         there
  * @returns {Uint8Array} RGBA pixel data, width * height * 4 bytes
  */
-export function buildNoSignalFrame(width = 560, height = 384, machine = "IIe") {
+export function buildNoSignalFrame(width = 560, height = 384, machine = "IIE") {
   const buf = new Uint8Array(width * height * 4);
 
   // Opaque black — the shader's vignette and bezel do the rest.
@@ -161,7 +151,7 @@ export function buildNoSignalFrame(width = 560, height = 384, machine = "IIe") {
 
   drawTextCentred("NO SIGNAL", cellRow(9), FG, 2);
   // One line if it fits the screen's columns, otherwise the "TO START" drops
-  // to the next: a 40-column picture has room for "IIc" but not "IIe Enhanced".
+  // to the next: a 40-column picture has room for "IIC" but not "IIE ENHANCED".
   const columns = Math.floor(width / CELL_W);
   const message = `SWITCH ON THE APPLE ${machine} TO START`;
   if (message.length <= columns) {
