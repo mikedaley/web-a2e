@@ -1494,6 +1494,29 @@ class ExpansionCard {
 - `SSCCard` (`cards/ssc/`) - Super Serial Card with ACIA 6551; drives ImageWriter I and ImageWriter II virtual printers (slots 1–2)
 - `SerialPort` (`cards/serial/`) - One of a //c's two built-in ports: the same ACIA 6551, no DIP switches and no ROM (slots 1 and 2, fixed)
 
+**The paper canvas is a window, not the whole job.** A browser caps a canvas
+(~32767 px a side, and iOS Safari by total area), and one 8.5x11" page at the
+default SS=3 is already ~13.5M backing pixels — about 54MB. `PrinterWindow`
+therefore keeps a few pages live (`_liveWindowPages`, asked of the browser via
+`canvasFits` and bounded by `MAX_LIVE_BACKING_PX`) and scrolls the paper through
+it: `_scrollWindow` writes the departing pages to the page store, shifts the
+bitmap up by whole pages and advances `_pagesScrolled`, which `_yToCanvas`
+subtracts from every coordinate. Whole pages, because the page-break overlay and
+every slice in the snapshot and export paths are page-aligned.
+
+Two consequences are load-bearing. **Ink asks for its row rather than working
+it out** (`_reserveRow`): making room can scroll the window, so the canvas y is
+only settled after the call — a caller that computed it first drew a page-height
+off once a long print started scrolling. And **an export is the job, not the
+window**: `_allJobPages()` puts the stored pages before the live ones, which is
+what the PDF and the multi-page ZIP use. Page records are numbered from the
+start of the job, and the Print Browser counts a job's pages itself rather than
+trusting the `pageCount` stamped on a record that was written while the job was
+still short.
+
+Before this the height was simply clamped, and every dot past the last page that
+fitted was dropped: a four-page print kept one page and silently lost three.
+
 **A GS/OS print is graphics, and the Automatic Line Feed switch nearly ruins
 it.** The ImageWriter driver rasterises the page into 8-dot bands and writes
 `CR`, `ESC T 16`, `LF` before each — 16/144" is exactly eight dots at the head's

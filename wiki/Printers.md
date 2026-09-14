@@ -55,6 +55,13 @@ From Applesoft you can also `PRINT CHR$(4);"PR#1"` inside a program. Software wi
 
 The Print Browser collects completed pages so you can go back through a session's output. Pages can be saved as images, and the paper rendering is what gets exported -- what you see is what you get.
 
+It is also where the earlier pages of a long print live. A browser will not host
+a canvas long enough for a whole multi-page job, so the paper on screen is a
+window a few pages deep and it scrolls as printing goes on; each page is written
+to the Print Browser as it leaves the top. Nothing is lost -- the PDF button and
+the multi-page PNG export both cover the whole job, not just the pages still on
+the paper.
+
 ## Editing the Printer Fonts
 
 The glyph banks the models render from can be authored in a standalone editor at **`/printers/rom-editor.html`**.

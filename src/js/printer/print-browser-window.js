@@ -156,13 +156,18 @@ export class PrintBrowserWindow extends BaseWindow {
 
       const thumbs = document.createElement("div");
       thumbs.className = "pb-thumbs";
+      // Count the pages this job actually has rather than trusting the count
+      // stamped on each record: a print longer than the live paper window is
+      // saved a page at a time as it scrolls, so the early records were written
+      // when the job was still short and their stored count is out of date.
+      const jobPages = job.pages.length;
       for (const page of job.pages) {
         const pageSel = this._sel.kind === "page" && this._sel.id === page.id;
         const card = document.createElement("div");
         card.className = "pb-thumb" + (pageSel ? " sel" : "");
         card.innerHTML =
           `<img src="${page.pngDataUrl}" alt="page ${page.pageIndex + 1}"/>` +
-          `<span class="pb-thumb-cap">Page ${page.pageIndex + 1} / ${page.pageCount}<br>` +
+          `<span class="pb-thumb-cap">Page ${page.pageIndex + 1} / ${jobPages}<br>` +
           `${this._esc(page.ribbon)} · ${this._pageSizeLabel(page)}</span>`;
         card.addEventListener("click", () => {
           this._sel = { kind: "page", id: page.id };
@@ -220,6 +225,13 @@ export class PrintBrowserWindow extends BaseWindow {
     this._preview.querySelector("#pb-del-job").addEventListener("click", () => this._deleteJob(job.jobId));
   }
 
+  // How many pages this page's job holds, counted from the records rather than
+  // read off the record: a long print is saved a page at a time as the paper
+  // scrolls, so an early record's stored count was right only at the time.
+  _jobPageCount(page) {
+    return this._pages.filter((p) => p.jobId === page.jobId).length || 1;
+  }
+
   // Single page: just that sheet + per-page actions (export is page-only).
   _renderPagePreview(page) {
     const when = new Date(page.savedAt).toLocaleString();
@@ -230,7 +242,7 @@ export class PrintBrowserWindow extends BaseWindow {
         <button id="pb-del" class="pb-btn pb-btn-danger pb-spacer">Delete Page</button>
       </div>
       <div class="pb-meta">
-        ${this._esc(page.model)} · page ${page.pageIndex + 1} of ${page.pageCount} ·
+        ${this._esc(page.model)} · page ${page.pageIndex + 1} of ${this._jobPageCount(page)} ·
         ${this._esc(page.ribbon)} ribbon · ${this._pageSizeLabel(page)} · ${when}
       </div>
       <div class="pb-stage"><img src="${page.pngDataUrl}" style="width:${this._imgDisplayW(page)}px" alt="printed page"/></div>`;

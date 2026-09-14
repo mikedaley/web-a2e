@@ -15,7 +15,7 @@ import {
   buildScreenDumpColor, litDensity, screenWidth, screenHeight,
 } from "./screen-dump.js";
 import { printPagesViaIframe } from "./print-utils.js";
-import { savePage } from "./printer-page-store.js";
+import { savePage, getAllPages } from "./printer-page-store.js";
 import { clampWidthInch, GRID_INCH, computeLayout } from "./printer-paper-geometry.js";
 
 // 1 display pixel per dot (canvas scrolls horizontally if wider than paper area)
@@ -120,6 +120,25 @@ const CANVAS_MAX_AREA = 16000000;
 // Safari's floor; Chrome/Firefox go far larger. Page-store snapshots use this
 // so full-density capture survives on browsers that allow it (Safari's failure
 // mode is a silently blank canvas, hence the draw-and-read-back probe).
+// How many whole pages the live paper canvas has to scroll so that ink at
+// logical row `neededY` (absolute paper space) lands inside a window of
+// `windowPages`. Zero while the ink is still inside the window. Pure, and
+// exported because the sliding window is the one piece of the long-print path
+// that can be reasoned about without a canvas.
+export function scrollPagesNeeded(neededY, windowPages, pageH) {
+  if (!(pageH > 0) || !(windowPages > 0) || !Number.isFinite(neededY)) return 0;
+  const lastPageWanted = Math.floor(Math.max(0, neededY) / pageH);
+  return Math.max(0, lastPageWanted - (windowPages - 1));
+}
+
+// Whole pages to try to keep live, and the memory that may go on them. Paper
+// nobody is looking at any more is expensive: one 8.5" page at SS=3 is already
+// ~13.5M backing pixels, which is ~54MB, and everything older is in the page
+// store. The browser is asked as well (canvasFits) — this is the budget we
+// impose on ourselves regardless of what it would allow.
+const MAX_LIVE_PAGES     = 4;
+const MAX_LIVE_BACKING_PX = 32e6;   // ~128MB of RGBA backing store
+
 const _canvasFitCache = new Map();
 function canvasFits(w, h) {
   if (w > CANVAS_MAX_H || h > CANVAS_MAX_H) return false;
@@ -538,8 +557,13 @@ export class PrinterWindow extends BaseWindow {
     const logW = this._platen.widthPx;
     // Start with the first sheet plus two blank feed pages ahead (display-only;
     // cropped from saved PNGs). _ensureCanvasHeight keeps the 2-page lead as
-    // printing advances.
-    const logH = this._pageHeightPx() * 3;
+    // printing advances — within the live window, which on a constrained engine
+    // is fewer than three pages; asking for more than the browser will host
+    // silently zeroes the backing store and blanks the sheet.
+    const pageH = this._pageHeightPx();
+    this._pagesScrolled = 0;
+    this._scrollNoted   = false;
+    const logH = pageH * Math.min(3, this._liveWindowPages(pageH, logW));
     const ctx  = this._sizePaperBacking(logW, logH);   // backing ×SS, ctx pre-scaled
     this._paintPaper(ctx, 0, logH);
     // Size both overlays to match main canvas at LOGICAL density (they carry thin
@@ -925,10 +949,12 @@ export class PrinterWindow extends BaseWindow {
 
   // Unscaled paper row (12 px/line) → canvas Y. Vertical-only scale to the true
   // 8:11 page aspect; the dot grid is 120 dpi across but 72 dpi down, so 1:1
-  // would draw a square page. No offset — the head's own y carries any start
-  // position, so the page keeps its exact dimensions.
+  // would draw a square page. The head's own y carries any start position, so
+  // the page keeps its exact dimensions; the only offset is the paper that has
+  // already scrolled off the top of the live window (_canvasOriginPx), which is
+  // zero until a print outgrows the canvas.
   _yToCanvas(base) {
-    return this._snapPx(base * this._vstretch);
+    return this._snapPx(base * this._vstretch) - this._canvasOriginPx;
   }
 
   // Quantize a logical-px coordinate to the supersampled backing grid (1/SS px).
@@ -991,6 +1017,104 @@ export class PrinterWindow extends BaseWindow {
     ctx.clip();
   }
 
+  // The live canvas holds a WINDOW of the paper, not the whole job. How many
+  // pages fit is asked of the browser rather than assumed: the static area cap
+  // is iOS Safari's floor, and on a desktop engine it allows barely one page at
+  // SS=3 — which is what used to truncate every print past page one.
+  // `logW` is passed explicitly by the one caller that knows the width before
+  // the canvas has it (_initCanvas): keyed on a width of undefined, the answer
+  // came back as a single page and stuck there.
+  _liveWindowPages(pageH, logW = this._logW) {
+    const ss  = this._ss;
+    const key = `${logW}x${pageH}x${ss}`;
+    if (this._windowPagesKey === key) return this._windowPagesValue;
+    const wBack = Math.round(logW * ss);
+    let pages = 1;
+    for (let n = MAX_LIVE_PAGES; n >= 2; n--) {
+      const hBack = Math.round(n * pageH * ss);
+      if (wBack * hBack > MAX_LIVE_BACKING_PX) continue;
+      if (canvasFits(wBack, hBack)) { pages = n; break; }
+    }
+    this._windowPagesKey   = key;
+    this._windowPagesValue = pages;
+    return pages;
+  }
+
+  // Logical px of paper that has scrolled off the top of the live canvas. Every
+  // canvas coordinate is paper space minus this, which is what _yToCanvas does.
+  get _canvasOriginPx() { return (this._pagesScrolled || 0) * this._pageHeightPx(); }
+
+  /**
+   * Make room for ink at paper row `paperBase` and return its canvas y.
+   *
+   * The answer is only knowable after the call, because making room can scroll
+   * the window — so every ink path asks for the row and is told where it landed
+   * rather than working the coordinate out first.
+   */
+  _reserveRow(paperBase, extraPx = 0) {
+    this._ensureCanvasHeight(this._yToCanvas(paperBase) + extraPx);
+    return this._yToCanvas(paperBase);
+  }
+
+  /**
+   * Scroll the live window down by whole pages, keeping what leaves.
+   *
+   * The pages going off the top are written to the page store first, so a long
+   * job is complete in the Print Browser and in an export even though the canvas
+   * only ever holds a few pages of it. Whole pages, because the page-break
+   * overlay and every slice in the snapshot and export paths are aligned to
+   * page boundaries.
+   */
+  _scrollWindow(pages) {
+    const cv = this.elements?.canvas;
+    if (!cv || pages <= 0) return;
+    const pageH = this._pageHeightPx();
+    const ss    = this._ss;
+
+    // Keep the departing pages before they are painted over.
+    this._persistScrollingPages(pages);
+
+    const shiftLog = pages * pageH;
+    const keepLog  = Math.max(0, this._logH - shiftLog);
+    let tmp = null;
+    if (keepLog > 0 && cv.width > 0 && cv.height > 0) {
+      tmp = document.createElement("canvas");
+      tmp.width  = cv.width;
+      tmp.height = cv.height;
+      tmp.getContext("2d").drawImage(cv, 0, 0);
+    }
+    const ctx = this.elements.ctx;
+    this._paintPaper(ctx, 0, this._logH);
+    if (tmp) {
+      // Draw the retained band at the top: source in backing px, destination in
+      // logical px (the context is pre-scaled by SS).
+      ctx.drawImage(tmp, 0, Math.round(shiftLog * ss), cv.width, Math.round(keepLog * ss),
+                         0, 0, this._logW, keepLog);
+    }
+    this._pagesScrolled = (this._pagesScrolled || 0) + pages;
+    this._heads = [];          // the impact cues belong to rows that have gone
+    this._ink?.clear?.();
+    this._drawPageBreaks();
+    if (!this._scrollNoted) {
+      this._scrollNoted = true;
+      console.info("[printer] the paper is longer than the live window; " +
+                   "earlier pages are kept in the Print Browser");
+    }
+  }
+
+  // Write the pages about to leave the window into the page store, under this
+  // job's id and their ABSOLUTE page numbers, so they sit in order beside the
+  // ones still on the paper.
+  _persistScrollingPages(pages) {
+    if (!this._canvasMode) return;
+    this._ensureJobId();
+    const recs = this._snapshotPages();
+    if (!recs.length) return;
+    const first = this._pagesScrolled || 0;
+    recs.filter((rec) => rec.pageIndex >= first && rec.pageIndex < first + pages)
+        .forEach((rec) => savePage(rec));
+  }
+
   _ensureCanvasHeight(neededPx) {
     const cv = this.elements.canvas;
     // A non-finite neededPx (a NaN/Infinity leaking out of the dot math when a
@@ -1006,26 +1130,34 @@ export class PrinterWindow extends BaseWindow {
     // — _usedCanvas() crops them out of any saved PNG.
     // neededPx is a LOGICAL canvas y (draw-space), so all the page math here is
     // logical; only the backing store is ×SS (set via _sizePaperBacking below).
-    const ss    = this._ss;
     const pageH = this._pageHeightPx();
-    let   newH  = Math.ceil(Math.max(1, neededPx) / pageH) * pageH + 2 * pageH;
-    // Browsers cap a canvas backing store (~32767 px per side; less by area on
-    // some engines). The cap is on the BACKING (×SS) dimensions, so convert to a
-    // logical limit: divide the per-side cap by SS and the area cap by SS² (both
-    // axes scale). Past it the assignment silently no-ops or zeroes the canvas,
-    // blanking the bottom of a long print. Clamp to whole pages; the page store
-    // already retains the earlier sheets for export.
-    const areaH = Math.floor(CANVAS_MAX_AREA / Math.max(1, this._logW * ss * ss) / pageH) * pageH;
-    const maxH  = Math.max(pageH, Math.min(Math.floor(CANVAS_MAX_H / ss / pageH) * pageH, areaH));
-    if (newH > maxH) {
-      newH = maxH;
-      if (!this._canvasCapWarned) {
-        this._canvasCapWarned = true;
-        this._lastRenderError = `canvas height capped at ${maxH}px (browser limit)`;
-        console.warn(`[printer] canvas height hit browser cap (${maxH}px); long print truncated on screen`);
-      }
+    // A canvas cannot hold an arbitrarily long print: browsers cap the backing
+    // store (~32767 px per side, and iOS Safari by total area), and one 8.5"
+    // page at SS=3 is already ~54MB of it. So the canvas is a WINDOW onto the
+    // paper — a few pages wide — and the paper scrolls through it. What leaves
+    // the top is written to the page store on the way out, so nothing printed
+    // is lost: it is all in the Print Browser and in an export. The old code
+    // clamped the height instead, and every dot past the last page that fitted
+    // was simply dropped.
+    const windowPages = this._liveWindowPages(pageH);
+    const maxH        = windowPages * pageH;
+    const scrollBy    = scrollPagesNeeded(neededPx, windowPages, pageH);
+    if (scrollBy > 0) {
+      // Grow to the full window first, so the retained band has somewhere to go.
+      if (this._logH < maxH) this._growCanvasTo(maxH);
+      this._scrollWindow(scrollBy);
+      return;
     }
+    let newH = Math.min(maxH, Math.ceil(Math.max(1, neededPx) / pageH) * pageH + 2 * pageH);
     this._maxNeeded = Math.max(this._maxNeeded || 0, Math.round(neededPx));
+    if (newH <= this._logH) return;
+    this._growCanvasTo(newH);
+  }
+
+  // Grow the backing store (and the overlays) to `newH` logical px, keeping what
+  // is already drawn.
+  _growCanvasTo(newH) {
+    const cv = this.elements.canvas;
     if (newH <= this._logH) return;
     this._growCount = (this._growCount || 0) + 1;
     // Snapshot existing content only when there IS some: drawImage throws if the
@@ -1424,7 +1556,15 @@ export class PrinterWindow extends BaseWindow {
     const clean = this._cleanUsedCanvas();
     if (!clean) return [];
     const pageH   = this._pageHeightPx();
-    const pages   = this._usedPageCount(pageH);
+    // Never slice past what the canvas holds: while the window is scrolling, the
+    // head has already moved to a row beyond it, and a page band sampled from
+    // off the bottom of the backing store would be saved as a blank sheet.
+    const pages   = Math.max(1, Math.min(this._usedPageCount(pageH),
+                                         Math.floor(this._logH / pageH)));
+    // Pages are numbered from the start of the JOB, not from the top of the live
+    // canvas, so the ones that scrolled off sit in order beside the ones still
+    // on the paper and a re-snapshot overwrites the same records.
+    const scrolled = this._pagesScrolled || 0;
     const printer = this.printerManager.getActivePrinter();
     const base = {
       jobId:      this._jobId,
@@ -1469,9 +1609,9 @@ export class PrinterWindow extends BaseWindow {
                          0, 0, slice.width, slice.height);
       recs.push({
         ...base,
-        id:         `${this._jobId}::${i}`,
-        pageIndex:  i,
-        pageCount:  pages,
+        id:         `${this._jobId}::${scrolled + i}`,
+        pageIndex:  scrolled + i,
+        pageCount:  scrolled + pages,
         width:      slice.width,
         height:     slice.height,
         pngDataUrl: slice.toDataURL("image/png"),
@@ -1531,7 +1671,17 @@ export class PrinterWindow extends BaseWindow {
     this._recomputePlaten();
     const pageH = this._pageHeightPx();
     const logW  = this._platen.widthPx;
-    const logH  = pageH * (job.pages.length + 2);
+    // A job can be longer than the live window. Restore its LAST pages onto the
+    // paper and count the rest as already scrolled off: they are still in the
+    // store, the head lands in the right place because the window carries its
+    // origin, and printing on can extend the job.
+    this._windowPagesKey = null;                       // width may have changed
+    const windowPages = this._liveWindowPages(pageH);
+    const shown       = Math.min(job.pages.length, Math.max(1, windowPages - 2));
+    const firstShown  = job.pages.length - shown;
+    this._pagesScrolled = firstShown;
+    this._scrollNoted   = firstShown > 0;
+    const logH  = pageH * Math.min(shown + 2, windowPages);
     const ctx   = this._sizePaperBacking(logW, logH);   // backing ×SS, ctx pre-scaled
     this._paintPaper(ctx, 0, logH);
     const g = this._platen;
@@ -1541,9 +1691,9 @@ export class PrinterWindow extends BaseWindow {
     // captures, or a since-lowered SS dial) rect-map up/down here instead.
     const bodyX = Math.round(g.paperLPx);
     const bodyW = Math.max(1, Math.round(g.paperRPx - g.paperLPx));
-    for (let i = 0; i < job.pages.length; i++) {
+    for (let i = firstShown; i < job.pages.length; i++) {
       const img = await this._loadImage(job.pages[i].pngDataUrl);
-      ctx.drawImage(img, bodyX, i * pageH, bodyW, pageH);
+      ctx.drawImage(img, bodyX, (i - firstShown) * pageH, bodyW, pageH);
     }
     const pf = this.elements.perf;
     pf.width  = logW;
@@ -1685,7 +1835,9 @@ export class PrinterWindow extends BaseWindow {
     const cx    = this._platen.zoneOriginPx + this._snapPx(xDot / this._hdotInternal) * DOT_PX;
     // No whole-row rounding on the baseline: ESC T fine pitches (1/144") place
     // lines BETWEEN 1/72" rows — _yToCanvas snaps to the 1/SS backing grid.
-    const cy    = this._yToCanvas((yDot / dotH) * DOT_PX);
+    // Reserved rather than computed: making room can scroll the live window, so
+    // the canvas y is only settled once the room exists (see _reserveRow).
+    const paperRow = (yDot / dotH) * DOT_PX;
     const nRows = rows || 9;
     // Column/row canvas pitch from the glyph's dot density vs the active raster:
     // draft/corr (120/72 dpi) → _ppi/120 px per column, _vstretch per row. NLQ
@@ -1708,10 +1860,9 @@ export class PrinterWindow extends BaseWindow {
     const baseHpx = Math.max(1, Math.round(rowStep));
     const dotHpx = half ? Math.max(1, Math.round(baseHpx * 0.5)) : baseHpx;
     const dotWpx = Math.max(1, Math.round(colStep * xs));
+    const cy     = this._reserveRow(paperRow, glyphH + DOT_PX);
     const rowY   = r => cy + yOff + this._snapPx(r * rowStep * vScale);
     const cellW  = Math.round(cols.length * colStep * xs);
-
-    this._ensureCanvasHeight(cy + glyphH + DOT_PX);
 
     const paint = (shift) => {
       for (let c = 0; c < cols.length; c++) {
@@ -1763,13 +1914,13 @@ export class PrinterWindow extends BaseWindow {
     // canvas footprint is its physical pitch, so neighbouring dots butt/overlap
     // into solid ink with no gaps.
     const px      = this._platen.zoneOriginPx + this._snapPx(xDot / this._hdotInternal) * DOT_PX;
-    const py      = this._yToCanvas(yDot / this._vdotInternal);
     const rowStep = (dotH / this._vdotInternal) * this._vstretch;          // canvas px between data rows
     const dW      = Math.max(DOT_PX, Math.round((dotW / this._hdotInternal) * DOT_PX));
     const dH      = Math.max(DOT_H_PX, Math.round(rowStep) + 1);
     const glyphH  = Math.round(8 * rowStep);
 
-    this._ensureCanvasHeight(py + glyphH + dH);
+    // Reserved rather than computed: making room can scroll the live window.
+    const py      = this._reserveRow(yDot / this._vdotInternal, glyphH + dH);
 
     ctx.save();
     this._clipToPaper(ctx);          // dots past the paper land on the roller, never the tractor strips
@@ -1876,8 +2027,8 @@ export class PrinterWindow extends BaseWindow {
       const lines     = Math.round((baseDelta * this._vdotInternal) / dotsPerLine);
       const newYDot   = Math.max(0, startYDot + (lines + autoLines) * dotsPerLine);
       if (p) p._yDot = newYDot;
-      const cy = this._yToCanvas(Math.round(newYDot / this._vdotInternal) * DOT_PX);
-      this._ensureCanvasHeight(cy + Math.round(12 * this._vstretch));
+      const cy = this._reserveRow(Math.round(newYDot / this._vdotInternal) * DOT_PX,
+                                  Math.round(12 * this._vstretch));
       this._updateHeadMarker(cy);
       // Head is the anchor: feed the paper past it so it stays centred in the
       // viewport (clamped at the top of the first page), exactly as printing does.
@@ -2184,8 +2335,8 @@ export class PrinterWindow extends BaseWindow {
     else if (kind === "down") p.lineFeedDown(1);
     else if (kind === "ff")   p.formFeed();
     if (this._canvasMode) {
-      const cy = this._yToCanvas(Math.round((p._yDot | 0) / this._vdotInternal) * DOT_PX);
-      this._ensureCanvasHeight(cy + Math.round(12 * this._vstretch));
+      const cy = this._reserveRow(Math.round((p._yDot | 0) / this._vdotInternal) * DOT_PX,
+                                  Math.round(12 * this._vstretch));
       this._updateHeadMarker(cy);
       this._followHead(cy);
     }
@@ -2759,6 +2910,11 @@ export class PrinterWindow extends BaseWindow {
       headYDot:    p?._yDot | 0,
       maxNeeded:   this._maxNeeded || 0,
       growCount:   this._growCount || 0,
+      // How much of a long print is behind the live window, and how wide that
+      // window is: the pages counted here are in the page store, not lost.
+      pagesScrolled: this._pagesScrolled || 0,
+      windowPages:   this._canvasMode && this.elements
+                       ? this._liveWindowPages(this._pageHeightPx()) : 0,
     };
   }
 
@@ -2816,11 +2972,50 @@ export class PrinterWindow extends BaseWindow {
     }
   }
 
+  /**
+   * Every page of the current job, in order, as page records.
+   *
+   * The live canvas is only a window onto a long print, so an export has to
+   * take the pages that scrolled off out of the store and put the ones still on
+   * the paper after them. Without this, saving a ten-page job wrote out
+   * whichever pages happened to be on the canvas.
+   */
+  async _allJobPages() {
+    const live  = this._snapshotPages();
+    const first = live.length ? live[0].pageIndex : (this._pagesScrolled || 0);
+    if (!first || this._jobId == null) return live;
+    let stored = [];
+    try {
+      stored = (await getAllPages())
+        .filter((rec) => rec.jobId === this._jobId && rec.pageIndex < first)
+        .sort((a, b) => a.pageIndex - b.pageIndex);
+    } catch (e) {
+      console.warn("[printer] could not read the earlier pages of this job:", e);
+    }
+    return [...stored, ...live];
+  }
+
+  // PNG bytes out of a stored page's data URL, without a round trip through a
+  // canvas (the stored raster is already exactly what was printed).
+  _dataUrlBytes(dataUrl) {
+    const base64 = String(dataUrl).split(",")[1] || "";
+    const bin    = atob(base64);
+    const out    = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
   _downloadPng() {
     if (this._canvasMode) {
       const cv    = this.elements.canvas;
       const pageH = this._pageHeightPx();
       const pages = this._usedPageCount(pageH);
+      // A print longer than the live window has pages in the store; zip the
+      // whole job from there rather than only what is on the paper.
+      if (this._pagesScrolled > 0) {
+        this._exportJobZip();
+        return;
+      }
       // One sheet → a plain PNG. Multiple sheets (e.g. a banner) → a ZIP with
       // one PNG per page plus a full-strip PNG of everything joined.
       if (pages <= 1) {
@@ -2879,6 +3074,20 @@ export class PrinterWindow extends BaseWindow {
   }
 
   // Slice the paper into one PNG per page + a full-strip PNG, zip, and download.
+  // Every page of a long job as its own PNG in a ZIP. No joined full-strip
+  // here: a print that outgrew the canvas cannot be joined into one image
+  // either, which is the whole reason the paper scrolls.
+  async _exportJobZip() {
+    const pad   = (n) => String(n).padStart(2, "0");
+    const recs  = await this._allJobPages();
+    if (!recs.length) return;
+    const files = recs.map((rec) => ({
+      name: `page-${pad(rec.pageIndex + 1)}.png`,
+      data: this._dataUrlBytes(rec.pngDataUrl),
+    }));
+    this._saveBlob(makeZipStore(files), "printer-pages.zip");
+  }
+
   async _exportPagesZip(cv, pageH, pages) {
     const pad   = (n) => String(n).padStart(2, "0");
     const files = [];
@@ -2925,9 +3134,20 @@ export class PrinterWindow extends BaseWindow {
   // Pages are cropped to the paper BODY (paperLPx → paperRPx) — the sheet an
   // operator files after tearing off the ½" tractor strips; same crop as the
   // page store, so the printer window's PDF and the Print Browser's agree.
-  _downloadPdf() {
+  async _downloadPdf() {
     if (!this._canvasMode) return;
     const pageH = this._pageHeightPx();
+    // A print longer than the live window: pages come from the store, in order,
+    // at the density they were captured at.
+    if (this._pagesScrolled > 0) {
+      const recs = await this._allJobPages();
+      if (!recs.length) return;
+      const first = recs[0];
+      const ppi   = first.pxPerInch || this._ppi;
+      printPagesViaIframe(recs.map((rec) => rec.pngDataUrl),
+                          first.width / ppi, first.height / ppi);
+      return;
+    }
     const pages = this._usedPageCount(pageH);
     const clean = this._cleanUsedCanvas();      // used pages, perforation-free (×SS backing)
     if (!clean) return;

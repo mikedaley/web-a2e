@@ -15,6 +15,7 @@ import { AppleDMP } from "../../../src/js/printer/apple-dmp.js";
 import { ImageWriterI } from "../../../src/js/printer/imagewriter-i.js";
 import { ImageWriterII } from "../../../src/js/printer/imagewriter-ii.js";
 import { bytes, capture, summarise, CR, LF, FF, ESC } from "./harness.js";
+import { scrollPagesNeeded } from "../../../src/js/printer/printer-window.js";
 
 const MODELS = [
   ["AppleDMP", () => new AppleDMP()],
@@ -189,5 +190,33 @@ describe("graphics bands from the GS/OS ImageWriter driver", () => {
     printer.on("linefeed", () => feeds++);
     for (const byte of bytes(CR, "A", LF)) printer.receiveByte(byte);
     expect(feeds).toBe(2);
+  });
+});
+
+describe("the live paper window", () => {
+  // A canvas cannot hold an arbitrarily long print, so the paper scrolls through
+  // a window a few pages wide and what leaves is kept in the page store. This is
+  // the arithmetic that decides when to scroll and by how much; the rest of the
+  // path needs a canvas, and is checked in a browser.
+  const PAGE = 1320; // logical px for an 11" form at 120 px/inch
+
+  it("does not scroll while the ink is inside the window", () => {
+    expect(scrollPagesNeeded(0, 3, PAGE)).toBe(0);
+    expect(scrollPagesNeeded(PAGE * 2 + 10, 3, PAGE)).toBe(0);
+  });
+
+  it("scrolls by whole pages once the ink would land past the window", () => {
+    expect(scrollPagesNeeded(PAGE * 3, 3, PAGE)).toBe(1);
+    expect(scrollPagesNeeded(PAGE * 4 + 5, 3, PAGE)).toBe(2);
+    // A one-page window is the constrained case: every new page scrolls.
+    expect(scrollPagesNeeded(PAGE, 1, PAGE)).toBe(1);
+    expect(scrollPagesNeeded(PAGE * 9, 1, PAGE)).toBe(9);
+  });
+
+  it("answers zero rather than NaN for nonsense", () => {
+    expect(scrollPagesNeeded(NaN, 3, PAGE)).toBe(0);
+    expect(scrollPagesNeeded(Infinity, 3, PAGE)).toBe(0);
+    expect(scrollPagesNeeded(PAGE * 5, 3, 0)).toBe(0);
+    expect(scrollPagesNeeded(-100, 3, PAGE)).toBe(0);
   });
 });
