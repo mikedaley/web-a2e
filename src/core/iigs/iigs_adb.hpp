@@ -10,6 +10,7 @@
 #include "../emulator/state_stream.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 
@@ -25,19 +26,35 @@ namespace a2e::iigs {
  * registers still work — $C000 and $C010 are still there — because the GLU
  * fills them in on the Mega II's behalf.
  *
- * **What this is for, today, is getting the machine past its own self-test.**
- * The firmware syncs the controller, asks its version, reads a few bytes of
- * its memory and sets its modes before it will draw anything, and a IIgs whose
- * ADB never answers stops with a fatal error before the splash screen. So the
- * commands are decoded, their arguments consumed, and plausible answers
- * queued. Real keys and a real mouse arrive later, through `queueKeyboard` and
- * `queueMouse`, and the queues are here already so that the shape does not
- * have to change when they do.
+ * **Every command has to take exactly the bytes that follow it.** The
+ * firmware writes a command and then its arguments to the same address, so a
+ * command whose argument count is wrong does not merely mishandle itself: the
+ * bytes it failed to take are read as commands of their own, and from there
+ * the two sides disagree about everything. Read-memory takes *two* bytes, not
+ * one, because its address is sixteen bits; a Listen takes two; $12 and $13,
+ * which Apple never documented, take two. Getting read-memory wrong was enough
+ * to put a GS/OS boot in the monitor.
+ *
+ * **A command above $1F addresses the ADB bus rather than the controller.**
+ * The high nibble is the command to put on the wire and the low nibble is the
+ * device: $8n-$Bn are Listen registers 0 to 3 and $Cn-$Fn are Talk. $70-$73
+ * are the exception and are the controller's own — stop polling that device.
+ * A Talk is answered in a frame: a header byte with bit 7 set, whose bottom
+ * three bits are one *less* than the number of bytes that follow, since the
+ * firmware's read loop counts down to one after an INY. A device that has
+ * nothing to say still sends the header; saying nothing at all leaves the
+ * firmware in its read loop until it gives up, and the error path it unwinds
+ * through lands the boot in the monitor. Register 3 is the one that matters:
+ * it is how the firmware enumerates the bus, and it answers with the address
+ * the device settled on and a handler that says what it is.
+ *
+ * Real keys and a real mouse arrive through `queueKeyboard` and `queueMouse`.
  *
  * The status register is the interesting half. The firmware polls it before
  * every exchange, and what it waits for is bit 5: the controller has a byte
  * for you. Bit 4 is the other direction — a command it has not finished with —
- * and since this one finishes instantly, that bit is never set for long.
+ * and since this one finishes instantly, that bit is only set between a
+ * command and the last of its arguments.
  */
 class IIgsADB {
 public:
@@ -103,6 +120,12 @@ public:
    */
   uint8_t readStatus() const;
   void writeStatus(uint8_t value);
+
+  /**
+   * The header byte of an answer to an ADB bus transaction: bit 7 says "this
+   * is the count", and the bottom three bits are how many bytes follow.
+   */
+  static constexpr uint8_t RESPONSE_HEADER = 0x80;
 
   /** Whether the controller is holding the interrupt line down. */
   bool interruptPending() const;
@@ -209,6 +232,8 @@ private:
   };
 
   void beginCommand(uint8_t code);
+  void answerTalk(uint8_t address, uint8_t reg);
+  void postBusResponse(const uint8_t *bytes, size_t count);
   void completeCommand();
 
   std::deque<uint8_t> response_;

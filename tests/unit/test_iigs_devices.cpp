@@ -134,9 +134,80 @@ TEST_CASE("The ADB controller answers the commands the firmware asks",
     adb.writeCommand(0x40); // ...at $40
     adb.writeCommand(0x5A);
 
+    // The read takes a sixteen-bit address, low byte first. Taking only one
+    // byte left the firmware's second to be read as a command of its own, and
+    // the answer it then waited for belonged to whatever that turned out to
+    // be — which is how a boot ended up in the monitor.
     adb.writeCommand(0x09); // Read memory
     adb.writeCommand(0x40);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) != 0);
+    REQUIRE_FALSE(adb.hasResponse());
+    adb.writeCommand(0x00);
     REQUIRE(adb.readData() == 0x5A);
+  }
+
+  SECTION("a Listen takes the two bytes that follow it") {
+    // $B3 is Listen register 3 of device 3. Taking none of its data left the
+    // firmware's next two bytes to be read as commands.
+    adb.writeCommand(0xB3);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) != 0);
+    adb.writeCommand(0x03);
+    adb.writeCommand(0x01);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) == 0);
+    REQUIRE_FALSE(adb.hasResponse());
+  }
+
+  SECTION("a Talk to a device answers in a frame") {
+    // $F2 is Talk register 3 of device 2, the keyboard, and register 3 is how
+    // the firmware enumerates the bus. The header's count is one less than the
+    // number of bytes that follow it, because the firmware's read loop counts
+    // down to one after an INY.
+    adb.writeCommand(0xF2);
+    REQUIRE(adb.responseCount() == 3);
+    REQUIRE(adb.readData() == (IIgsADB::RESPONSE_HEADER | 1));
+    REQUIRE(adb.readData() == 0x22); // service request enabled, address 2
+    REQUIRE(adb.readData() == 0x01); // a plain keyboard
+  }
+
+  SECTION("a Talk to nothing still answers, with no bytes") {
+    // Nothing sits at address 9, and a controller that simply said nothing
+    // left the firmware in its read loop until the loop gave up and unwound
+    // through an error path that put the boot in the monitor.
+    adb.writeCommand(0xF9);
+    REQUIRE(adb.responseCount() == 1);
+    REQUIRE(adb.readData() == IIgsADB::RESPONSE_HEADER);
+
+    // Only register 3 has an answer, and the same goes for a register that
+    // does not.
+    adb.writeCommand(0xC2); // Talk register 0 of the keyboard
+    REQUIRE(adb.responseCount() == 1);
+    REQUIRE(adb.readData() == IIgsADB::RESPONSE_HEADER);
+  }
+
+  SECTION("there is a character set and a keyboard layout") {
+    // Answering zero to both said the machine had neither.
+    adb.writeCommand(0x0E);
+    REQUIRE(adb.readData() == 0x01);
+    REQUIRE(adb.readData() == 0x00);
+    adb.writeCommand(0x0F);
+    REQUIRE(adb.readData() == 0x01);
+    REQUIRE(adb.readData() == 0x00);
+  }
+
+  SECTION("the commands with no answer are still acknowledged") {
+    // $70-$73 stop the controller polling a device for service requests, and
+    // $12/$13 are undocumented and take two bytes. None says anything back;
+    // what matters is that their bytes are not read as commands.
+    adb.writeCommand(0x73);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) == 0);
+    REQUIRE_FALSE(adb.hasResponse());
+
+    adb.writeCommand(0x12);
+    adb.writeCommand(0xAA);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) != 0);
+    adb.writeCommand(0xBB);
+    REQUIRE((adb.readStatus() & IIgsADB::STATUS_COMMAND_FULL) == 0);
+    REQUIRE_FALSE(adb.hasResponse());
   }
 
   SECTION("modes are set and cleared a bit at a time") {

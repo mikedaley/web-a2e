@@ -426,6 +426,26 @@ RAM in a file the same way and also does not compute the checksum.
 `test_iigs_boot.cpp` proves the firmware then leaves them alone: not one byte
 written on the second start.
 
+**The ADB controller has to take exactly the bytes each command carries, and
+has to answer a bus transaction in a frame.** The firmware writes a command and
+then its arguments to `$C026`, so a command whose argument count is wrong leaves
+its own bytes to be read as commands: read-memory takes *two* bytes because its
+address is sixteen bits, a Listen takes two, and the undocumented `$12`/`$13`
+take two. A command above `$1F` addresses the bus rather than the controller —
+high nibble the command, low nibble the device, `$8n-$Bn` Listen registers 0 to
+3 and `$Cn-$Fn` Talk, with `$70-$73` the controller's own "stop polling that
+device". A Talk is answered with a header byte with bit 7 set whose bottom three
+bits are one *less* than the count that follows, because the firmware's read
+loop counts down to one after an INY; a device with nothing to say still sends
+the header. Register 3 is what the firmware enumerates the bus with, and answers
+with the device's address and a handler byte. Get any of it wrong and the
+firmware sits in a read loop until its own counter expires, reports the
+transaction incomplete, and unwinds through a tool error path whose `RTL` lands
+in the middle of an instruction in the Tool Locator — so the boot ends in the
+monitor, with the message hidden behind whatever Super Hi-Res was showing. That
+is what stalled a System 6.0.4 install disk at its splash screen.
+`test_iigs_devices.cpp` pins the counts, the frame and the empty answer.
+
 **`$C025` says which modifier keys are down**, and it used to read zero
 whatever was held. The Event Manager reads it on every event, so a machine
 answering zero has no shift-click and no command-key menu shortcut.

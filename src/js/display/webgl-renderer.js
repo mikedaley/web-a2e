@@ -647,6 +647,13 @@ export class WebGLRenderer {
     // pitch depends on it.
     gl.uniform1f(this.uniforms.pixelRatio, window.devicePixelRatio || 1);
 
+    // Rounded corners only when there is a curved or bezelled screen to
+    // round; a flat picture keeps square corners. Declared out here because the
+    // edge-overlay pass below needs it on every frame, not only on the frames
+    // that refresh the cached uniforms.
+    const roundedCorners =
+      this.crtParams.screenInset > 0 || this.crtParams.curvature > 0;
+
     // Static uniforms (only update when CRT parameters change)
     if (this._uniformsDirty !== false) {
       this._uniformsDirty = false;
@@ -677,9 +684,6 @@ export class WebGLRenderer {
       gl.uniform1f(this.uniforms.overscan, this.crtParams.overscan);
       gl.uniform1f(this.uniforms.colorBleed, this.crtParams.colorBleed);
       gl.uniform1i(this.uniforms.monochromeMode, this.crtParams.monochromeMode);
-      // Rounded corners only when there is a curved or bezelled screen to
-      // round; a flat picture keeps square corners.
-      const roundedCorners = this.crtParams.screenInset > 0 || this.crtParams.curvature > 0;
       gl.uniform1f(this.uniforms.cornerRadius, roundedCorners ? this.crtParams.cornerRadius : 0.0);
       gl.uniform1f(this.uniforms.screenMargin, this.crtParams.screenMargin);
       gl.uniform1f(this.uniforms.screenInset, this.crtParams.screenInset);

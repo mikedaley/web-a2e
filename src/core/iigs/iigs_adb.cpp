@@ -32,6 +32,34 @@ constexpr uint8_t CMD_READ_CHARSETS = 0x0E;
 constexpr uint8_t CMD_READ_LAYOUTS = 0x0F;
 constexpr uint8_t CMD_RESET = 0x10;
 
+// Two commands the firmware sends that Apple never documented. They each take
+// two bytes and say nothing back; MESS calls them "mystery" and does the same.
+constexpr uint8_t CMD_MYSTERY_12 = 0x12;
+constexpr uint8_t CMD_MYSTERY_13 = 0x13;
+
+// Above the controller's own commands, a byte addresses the ADB bus: the high
+// nibble is the command the controller is to put on the wire and the low
+// nibble is the device it is aimed at. $70-$73 is the odd one out and is the
+// controller's own "stop polling this device".
+constexpr uint8_t CMD_DISABLE_SRQ_FIRST = 0x70;
+constexpr uint8_t CMD_DISABLE_SRQ_LAST = 0x73;
+constexpr uint8_t BUS_LISTEN_FIRST = 0x80; // $8n-$Bn, registers 0 to 3
+constexpr uint8_t BUS_LISTEN_LAST = 0xBF;
+constexpr uint8_t BUS_TALK_FIRST = 0xC0; // $Cn-$Fn, registers 0 to 3
+constexpr uint8_t BUS_TALK_LAST = 0xFF;
+
+// Where the two devices this machine has sit on the bus. These are the
+// addresses the firmware assigns and then talks to, and they are the same in
+// MESS.
+constexpr uint8_t ADDRESS_KEYBOARD = 0x02;
+constexpr uint8_t ADDRESS_MOUSE = 0x03;
+
+// A device's register 3: the address it answers to, with the service-request
+// bit above it, and the handler that says what kind of device it is. $01 is
+// the plain keyboard and the plain mouse.
+constexpr uint8_t SRQ_ENABLE = 0x20;
+constexpr uint8_t HANDLER_ID = 0x01;
+
 // The version the firmware is told it is talking to. Apple's own controller
 // answers with its ROM revision; what matters is that it answers.
 constexpr uint8_t CONTROLLER_VERSION = 0x06;
@@ -171,10 +199,20 @@ void IIgsADB::beginCommand(uint8_t code) {
   switch (code) {
   case CMD_SET_MODES:
   case CMD_CLEAR_MODES:
-  case CMD_READ_MEMORY:
     argumentsExpected_ = 1;
     break;
   case CMD_WRITE_MEMORY:
+    argumentsExpected_ = 2;
+    break;
+  case CMD_READ_MEMORY:
+    // Two bytes, not one: the address is sixteen bits, low byte first. Taking
+    // one left the firmware's second byte to be read as a command of its own,
+    // and the reply it was waiting for belonged to whatever that turned out
+    // to be.
+    argumentsExpected_ = 2;
+    break;
+  case CMD_MYSTERY_12:
+  case CMD_MYSTERY_13:
     argumentsExpected_ = 2;
     break;
   case CMD_SET_CONFIG:
@@ -186,6 +224,11 @@ void IIgsADB::beginCommand(uint8_t code) {
     argumentsExpected_ = 4;
     break;
   default:
+    // A Listen carries the two bytes to be written into the device's
+    // register; a Talk carries none, because the bytes come back.
+    if (code >= BUS_LISTEN_FIRST && code <= BUS_LISTEN_LAST) {
+      argumentsExpected_ = 2;
+    }
     break;
   }
 
@@ -216,9 +259,14 @@ void IIgsADB::completeCommand() {
   case CMD_WRITE_MEMORY:
     controllerMemory_[arguments_[0]] = arguments_[1];
     break;
-  case CMD_READ_MEMORY:
-    response_.push_back(controllerMemory_[arguments_[0]]);
+  case CMD_READ_MEMORY: {
+    // The address is sixteen bits but the memory is 256 bytes, so only the low
+    // byte selects; the firmware sends zero for the high one.
+    const uint16_t address =
+        static_cast<uint16_t>(arguments_[0] | (arguments_[1] << 8));
+    response_.push_back(controllerMemory_[address & 0xFF]);
     break;
+  }
 
   case CMD_READ_MODES:
     response_.push_back(modes_);
@@ -236,8 +284,16 @@ void IIgsADB::completeCommand() {
     break;
   case CMD_READ_CHARSETS:
   case CMD_READ_LAYOUTS:
+    // One of each is available, and it is the first. Answering zero said the
+    // machine had no character set and no keyboard layout at all.
+    response_.push_back(0x01);
     response_.push_back(0x00);
-    response_.push_back(0x00);
+    break;
+
+  case CMD_MYSTERY_12:
+  case CMD_MYSTERY_13:
+    // Undocumented, two bytes in, nothing back. Taking the arguments is the
+    // whole of the job: what matters is that they are not read as commands.
     break;
 
   case CMD_ABORT:
@@ -253,8 +309,19 @@ void IIgsADB::completeCommand() {
     break;
 
   default:
-    // Talking to a device on the bus rather than to the controller itself.
-    // Nothing is attached yet, so there is nothing to say back.
+    if (lastCommand_ >= CMD_DISABLE_SRQ_FIRST &&
+        lastCommand_ <= CMD_DISABLE_SRQ_LAST) {
+      // Stop polling a device for service requests. Nothing here polls, so
+      // there is nothing to stop; the firmware only needs it acknowledged.
+      break;
+    }
+    if (lastCommand_ >= BUS_TALK_FIRST && lastCommand_ <= BUS_TALK_LAST) {
+      answerTalk(static_cast<uint8_t>(lastCommand_ & 0x0F),
+                 static_cast<uint8_t>((lastCommand_ >> 4) & 0x03));
+      break;
+    }
+    // A Listen, or something this controller does not know. Its arguments have
+    // been taken and there is nothing to say back.
     break;
   }
 
@@ -262,6 +329,38 @@ void IIgsADB::completeCommand() {
   argumentsSeen_ = 0;
 }
 
+
+void IIgsADB::answerTalk(uint8_t address, uint8_t reg) {
+  // A bus transaction is answered in a frame, not as bare bytes: the firmware
+  // reads until it sees a byte with bit 7 set, and that byte's bottom three
+  // bits say how many follow. A device that says nothing still has to send the
+  // header — without it the firmware sits in its read loop until the loop's
+  // own counter runs out, reports the transaction as incomplete, and unwinds
+  // through an error path that lands the boot in the monitor.
+  const bool present = address == ADDRESS_KEYBOARD || address == ADDRESS_MOUSE;
+
+  // Only register 3 has an answer here. It is how the firmware enumerates the
+  // bus: the address the device settled on, with the service-request bit, and
+  // the handler that says what it is.
+  if (!present || reg != 3) {
+    response_.push_back(RESPONSE_HEADER);
+    return;
+  }
+
+  const uint8_t reply[] = {static_cast<uint8_t>(SRQ_ENABLE | address),
+                           HANDLER_ID};
+  postBusResponse(reply, sizeof(reply));
+}
+
+void IIgsADB::postBusResponse(const uint8_t *bytes, size_t count) {
+  // The count in the header is one less than the number of bytes, because the
+  // firmware's read loop counts from it *down to one* after an INY — so a
+  // header of 2 has it read three bytes, not two. Answering an ADB register 3
+  // with a header of 2 left it one byte short and waiting for ever.
+  response_.push_back(
+      static_cast<uint8_t>(RESPONSE_HEADER | (count ? count - 1 : 0)));
+  for (size_t i = 0; i < count; i++) response_.push_back(bytes[i]);
+}
 
 namespace {
 template <typename Q> void writeQueue(StateWriter &w, const Q &q) {
