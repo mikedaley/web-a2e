@@ -32,7 +32,19 @@ static constexpr uint32_t STATE_VERSION = 1;
 
 const uint8_t *IIgsMachine::exportState(size_t *size) {
   stateBuffer_.clear();
-  stateBuffer_.reserve(memory_->fastRamSize() + 512 * 1024);
+
+  // The fast RAM, the Mega II's, and whatever the two built-in cards weigh —
+  // the SmartPort's state is its hard drive images, so with two 32MB volumes
+  // that is the bulk of it. Reserved in one go because growing a vector
+  // doubles it, and a doubling realloc part-way through briefly needs three
+  // times the payload: that is what took the heap past its ceiling and
+  // aborted the module rather than failing the save.
+  size_t cardBytes = 0;
+  for (ExpansionCard *c : {static_cast<ExpansionCard *>(disk_),
+                           static_cast<ExpansionCard *>(smartPort_)}) {
+    if (c) cardBytes += c->getStateSize() + 8;
+  }
+  stateBuffer_.reserve(memory_->fastRamSize() + 512 * 1024 + cardBytes);
   StateWriter w(stateBuffer_);
 
   w.u32(STATE_MAGIC);
@@ -79,9 +91,9 @@ const uint8_t *IIgsMachine::exportState(size_t *size) {
       w.u32(0);
       return;
     }
-    std::vector<uint8_t> cardState(cardSize);
-    const size_t written = card->serialize(cardState.data(), cardSize);
-    w.blob(cardState.data(), written);
+    w.blobFrom(cardSize, [&](uint8_t *dst) {
+      return card->serialize(dst, cardSize);
+    });
   };
   writeCard(disk_);
   writeDriveState(w, *disk_);

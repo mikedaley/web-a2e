@@ -144,6 +144,13 @@ if(EMSCRIPTEN)
     )
 
     # Emscripten-specific flags
+    # MAXIMUM_MEMORY is 512MB. The ceiling only has to hold the largest machine
+    # anyone can configure, and that is a IIgs with 8MB of fast RAM and two 32MB
+    # SmartPort volumes: about 72MB live, and a save state is a second copy of
+    # the images on top. At 256MB that aborted the module outright — and an
+    # aborted module answers nothing afterwards, so the symptom was every
+    # control in the app going dead rather than one save failing. Growth is
+    # still on, so the ceiling costs nothing until it is needed.
     set_target_properties(a2e PROPERTIES
         SUFFIX ".js"
         LINK_FLAGS "\
@@ -495,7 +502,7 @@ if(EMSCRIPTEN)
             -s EXPORTED_RUNTIME_METHODS='[\"ccall\", \"cwrap\", \"UTF8ToString\", \"stringToUTF8\", \"HEAPU8\", \"HEAPF32\"]' \
             -s ALLOW_MEMORY_GROWTH=1 \
             -s INITIAL_MEMORY=33554432 \
-            -s MAXIMUM_MEMORY=268435456 \
+            -s MAXIMUM_MEMORY=536870912 \
             -s NO_EXIT_RUNTIME=1 \
             -s ASYNCIFY=0 \
             --no-entry \

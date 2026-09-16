@@ -40,9 +40,19 @@ static constexpr uint32_t STATE_MAGIC = 0x53324541; // "A2ES" in little-endian
 
 const uint8_t *Emulator::exportState(size_t *size) {
   stateBuffer_.clear();
-  // ~200KB before any disk images: 128KB of RAM, 32KB of language card, the
-  // rest small. Reserving keeps a floppy or two from reallocating it.
-  stateBuffer_.reserve(500000);
+
+  // ~200KB before any card's state: 128KB of RAM, 32KB of language card, the
+  // rest small. The cards are added because a SmartPort card's state is its
+  // hard drive images, and growing a vector doubles it — a doubling realloc
+  // part-way through a state holding two 32MB volumes briefly needs three
+  // times the payload, which is what took the heap over its ceiling and
+  // aborted the module instead of failing the save.
+  size_t cardBytes = 0;
+  for (uint8_t slot = 0; slot < 8; slot++) {
+    ExpansionCard *c = machine_->hasSlot(slot) ? mmu_->getCard(slot) : nullptr;
+    if (c) cardBytes += c->getStateSize() + 8;
+  }
+  stateBuffer_.reserve(500000 + cardBytes);
   StateWriter w(stateBuffer_);
 
   w.u32(STATE_MAGIC);
@@ -98,9 +108,9 @@ const uint8_t *Emulator::exportState(size_t *size) {
       w.u32(0);
       continue;
     }
-    std::vector<uint8_t> cardState(cardSize);
-    const size_t written = card->serialize(cardState.data(), cardSize);
-    w.blob(cardState.data(), written);
+    w.blobFrom(cardSize, [&](uint8_t *dst) {
+      return card->serialize(dst, cardSize);
+    });
   }
 
   // The media in the drives, after the controller so a restore fits the card

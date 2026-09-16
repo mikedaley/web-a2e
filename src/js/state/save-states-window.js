@@ -307,12 +307,25 @@ export class SaveStatesWindow extends BaseWindow {
       this.uiController.showNotification("Power on the emulator first");
       return;
     }
-    const ok = await this.stateManager.saveToSlot(slot);
-    if (ok) {
-      this.uiController.showNotification(`Saved to slot ${slot}`);
-    } else {
-      this.uiController.showNotification("Save failed");
+    // A throw has to be caught here rather than left to bubble out of the
+    // click handler. Every notification below is after the await, so a
+    // rejected save said nothing at all and looked exactly like a button that
+    // had not been pressed — which is how an out-of-memory abort in the core
+    // presented, since an aborted module rejects everything asked of it
+    // afterwards.
+    let ok = false;
+    let reason = "";
+    try {
+      ok = await this.stateManager.saveToSlot(slot);
+    } catch (error) {
+      console.error("Save to slot failed:", error);
+      reason = /abort/i.test(String(error && error.message))
+        ? " — the emulator ran out of memory. Reload the page."
+        : "";
     }
+    this.uiController.showNotification(
+      ok ? `Saved to slot ${slot}` : `Save failed${reason}`,
+    );
     this.refreshSlots();
   }
 

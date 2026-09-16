@@ -1639,6 +1639,20 @@ the Ensoniq (RAM, oscillators, registers; not its output ring, which is the
 host's backlog). Then the machine's own counters, the IWM, the floppies and
 the SmartPort with its images. `test_iigs_state.cpp` round-trips each part.
 
+**A card's state is written straight into the buffer, and the buffer is
+reserved for it.** A SmartPort card's state is its hard drive images, so a
+machine with two 32MB volumes writes a state of about 72MB. Serializing each
+card into a temporary and copying that in held two further copies of the
+payload at once, and the buffer's own growth doubled it again — about 190MB of
+heap to write 72MB. That went past `MAXIMUM_MEMORY` and **aborted the module**,
+which is worse than it sounds: an aborted module rejects everything asked of it
+afterwards, so the symptom was every control in the app going dead rather than
+one save failing. `StateWriter::blobFrom` writes the card's bytes in place and
+patches the length to what `serialize` actually returned, both `exportState`s
+reserve the card sizes up front, and the ceiling is 512MB. The host also
+reports a failed save now: every notification in `handleSave` came after the
+await, so a rejected save said nothing at all.
+
 Autosave plus 5 manual save slots, stored in browser IndexedDB, each record
 naming the machine that wrote it. **The autosave is per machine**
 (`autosave:<key>`; the record from before there was more than one machine is

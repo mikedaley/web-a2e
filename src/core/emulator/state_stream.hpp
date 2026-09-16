@@ -67,6 +67,35 @@ public:
     blob(reinterpret_cast<const uint8_t *>(s.data()), s.size());
   }
 
+  /**
+   * A blob whose bytes are produced straight into the output.
+   *
+   * `fill(dst)` writes at most `capacity` bytes and returns how many it wrote;
+   * the length is patched afterwards to what it actually returned.
+   *
+   * This exists because of how much a card's state can weigh. Serializing into
+   * a temporary buffer and then copying that in held two further copies of the
+   * payload at once, and a SmartPort card's state *is* its hard drive images —
+   * so a machine with two 32MB volumes needed about 190MB of heap to write a
+   * 65MB state, and aborted the whole module instead. Writing in place needs
+   * one.
+   */
+  template <typename Fill> void blobFrom(size_t capacity, Fill &&fill) {
+    const size_t lengthAt = out_.size();
+    u32(0);
+    if (capacity == 0) return;
+
+    const size_t start = out_.size();
+    out_.resize(start + capacity);
+    const size_t written = fill(out_.data() + start);
+    out_.resize(start + (written < capacity ? written : capacity));
+
+    const uint32_t length = static_cast<uint32_t>(out_.size() - start);
+    for (int i = 0; i < 4; i++) {
+      out_[lengthAt + static_cast<size_t>(i)] = (length >> (i * 8)) & 0xFF;
+    }
+  }
+
   size_t size() const { return out_.size(); }
 
 private:

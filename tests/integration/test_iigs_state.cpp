@@ -14,6 +14,7 @@
 #include "cpu65816.hpp"
 #include "iigs_machine.hpp"
 #include "iigs_memory.hpp"
+#include "emulator/state_stream.hpp"
 #include "mmu/mmu.hpp"
 
 #include <string>
@@ -167,4 +168,77 @@ TEST_CASE("A IIgs refuses another machine's state and garbage", "[iigs][state]")
   // Its own state, cut short
   auto state = exported(machine);
   REQUIRE_FALSE(machine.importState(state.data(), state.size() / 2));
+}
+
+// ============================================================================
+// A state big enough to matter
+// ============================================================================
+
+TEST_CASE("A blob is written straight into the state, not copied through a "
+          "temporary", "[iigs][state]") {
+  // This is the shape of the bug that made saving look like a dead button: a
+  // SmartPort card's state is its hard drive images, and serializing into a
+  // temporary and then copying that in held two further copies of the payload
+  // at once. With two 32MB volumes that took the WebAssembly heap past its
+  // ceiling, and an aborted module answers nothing afterwards — so every
+  // control in the app went dead rather than one save failing.
+  std::vector<uint8_t> out;
+  StateWriter w(out);
+
+  constexpr size_t PAYLOAD = 1024 * 1024;
+  w.u32(0xA1B2C3D4);
+  w.blobFrom(PAYLOAD, [](uint8_t *dst) {
+    for (size_t i = 0; i < PAYLOAD; i++) dst[i] = static_cast<uint8_t>(i * 7);
+    return PAYLOAD;
+  });
+  w.u32(0x5E6F7A8B);
+
+  StateReader r(out.data(), out.size());
+  REQUIRE(r.u32() == 0xA1B2C3D4);
+  size_t got = 0;
+  const uint8_t *blob = r.blob(got);
+  REQUIRE(got == PAYLOAD);
+  REQUIRE(blob != nullptr);
+  for (size_t i = 0; i < PAYLOAD; i += 4099) {
+    REQUIRE(blob[i] == static_cast<uint8_t>(i * 7));
+  }
+  REQUIRE(r.u32() == 0x5E6F7A8B);
+  REQUIRE_FALSE(r.failed());
+}
+
+TEST_CASE("A blob that fills less than it asked for keeps its real length",
+          "[iigs][state]") {
+  // getStateSize() is an upper bound and serialize() may write less, so the
+  // length in the stream is what came back rather than what was reserved.
+  std::vector<uint8_t> out;
+  StateWriter w(out);
+  w.blobFrom(64, [](uint8_t *dst) {
+    dst[0] = 0xAA;
+    dst[1] = 0xBB;
+    return size_t{2};
+  });
+  w.u8(0x99);
+
+  StateReader r(out.data(), out.size());
+  size_t got = 0;
+  const uint8_t *blob = r.blob(got);
+  REQUIRE(got == 2);
+  REQUIRE(blob[0] == 0xAA);
+  REQUIRE(blob[1] == 0xBB);
+  REQUIRE(r.u8() == 0x99);
+  REQUIRE_FALSE(r.failed());
+}
+
+TEST_CASE("A card with nothing to say writes an empty blob", "[iigs][state]") {
+  std::vector<uint8_t> out;
+  StateWriter w(out);
+  w.blobFrom(0, [](uint8_t *) { return size_t{0}; });
+  w.u8(0x42);
+
+  StateReader r(out.data(), out.size());
+  size_t got = 1;
+  r.blob(got);
+  REQUIRE(got == 0);
+  REQUIRE(r.u8() == 0x42);
+  REQUIRE_FALSE(r.failed());
 }
