@@ -356,6 +356,22 @@ When tracking is enabled, every `read()` and `write()` call increments the corre
 
 ---
 
+## The IIgs's Memory
+
+A IIgs has a 24-bit address space and a memory controller of its own, `IIgsMemory` in `core/iigs/`. Four things about it are worth knowing.
+
+**The Mega II side of it is an `MMU`** — the same class a //e is built from, constructed with the IIgs profile. Banks `$E0`/`$E1` are its main and auxiliary RAM, `$C000-$CFFF` in the banks that see it are its soft switches, and `$D000-$FFFF` is its language card. That is not a convenience: a IIgs really does contain a //e, and the video reads that MMU exactly as `Video` does on any other machine.
+
+**Shadowing is a copy, not a redirection.** A write to a display region of bank `$00` or `$01` lands in fast RAM *and* is copied to `$E0`/`$E1`, because the video only ever looks at the Mega II's side. Which regions those are is the `$C035` register, and its bits read backwards — a set bit turns a region's shadowing **off**. Bit 6 changes what an address *is* rather than where a write also goes: with I/O and language card shadowing inhibited, banks `$00`/`$01` are plain RAM from `$C000` up, which is how a program gets a contiguous 128KB.
+
+**Bank `$00` still obeys the //e's memory switches, and they send it into bank `$01`.** A IIgs is a //e whose main RAM is bank `$00` and whose auxiliary RAM is bank `$01`, so RAMRD and RAMWRT move `$0200-$BFFF`, ALTZP the zero page, stack and language card, and 80STORE with PAGE2 the text and first hi-res pages. Bank `$01` is never redirected. The 80-column firmware depends on it.
+
+**`$C068` is eight of the //e's soft switches in one byte**, and writing it drives those switches through their own addresses so everything watching them sees the change the usual way. It has no bit for the language card's *write* latch, so that is read off the machine and preserved: changing the memory map must not quietly write-protect the card.
+
+Banks `$00` and `$01` are 64K of fast RAM each, language card included — their `$D000-$FFFF` is the bank's own memory in the shape of a //e's card. The Mega II's card belongs to `$E0`/`$E1` alone. Vectors are pulled from ROM whatever the map shows, because the FPI answers the 65816's VPB line; GS/OS copies its kernel over `$D000-$FFFF` with interrupts enabled.
+
+How much fast RAM is fitted is a user choice, 256K to 8M, in the Machine menu. Banks above what is fitted must not answer, because the firmware sizes memory by writing to one and reading it back.
+
 ## See Also
 
 - [[Architecture-Overview]] -- How the MMU fits into the emulator

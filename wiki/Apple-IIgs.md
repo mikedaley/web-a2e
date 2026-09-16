@@ -195,8 +195,15 @@ side — and a monitor's overscan hides a cycle or two in any case. The picture'
 place and size are exact; the border's outer edge is the one number here that
 is an estimate, by one cycle at most.
 
-The frame is that raster: at Super Hi-Res's 16 pixels a cycle, **848x480**
-with lines doubled, the 640x400 picture at (96, 38) and border everywhere else.
+**What is drawn is the part of that raster a monitor's bezel does not hide.**
+Drawing every border cycle made the border about a fifth of the picture's
+width, which no monitor of the period showed; the frame therefore keeps three
+cycles either side and twelve lines above and below, which keeps the border's
+shape and puts it at about the width it has on the glass. At Super Hi-Res's 16
+pixels a cycle that is **736x448** with lines doubled, the 640x400 picture at
+(48, 24) and border everywhere else. `iigs_spec.hpp` holds both sets of
+numbers — the full raster, and the part of it that is drawn.
+
 Two things about it are deliberate:
 
 - **Super Hi-Res has a border too.** It used to fill a 640x400 frame edge to
@@ -210,12 +217,18 @@ Two things about it are deliberate:
   narrow. The stretch blends a glyph's edge between its two colours, which is
   what a beam does and what the boot test now allows for.
 
+The //e's 192 lines are **centred in the picture's 200** (`MEGAII_TOP`), because
+192 is eight short and putting all eight at the bottom made the bottom border
+deeper than the top.
+
 The raster's shape is a monitor's, 4:3, and the profile says so (`aspect`), so
 the screen window and the full-page layout show it at that rather than at the
-frame's own 848:480; a //e's frame is still shown at 560:384 as it always was.
+frame's own 736:448; a //e's frame is still shown at 560:384 as it always was.
 The profile's `text` rectangle says where the text screen landed, and the
-host's text selection maps through it. The shared framebuffer slot is sized
-for this frame, the largest of any machine's.
+host's text selection maps through it rather than assuming the text fills the
+frame. The shared framebuffer slot is **848x480**, which holds this frame with
+room to spare; a `SharedArrayBuffer` cannot be resized once handed to the
+Worker, so the slot is allocated up front and must fit any machine.
 
 ## Debugging It
 
@@ -774,23 +787,24 @@ The rule for this directory: **nothing in `core/iigs/` is included by a machine 
 
 Each step is meant to be a commit that stands on its own, with tests that pass before the next one starts.
 
-1. **Describe the machine.** Profile, family, spec header, ROMs, and an honest "not runnable". *(Done.)*
+1. **Describe the machine.** Profile, family, spec header, ROMs, and — at the time — an honest "not runnable". *(Done; it runs now.)*
 2. **The 65816.** *(Done.)* A standalone core in `src/core/cpu/65816/` with no emulator wiring at all: registers, both modes, every addressing mode, all 256 opcodes, cycle counts. Tested on its own against a flat 16MB of memory, and checked against 5.1 million recorded states from a real chip — see [[CPU-Emulation]] and `tests/conformance/test_65816_vectors.cpp`.
 3. **Memory.** *(Done.)* `IIgsMemory` in `src/core/iigs/`: banks, fast and slow RAM, ROM, the language card, shadowing, and the machine's own registers. The Mega II side is an `MMU` — the same class a //e is built from — rather than a second copy of that map, so the video will later read it exactly as a //e's video does. Bank `$00` obeys the //e's memory switches, and they send it into bank `$01`: RAMRD and RAMWRT move `$0200-$BFFF`, ALTZP the zero page, stack and language card, and 80STORE with PAGE2 (and HIRES) the text and first hi-res pages, overriding RAMRD/RAMWRT there. `IIgsMemory::effectiveBank` is the rule, applied before a write lands and before it shadows, so a bank `$00` write meant for auxiliary memory reaches `$E1`. The 80-column firmware writes a line's even columns that way, and a machine that left them in bank `$00` drew every other column blank — `PR#3` then `PRINT "ABCDEFGH"` showed `B D F H`. GSSquared applies the same rule in `calc_aux_read`/`calc_aux_write`. The odd-bank hi-res pages are shadowed unless both their own inhibit bit and Super Hi-Res's say not to; the two per-page bits are bank `$00`'s.
 4. **A machine that boots.** *(Done.)* `IIgsMachine` wires the CPU, the memory and the Mega II's video together and runs the firmware to its startup screen. Getting there needed two devices earlier than this plan expected, because the diagnostics run before anything is drawn: the **ADB** controller (`iigs_adb.*`), which the firmware syncs and interrogates before it will continue, and the **Ensoniq's RAM window** (`iigs_sound.*`), which is the chip's 64KB and the four registers the CPU reaches it through. Both are real devices in their own files rather than stubs in somebody else's; the keyboard, the mouse and the synthesiser came later.
 5. **Super Hi-Res.** *(Done.)* `iigs_video.*`: both widths, per-line control bytes, sixteen palettes of sixteen colours out of 4096, fill mode, and the `$C029` switch that decides which of the machine's two video systems is on screen. Nothing in the firmware turns it on — a IIgs boots in text — so it shows up when a program asks for it.
 6. **Sound.** *(Done.)* The 32 oscillators: each walks a pointer through the sound RAM at its own frequency, scales what it reads by its volume, and adds it to one of sixteen channels — even ones to one speaker, odd to the other. A zero byte is the end of a sound, and the chip halts an oscillator that reads one, which is how a sample knows where it stops without anybody counting. The machine's audio call now asks the chip rather than returning silence.
-7. **Input and settings.** *(Mostly done.)* The keyboard works: a browser key event is translated the //e's way, handed to the ADB controller, and put by it into the register the Mega II reads — so //e software finds the keyboard where it expects it without knowing a microcontroller is involved. The mouse reports through the same controller, seven bits of signed movement a byte with the button in the top bit. The clock and its 256 bytes of battery RAM work, and the firmware writes its settings there at startup. Still to come: the Control Panel hotkey, which the controller itself intercepts on real hardware, and the slots.
-8. **The host.** *(Mostly done.)* The machine can be chosen from the menu and drives the display: the wasm layer holds either an `Emulator` or an `IIgsMachine` and routes the calls that run and show a machine to whichever it is. The shared framebuffer slot is sized for the largest picture (640x400) so the IIgs does not fall back to `postMessage`. Keys, the mouse, disk insertion and the audio the emulation is paced by all reach the machine. Everything else — printers, cards, the debugger, the agent tools — still asks for an `Emulator` and quietly does nothing while a IIgs is running.
+7. **Input and settings.** *(Done, bar the Control Panel hotkey.)* The keyboard works: a browser key event is translated the //e's way, handed to the ADB controller, and put by it into the register the Mega II reads — so //e software finds the keyboard where it expects it without knowing a microcontroller is involved. The mouse reports through the same controller, seven bits of signed movement a byte, with **two different buttons** in the two top bits. `$C025` reports the modifier keys, which the Event Manager reads on every event. The clock and its 256 bytes of battery RAM work and are kept by the host between sessions. `$C02D` decides which slots the internal firmware answers for, and a slot switched away from it with no card fitted reads the bus. The ADB's command set is complete enough for GS/OS: argument counts exact, bus Listen and Talk decoded, and a Talk answered in the frame the firmware's read loop expects — see [What Stopped the Hotkey](#what-stopped-the-hotkey) for the one thing that is still missing.
+8. **The host.** *(Done.)* The machine can be chosen from the menu and drives the display: the wasm layer holds either an `Emulator` or an `IIgsMachine` and routes the calls that run and show a machine to whichever it is. The shared framebuffer slot is sized for the largest picture — 848x480, which holds the IIgs's 736x448 raster — so no machine falls back to `postMessage`. Keys, the mouse, disk insertion and the audio the emulation is paced by all reach the machine. **Save states**, **the debugger** and **printing** work on a IIgs as they do on the others; the menus hide what the machine has not got rather than greying it out.
 
 ## Things That Will Have to Give
 
 Known places where the rest of the emulator assumes an 8-bit Apple II. None is a blocker; all are listed so they are not a surprise.
 
-- ~~The shared framebuffer slot is sized for the //e's 560x384~~ — now 640x400, the largest any machine here draws. The other three write a smaller picture into a larger slot, which costs 164KB of address space and saves the one machine that would not fit from falling back to `postMessage`.
-- **Save states** are laid out to the saving machine's shape and carry a machine id. A IIgs state is a different shape again; `STATE_VERSION` will have to move.
-- **The debugger** — disassembler, breakpoints, the trace — speaks 6502 and 16-bit addresses.
+- ~~The shared framebuffer slot is sized for the //e's 560x384~~ — now **848x480**, which holds the IIgs's 736x448 raster, border included. The other three write a smaller picture into a larger slot, which costs some address space and saves the one machine that would not fit from falling back to `postMessage`.
+- ~~**Save states** are laid out to the saving machine's shape and carry a machine id. A IIgs state is a different shape again; `STATE_VERSION` will have to move.~~ — done, and it did not move: a IIgs's state is its **own** version in `iigs_state.cpp`, because the two layouts share nothing after the twelve-byte header and have no reason to move together. The host reads that header itself and switches machine rather than let the core refuse. See [[Save-States]].
+- ~~**The debugger** — disassembler, breakpoints, the trace — speaks 6502 and 16-bit addresses.~~ — done. Every debug question is now asked once at the widest shape: 24-bit addresses, 16-bit registers, with what a machine has not got reading as zero. Two things stay //e-only and say so: cycle profiling, which would need 64MB of counters for a 65816, and the call-stack summary, which the //e's run loop builds as it executes JSRs. See [Debugging It](#debugging-it).
 - **The agent tools** are `g_emulator`-shaped, and `Emulator` is the Apple II family's coordinator. The wasm interface no longer is everywhere: see [What the Host Sees](#what-the-host-sees) for the three accessors that answer "which machine is running" once, so the drive panel, the display settings and the volume slider need not.
+- **Expansion slots** are not offered on a IIgs. The machine has real slots, but the "internal firmware or your card" choice each one carries is not modelled, and the core does not answer the host's request to change one — so the window is hidden rather than shown empty.
 
 ## ROMs
 

@@ -2,7 +2,7 @@
 
 The emulator models one machine at a time, and the badge in the header names it. Click the badge to choose a different one.
 
-There are three you can run — the **Apple //e**, the **Apple II Plus** and the **Apple //c** — and a fourth being built, the **Apple IIgs**.
+There are four: the **Apple //e**, the **Apple II Plus**, the **Apple //c** and the **Apple IIgs**.
 
 ---
 
@@ -137,13 +137,38 @@ Mouse-driven software — MousePaint, AppleWorks' mouse support — therefore wo
 
 ## Apple IIgs
 
-The 1986 machine that took the Apple II 16-bit: a 65C816, megabytes of RAM, 4096 colours and a synthesiser. **Not runnable** — it is described and listed, and the menu marks it unavailable.
+The 1986 machine that took the Apple II 16-bit: a 65C816, megabytes of RAM, 4096 colours and a synthesiser. It boots **GS/OS System 6.0.4 to the Finder**, with a working mouse and sound.
 
-It is the first machine here that is not the same computer as the others. A //e, a II Plus and a //c differ by numbers, which is what a machine profile is for; a IIgs differs by mechanism — a 24-bit bus, a shadowing memory map, a second display system, an Ensoniq — and those get their own classes in their own directory rather than flags in everyone else's.
+It is the one machine here that is not the same computer as the others. A //e, a II Plus and a //c differ by numbers, which is what a machine profile is for; a IIgs differs by *mechanism* — a 24-bit bus, a shadowing memory map, a second display system, an Ensoniq — and those get their own classes in their own directory rather than flags in everyone else's. Its profile says `MachineFamily::AppleIIgs`, and that is what selects the parts.
 
-What it *does* share is real: a IIgs contains a Mega II, and a Mega II is a //e. Its video timing is the //e's to the cycle, which is why its profile carries those numbers and why it runs //e software at all.
+What it *does* share is real: a IIgs contains a Mega II, and a Mega II is a //e. Its video timing is the //e's to the cycle, which is why its profile carries those numbers, why the //e's `Video` class draws its text and hi-res, and why it runs //e software at all.
 
-See [[Apple-IIgs]] for what is built, what is not, and the order the rest arrives in.
+### Two clocks
+
+The 65816 runs at 2.8 MHz until it reaches the Mega II, and that access is stretched to a 1.023 MHz cycle. So the slow clock ticks *inside* the memory, as each slow-side access happens, and the rest of the instruction is added afterwards at whatever the speed register says. Keeping it there is what lets it advance during an instruction: a disk read loop is a few cycles with one access in it, and a drive whose clock only moved between instructions would see that loop in lumps.
+
+`$C036`'s bottom four bits are a veto on the fast clock rather than a speed setting — they are slot motor detect, and a drive turning in an enabled slot drops the whole machine to 1.023 MHz until it stops. That is what makes a Disk II readable at all.
+
+### How much memory
+
+A IIgs's fast RAM is a choice, from **256K to 8M**, in the Machine menu and remembered. Changing it rebuilds the machine, as switching machines does. Banks above what is fitted must not answer, because the firmware sizes memory by writing to one and reading it back.
+
+### Super Hi-Res, and a border
+
+`$C029` switches between the machine's two video systems. Super Hi-Res is 320 or 640 pixels wide with a palette per scanline, and the frame the emulator draws is the raster a monitor shows — border included, minus the part a bezel would hide. At 16 pixels a cycle that is **736x448** with the 640x400 picture at (48, 24); the //e's 560x384 goes in the same width, stretched to 640, and centred in the 200 lines. The IIgs's screen is shown at a monitor's 4:3 rather than at the //e's own ratio.
+
+Bit 5 of `$C029` shows double hi-res in black and white, which is what the System 6 Finder and the 80-column desktop programs ask for.
+
+### What else is in it
+
+- **An Ensoniq** with thirty-two oscillators, clocked from the machine and interrupting, summed to one output pin the way a stock machine hears it
+- **An ADB controller** for the keyboard and mouse, with `$C025` reporting the modifier keys so shift-click and ⌘-menu shortcuts work
+- **A battery-backed clock** and the 256 bytes of settings beside it, kept by the host between sessions exactly as the firmware wrote them, checksum included — alter one byte and the firmware writes its defaults over the lot, which is what a machine with a dead battery does
+- **A Z8530 SCC** behind two serial ports, with a loopback cable available as a tick box for the Apple IIgs Diagnostic's external test
+- **A SmartPort in slot 5**, part of the machine rather than a card, serving hard drive images through GS/OS's extended calls
+- **A speaker** as well, because `$C030` is a Mega II address; the volume nibble in `$C03C` is the speaker's amplifier and is applied as a taper rather than a ratio
+
+See [[Apple-IIgs]] for the full account — the memory map, the interrupt sources, the video raster's numbers, and what is still missing.
 
 ## What Survives a Switch
 
@@ -153,18 +178,25 @@ Switching machines **rebuilds the emulator**. There is no way to convert a runni
 |---|---|
 | Inserted disks and hard drives | No |
 | Anything in memory | No |
-| Display settings and monitor profile | Yes |
+| Display settings | No — **remembered per machine** |
+| Saved monitor profiles | Yes — they are named snapshots any machine may pick |
 | Volume and mute | Yes |
 | Character set | Yes |
 | CPU speed | Yes |
 | Game port device (Apple joystick or Joyport) | Yes |
-| Expansion slot layout | Yes, but **per machine** |
+| Expansion slot layout | No — **remembered per machine** |
+| Save states, including the autosave | No — **kept per machine** |
+| ⌘ as Open Apple | No — **remembered per machine** |
 
 Slot layouts are remembered separately for each machine, because the machines do not agree about what a slot is: one shared layout would put a II Plus's slot 3 card into a //e's built-in 80-column slot, and would follow a //e's SmartPort onto a machine whose defaults are a bare Disk II. A machine you have never configured falls back to its own defaults; a machine you deliberately stripped stays stripped.
 
+Display settings are per machine for the same kind of reason — a //e's soft composite look has no business on a IIgs's RGB desktop — and each machine's default differs in one value, the screen border: 35% on the 8-bit machines, whose picture fills the frame, and 0 on a IIgs, which draws its own.
+
+Save states are per machine because a state only restores into the machine that wrote it, so one shared autosave would come back to nothing for every machine but the last. See [[Save-States]].
+
 ## ROMs
 
-The //e's ROMs are part of the build. **The Apple II Plus ROMs are not distributed with the emulator** and have to be supplied before building.
+The //e's and the //c's ROMs are part of the build. **The Apple II Plus and Apple IIgs ROMs are not distributed with the emulator** and have to be supplied before building.
 
 A II Plus motherboard carries six 2KB ROMs in sockets D0 to F8 covering `$D000-$FFFF`: five of Applesoft and the Autostart monitor at `$F800`. Supply either those six images or one pre-combined 12KB image, plus the 2KB character generator:
 
@@ -179,17 +211,28 @@ The //c carries one 16KB ROM covering `$C000-$FFFF` and a 4KB character generato
 
 `342-0272-A` is ROM 255, the original //c, which is the machine the profile describes. The later 32KB ROMs — `342-0033-A` (ROM 0), `341-0445-A` and `341-0445-B` (ROMs 3 and 4) — are bank-switched and carry different peripherals in slots 4 and 5, so they are a different machine and are not taken.
 
+The IIgs takes a ROM 01 image, either as its two socket ROMs or pre-combined:
+
+- `341-0728.bin` with `341-0749.bin` (or `341-0748.bin`), 64KB each
+- **or** `342-0077-B.bin` (128KB) **or** `apple2gs.rom`
+
+A ROM image's banks can be either way round, and the loader asks rather than assumes: it looks for the emulation reset vector, which every IIgs ROM has at `$FF:FFFC`. Get it wrong and the machine resets to `$00:0000`.
+
 Put them in `roms/` and rebuild. Without them the machine is still fully described and still listed in the menu, but is marked **unavailable** — a machine that could never reach a prompt is not offered rather than failing silently.
 
 ## How It Works
 
 A machine is **data, not polymorphism**. What differs between a //e and a II Plus is overwhelmingly numbers — a clock rate, a scanline count, how much RAM answers, which CPU is fitted, whether the video generator inhibits colour burst in text mode — and those live in a `MachineProfile` struct that the subsystems read.
 
-They are deliberately not virtual methods. `MMU::read`, the video emitters and the CPU dispatch loop are the hottest code in the emulator, and an indirect call on a per-cycle or per-dot path would cost real speed to serve a machine count of three. The rule is: **a number or a flag goes in the profile; a different mechanism goes in a different class that the profile names.**
+They are deliberately not virtual methods. `MMU::read`, the video emitters and the CPU dispatch loop are the hottest code in the emulator, and an indirect call on a per-cycle or per-dot path would cost real speed to serve a machine count of four. The rule is: **a number or a flag goes in the profile; a different mechanism goes in a different class that the profile names.**
+
+A profile also says which **family** it belongs to, and that is what selects the parts. `MachineFamily::AppleII` is the three 8-bit machines, built from `MMU`, `Video`, `Audio` and `CPU6502`. `MachineFamily::AppleIIgs` is a different computer, built from its own classes in `core/iigs/`. The family is chosen once, at construction, and is also what the compile-time validation asks before applying a rule that only holds for one design — a IIgs is not measured against "a visible column clocks out 14 dots" when its picture is 640 dots wide.
 
 Every profile is validated at compile time — that a scanline is its blanking plus one cycle per visible column, that a machine with no auxiliary bank does not claim auxiliary RAM, that double hi-res does not exist without 80 columns, that nothing is fitted to a slot the machine does not have, that a machine with no sockets ships nothing the user could then remove — so a broken profile does not compile.
 
-Save states carry the machine id in their header, and a state saved on one machine is refused by the other rather than being read as garbage.
+Save states carry the machine id in their header, and a state saved on one machine is refused by another rather than being read as garbage — the host reads that header itself and offers to switch instead. The Apple II family's layout is one version; a IIgs's is its own, because the two share nothing after the header and have no reason to move together.
+
+Menus follow the machine too. `machine-availability.js` says which items the running machine can use, from its profile and the cards fitted, and the rest are **hidden rather than disabled** — a greyed "Expansion Slots" on a //c only invites the question of how to enable it, and the answer is a different computer.
 
 Adding a machine needs a profile entry, a subsystem class for anything that is a different mechanism rather than a different number, and its ROMs. Nothing in the browser layer needs to know: the //c arrived in the menu, the slot window and the window title without any of them being told about it, because all three read the profile.
 

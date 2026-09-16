@@ -84,6 +84,8 @@ When `SharedArrayBuffer` is available, `main.js:setupSharedBuffers()` allocates 
 
 **Framebuffer** -- double-buffered (`FB_SLOTS = 2`). The Worker writes the slot the renderer is not reading, publishes the index in `CTRL_FRAME_INDEX`, then sets `CTRL_FRAME_READY`. The main thread's `pollSharedFrame()` claims it with `Atomics.exchange`, so a frame is never uploaded twice. This replaced allocating a fresh 860KB array every frame.
 
+The slot is **the one place that still fixes a size**: `FB_WIDTH` x `FB_HEIGHT` is 848x480, and every machine writes its own picture into it — a //e's 560x384, a IIgs's 736x448 raster. A `SharedArrayBuffer` cannot be resized once it has been handed to the Worker and the AudioWorklet, so it is allocated up front and must hold any machine's frame. `setupSharedBuffers()` checks the fit and falls back to the `postMessage` transport rather than let a frame write past the end of the slot.
+
 **Audio ring** -- 16,384 stereo frames of interleaved L/R floats. The AudioWorklet reads it directly, so the main thread is no longer in the audio critical path; only the small refill request routes through it.
 
 **Control block** -- an `Int32Array` of status fields (`CTRL_*` in `shared-buffers.js`):

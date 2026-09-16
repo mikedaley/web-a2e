@@ -2,26 +2,28 @@
 
 A cycle-accurate Apple II emulator running in the browser using WebAssembly and WebGL. No JavaScript frameworks — vanilla ES6 modules with Vite for bundling. Having built native emulators in the past, this is my first attempt at a browser-based emulator, hopefully making it easier to allow cross platform users from making use of it :)
 
-Two machines are modelled: the **Apple //e Enhanced** and the **Apple II Plus**. See [Machines](#machines).
+Four machines are modelled: the **Apple IIe Enhanced**, the **Apple II Plus**, the **Apple IIc** and the **Apple IIgs**. See [Machines](#machines).
 
 **[Run it →](https://web-a2e.retrotech71.co.uk/)**  ·  **[Documentation wiki →](https://github.com/mikedaley/web-a2e/wiki)**
 
 ## Features
 
-- **Two machines** — Apple //e Enhanced and Apple II Plus, chosen from the badge in the header; each is described by a profile, remembers its own slot layout, and the II+ is a real II+ down to its NMOS CPU, single character set and permanently live colour burst
+- **Four machines** — Apple IIe Enhanced, Apple II Plus, Apple IIc and Apple IIgs, chosen from the badge in the header; each is described by a profile and remembers its own slot layout, display settings and save states
 - **Cycle-accurate 65C02 CPU** — All legal 6502 opcodes plus 65C02 extensions at 1.023 MHz
-- **Full Apple //e memory architecture** — 128KB RAM (64KB main + 64KB auxiliary), language card, soft switches
-- **Multiple display modes** — Text (40/80 col), LoRes, Double LoRes, HiRes, Double HiRes, monochrome
+- **A 65C816 for the IIgs** — 24-bit bus, 16-bit registers, native and emulation modes, verified against 5.1 million recorded states from real silicon
+- **Full Apple //e memory architecture** — 128KB RAM (64KB main + 64KB auxiliary), language card, soft switches; the IIgs adds 256K–8M of fast RAM, bank shadowing and a Mega II inside it
+- **Multiple display modes** — Text (40/80 col), LoRes, Double LoRes, HiRes, Double HiRes, monochrome, and **Super Hi-Res** (320/640, palette per scanline) on the IIgs
+- **GS/OS** — the IIgs boots System 6.0.4 to the Finder from its built-in SmartPort, with a working mouse, an Ensoniq synthesiser and a battery-backed clock
 - **Signal-accurate composite video** — Decodes the machine's real 14.31818 MHz dot stream rather than looking colours up, so artifact colour, the hi-res half-dot shift and colour burst all emerge from the signal
 - **WebGL rendering** — Hardware-accelerated display with configurable CRT shader effects and saveable monitor profiles
 - **Web Worker architecture** — WASM emulation runs in a dedicated Worker thread, eliminating main-thread blocking
 - **Audio-driven timing** — Web Audio API AudioWorklet drives frame timing at 48kHz via Worker RPC
 - **Disk II controller** — DSK, DO, PO, and WOZ format support with write capability
-- **Expansion cards** — Mockingboard sound card, Thunderclock Plus, Apple Mouse Interface Card, SmartPort hard drive, Super Serial Card, Parallel Card (Centronics), Microsoft Z-80 SoftCard, No-Slot Clock (DS1215)
+- **Expansion cards** — Mockingboard sound card, Thunderclock Plus, Apple Mouse Interface Card, SmartPort hard drive, Super Serial Card, Parallel Card (Centronics), Microsoft Z-80 SoftCard, No-Slot Clock (DS1215). A //c has no sockets but decodes every slot address to a soldered-in part; a IIgs carries its SmartPort in slot 5
 - **Virtual dot-matrix printer** — ImageWriter II (colour), ImageWriter I, Epson FX-80, and Apple DMP with period-correct fonts, sounds, and PNG/PDF export, plus a standalone font editor at `/printers/rom-editor.html`
 - **File explorer** — Browse DOS 3.3 and ProDOS disk contents with BASIC detokenizer and disassembler
 - **Shareable links** — Pass a disk image URL in the address (`?disk=`) to open the emulator with it already loaded
-- **Save states** — Autosave slot plus 5 manual save slots, stored in IndexedDB
+- **Save states** — Autosave slot plus 5 manual save slots, stored in IndexedDB, kept per machine; a state names the machine that wrote it and loading one switches to it
 - **Built-in debugger** — CPU debugger, memory browser, heat map, soft switch monitor, BASIC conditional breakpoints, and more
 - **Light/Dark/System themes** — Switchable colour scheme with Apple rainbow logo accent palette
 - **AI Agent integration** — Full programmatic control via MCP and AG-UI event protocol for AI-assisted development
@@ -29,22 +31,28 @@ Two machines are modelled: the **Apple //e Enhanced** and the **Apple II Plus**.
 
 ### Machines
 
-The emulator runs one machine at a time, and the badge in the header names it — click it to switch. Two machines are described:
+The emulator runs one machine at a time, and the badge in the header names it — click it to switch. Four machines are described:
 
-| | Apple //e (Enhanced) | Apple II Plus |
-| --- | --- | --- |
-| CPU | 65C02 | NMOS 6502 |
-| RAM | 128KB (64KB main + 64KB aux) | 48KB + a 16KB language card in slot 0 |
-| Columns | 40 / 80 | 40 |
-| Double-resolution modes | Yes | No |
-| Character sets | US/UK | One |
-| Colour burst in text | Inhibited (crisp white text) | Always sent (text fringes green and violet) |
-| Slot 3 | Built-in 80-column card, fixed | Free |
-| ROMs | Included | **Supply your own** — see [ROM Files](#rom-files) |
+| | Apple IIe (Enhanced) | Apple II Plus | Apple IIc | Apple IIgs |
+| --- | --- | --- | --- | --- |
+| Released | 1983 | 1979 | 1984 | 1986 |
+| CPU | 65C02 | NMOS 6502 | 65C02 | 65C816 @ 2.8 MHz |
+| RAM | 128KB (64 main + 64 aux) | 48KB + 16KB language card in slot 0 | 128KB | 128KB Mega II + 256K–8M fast |
+| Columns | 40 / 80 | 40 | 40 / 80 | 40 / 80 |
+| Double-resolution modes | Yes | No | Yes | Yes, plus Super Hi-Res |
+| Character sets | US/UK | One | One | One |
+| Colour burst in text | Inhibited | Always sent (text fringes) | Inhibited | Inhibited |
+| Expansion slots | 1–7, slot 3 fixed | 0–7, slot 0 fixed | None — every slot address is a soldered-in part | Slot 5 is the built-in SmartPort |
+| Disk controller | Disk II card | Disk II card | IWM (built in) | IWM (built in) |
+| ROMs | Included | **Supply your own** | Included | **Supply your own** |
 
-A machine's differences are data in its profile rather than special cases scattered through the code, so the II+'s missing auxiliary bank is what makes 80 columns and double hi-res genuinely unreachable rather than merely hidden. The [Machines wiki page](https://github.com/mikedaley/web-a2e/wiki/Machines) covers each machine in full.
+A machine's differences are data in its profile rather than special cases scattered through the code, so the II+'s missing auxiliary bank is what makes 80 columns and double hi-res genuinely unreachable rather than merely hidden.
 
-Switching rebuilds the emulator, so inserted media and anything in memory are lost exactly as they would be on a page reload — the menu says so first. Display settings, volume, character set and CPU speed follow you across, because those were your choices rather than the machine's. Each machine remembers its own slot layout, and the machine you last chose is restored at startup. A machine whose ROMs are missing is still listed, but marked unavailable rather than quietly failing to reach a prompt.
+The IIgs is the exception to that rule, and deliberately: it belongs to its own `MachineFamily` and is built from its own classes in `src/core/iigs/` — a 65816, a 24-bit memory controller that shadows banks, a second display system, an Ensoniq, an ADB controller and a Z8530. A number or a flag goes in the profile; a different mechanism goes in a different class that the profile names. The [Machines wiki page](https://github.com/mikedaley/web-a2e/wiki/Machines) covers each machine in full, and [Apple IIgs](https://github.com/mikedaley/web-a2e/wiki/Apple-IIgs) covers that one in depth.
+
+Switching rebuilds the emulator, so inserted media and anything in memory are lost exactly as they would be on a page reload — the menu says so first. Volume, character set and CPU speed follow you across, because those were your choices rather than the machine's. Each machine remembers its own slot layout, display settings and save states, and the machine you last chose is restored at startup. A machine whose ROMs are missing is still listed, but marked unavailable rather than quietly failing to reach a prompt.
+
+Menu items for hardware the running machine does not have are hidden rather than disabled: a greyed-out "Expansion Slots" on a //c only invites the question of how to enable it, and the answer is a different computer.
 
 ## Prerequisites
 
@@ -64,8 +72,43 @@ Place the following ROM files in the `roms/` directory before building. ROMs are
 | `Thunderclock Plus ROM.bin` | 2KB | Thunderclock card ROM |
 | `Apple Mouse Interface Card ROM - 342-0270-C.bin` | 2KB | Mouse Interface Card ROM |
 | `Apple Parallel Interface Card ROM - 341-0057.bin` | 512 bytes | Parallel card PROM (341-0057); upper half is 341-0005 "Parallel Printer" firmware |
+| `Super Serial Card ROM - 341-0065-A.bin` | 2KB | Super Serial Card firmware |
 
 An alternate character ROM variant `341-0160-A-US-UK.bin` (8KB) is also supported.
+
+### The other machines' ROMs
+
+A machine can be fully described and still be unable to start. Where its ROMs
+are absent the profile still exists and the machine is still listed, but it is
+marked unavailable rather than quietly running someone else's ROM or none at
+all — `Emulator::isMachineRunnable()` is what the chooser asks.
+
+**Apple II Plus** — either the six motherboard ROMs in address order, or one
+pre-combined 12KB image:
+
+| File | Size | Description |
+|------|------|-------------|
+| `341-0011.bin` … `341-0015.bin` | 2KB each | Applesoft, `$D000-$F7FF` |
+| `341-0020.bin` | 2KB | Autostart monitor, `$F800-$FFFF` |
+| `apple2plus.rom` | 12KB | ...or one pre-combined image instead of the six |
+| `341-0036.bin` | 2KB | II+ character generator |
+
+**Apple //c** — the system ROM is 16KB because everything a //c would have put
+in a slot is inside it:
+
+| File | Size | Description |
+|------|------|-------------|
+| `342-0272-A.bin` (or `apple2c.rom`) | 16KB | //c system ROM |
+| `342-0265-A.bin` (or `341-0265-A.bin`) | 4KB | //c character generator |
+
+**Apple IIgs** — a ROM 01 image, either as the two socket ROMs or pre-combined.
+`loadROM` looks for the emulation reset vector at `$FF:FFFC` to work out which
+way round the banks are, so either order loads:
+
+| File | Size | Description |
+|------|------|-------------|
+| `341-0728.bin` + `341-0749.bin` (or `341-0748.bin`) | 64KB each | ROM 01, as its two parts |
+| `342-0077-B.bin` (or `apple2gs.rom`) | 128KB | ...or one pre-combined image |
 
 ## Building
 
@@ -127,8 +170,9 @@ npm run check         # Consistency checks + JavaScript tests
 |--------|----------|
 | Backspace | Delete (left arrow) |
 | Arrow Keys | Arrow Keys |
-| Left Alt | Open Apple (joystick button 0) |
-| Right Alt | Closed Apple (joystick button 1) |
+| Left Alt / Option | Open Apple (joystick button 0) |
+| Right Alt / Option | Closed Apple (joystick button 1) |
+| ⌘ (IIgs only, by default) | Open Apple — see below |
 | Ctrl+Letter | Control characters |
 | Escape | ESC |
 | Enter | Return |
@@ -144,6 +188,19 @@ npm run check         # Consistency checks + JavaScript tests
 | Ctrl+` | Open window switcher |
 | Option+Tab | Cycle to next window |
 | Option+Shift+Tab | Cycle to previous window |
+| F5 | Run / Continue execution |
+| F10 | Step Over |
+| F11 | Step Into |
+| Shift+F11 | Step Out |
+
+**Which host key is Open Apple is the machine's choice.** On the 8-bit machines
+the two Option keys are the Apple keys — left Open, right Closed — and ⌘ is
+left to the browser. A IIgs's keyboard is a Mac's: ⌘ *is* its Open Apple and
+Option its Closed Apple, and GS/OS drives its menus with ⌘-letter, so on that
+machine the emulator takes ⌘ while it has the keyboard. **View > ⌘ as Open
+Apple** is the switch, remembered per machine and on by default for the IIgs
+only. A browser still keeps ⌘W, ⌘Q and the like for itself, which is why this
+is a choice rather than a rule.
 
 ### Text Selection
 
@@ -202,10 +259,26 @@ Browse the contents of inserted disks:
 
 ### Save States
 
-- **Autosave** — Saves every 5 seconds while running (enabled by default)
+- **Autosave** — Saves every 5 seconds while running (enabled by default), kept per machine
 - **5 manual slots** — Save and restore at any time from the Save States window
-- State includes CPU registers, 128KB RAM, language card, soft switches, disk images with modifications, filenames, and debugger state
+- State includes CPU registers, RAM, language card, soft switches, every slot by card id with that card's own state, disk images with modifications, filenames, and debugger state
 - Stored in browser IndexedDB
+
+Every machine writes the same twelve-byte header — magic, format version, and
+the id of the machine that wrote it — so the host can tell a //e's state from a
+IIgs's before handing either to the core. Everything after the header is laid
+out to the saving machine's shape, which is why the id matters: a state
+restored into the wrong machine would be read as garbage rather than fail.
+Loading a state saved elsewhere switches to that machine first (asking first),
+because a save is a save of a whole computer.
+
+The Apple II family's layout is `STATE_VERSION` 9 in `emulator_state.cpp`; a
+IIgs's is its own (`iigs_state.cpp`, version 1), since the two share nothing
+after the header. A IIgs state carries its fast RAM, the Mega II's RAM and
+switches, the memory controller's registers, and every device — ADB, clock
+chip with its battery RAM, SCC, Ensoniq — plus the IWM, the floppies and the
+SmartPort with its images. That last one is why a state can be tens of
+megabytes: a SmartPort card's state *is* its hard drive images.
 
 ### Display Settings
 
@@ -324,12 +397,24 @@ The speed is a host preference, not machine state, so it survives reset and rebo
 |  | CPU  | MMU | Video | Audio| Disk II|     |
 |  |65C02 |128KB|       |      |        |     |
 |  +------+-----+-------+------+--------+     |
+|         ...or, for the Apple IIgs:          |
+|  +------+--------+-------+-------+----+     |
+|  |65816 | IIgs   | SHR + | Enso- | ADB|     |
+|  |24-bit| Memory | MegaII| niq   | SCC|     |
+|  +------+--------+-------+-------+----+     |
 |                                             |
 |  +-------+------------+-------+-------+     |
 |  | Cards | Filesystem | BASIC | Disasm|     |
 |  +-------+------------+-------+-------+     |
 +---------------------------------------------+
 ```
+
+**Which parts a machine is built from comes from its profile's family.**
+`MachineFamily::AppleII` is the three 8-bit machines: one design, built from
+`MMU`, `Video`, `Audio` and `CPU6502`, differing only by the numbers in their
+profiles. `MachineFamily::AppleIIgs` is a different computer and is built from
+its own classes in `src/core/iigs/`. The family is chosen once, at
+construction. Nothing outside `src/core/iigs/` grows an `if (IIgs)`.
 
 The emulator core runs in a dedicated Web Worker, and where the browser allows
 `SharedArrayBuffer` the screen and audio travel through shared memory rather than
@@ -473,28 +558,37 @@ web-a2e/
 ├── src/
 │   ├── core/                # C++ emulator core (namespace a2e::)
 │   │   ├── cpu/
-│   │   │   └── 6502/        # Cycle-accurate 65C02 processor
+│   │   │   ├── 6502/        # Cycle-accurate 65C02 processor
+│   │   │   └── 65816/       # The IIgs's 65C816: 24-bit bus, 16-bit registers
 │   │   ├── mmu/             # Memory management, soft switches
+│   │   ├── machine/         # Machine profiles and the registry of machines
+│   │   ├── iigs/            # The IIgs's own parts, kept apart from every
+│   │   │                    #   other machine's: memory, video, ADB, clock,
+│   │   │                    #   Ensoniq, SCC, and the machine that owns them
 │   │   ├── video/           # Per-scanline signal generation + NTSC/RGB decoding
 │   │   ├── audio/           # Speaker emulation
 │   │   ├── disk-image/      # Disk formats (DSK/DO/PO/WOZ), GCR encoding
-│   │   ├── disassembler/    # 65C02 disassembler
-│   │   ├── input/           # Keyboard handling
+│   │   ├── disassembler/    # 65C02 and 65816 disassemblers
+│   │   ├── input/           # Keyboard, Sirius Joyport, the //c's IOU mouse
 │   │   ├── cards/           # Expansion card system
-│   │   │   ├── disk2/       # Disk II controller
+│   │   │   ├── disk_controller.*  # The drive mechanism both machines share
+│   │   │   ├── disk2/       # Disk II controller card
+│   │   │   ├── iwm/         # Integrated Woz Machine (//c and IIgs)
 │   │   │   ├── mockingboard/  # AY-3-8910 + VIA 6522
 │   │   │   ├── mouse/       # Apple Mouse Interface Card
 │   │   │   ├── smartport/   # SmartPort hard drive controller
 │   │   │   ├── softcard/    # Microsoft Z-80 SoftCard
 │   │   │   │   └── z80/     # Z80 CPU emulation core
 │   │   │   ├── parallel/    # Parallel (Centronics) card
+│   │   │   ├── serial/      # The //c's two built-in serial ports
 │   │   │   ├── ssc/         # Super Serial Card + ACIA 6551
 │   │   │   └── thunderclock/  # Thunderclock Plus
-│   │   ├── filesystem/      # DOS 3.3 and ProDOS parsers
+│   │   ├── filesystem/      # DOS 3.3, ProDOS and Pascal parsers and writers
 │   │   ├── basic/           # BASIC tokenizer and detokenizer
 │   │   ├── assembler/       # 65C02 assembler (Merlin-style syntax)
-│   │   ├── debug/           # Condition evaluator
+│   │   ├── debug/           # Shared debug facilities, condition evaluator
 │   │   ├── emulator/        # Split emulator implementation files
+│   │   │   ├── state_stream.hpp    # The writer/reader every machine uses
 │   │   │   ├── emulator_state.cpp  # State serialization
 │   │   │   └── emulator_debug.cpp  # Debug facilities
 │   │   ├── emulator.cpp     # Core coordinator
@@ -511,7 +605,9 @@ web-a2e/
 │       ├── display/         # WebGL renderer, CRT shaders, display settings, user profiles
 │       ├── file-explorer/   # DOS 3.3/ProDOS browser, file viewer, disassembler
 │       ├── help/            # Documentation and release notes
-│       ├── input/           # Keyboard, text selection, joystick, mouse
+│       ├── input/           # Keyboard, text selection, joystick, mouse, Apple keys
+│       ├── machine/         # Host-side machine profile, menu, slot storage,
+│       │                    #   the IIgs's memory size and battery RAM
 │       ├── printer/         # Virtual dot-matrix printer (IW-I, IW-II, FX-80, DMP)
 │       ├── state/           # Save state manager and persistence
 │       ├── ui/              # Menu wiring, reminders, slot configuration

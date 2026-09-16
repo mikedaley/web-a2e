@@ -2,7 +2,13 @@
 
 The Display Settings window controls every visual effect applied to the emulator screen. Open it from **View > Display**.
 
-The window leads with a **Monitor** preset, which sets the whole picture in one choice. Below that are the image adjustments you are most likely to touch, and everything else folds away behind **Advanced**. All settings are saved to `localStorage` under `a2e-display-settings` and restored on reload. **Reset to Defaults** at the bottom returns everything to its initial state.
+The window leads with a **Monitor** preset, which sets the whole picture in one choice. Below that are the image adjustments you are most likely to touch, and everything else folds away behind **Advanced**. **Reset to Defaults** at the bottom returns everything to its initial state.
+
+**Display settings are remembered per machine.** A //e's soft composite look, which is exactly right for games, has no business on a IIgs's RGB desktop — so each machine has its own `localStorage` key and its own settings, and switching machines brings that machine's picture back rather than carrying the last one across. The key from before there was more than one machine is read once as the //e's.
+
+Each machine's defaults differ in exactly one value, the **Screen Border**: 35% on the 8-bit machines, whose picture fills the frame, and 0 on a IIgs, which draws a border of its own as part of the raster.
+
+Saved display profiles stay **global** — they are named snapshots any machine may pick.
 
 ---
 

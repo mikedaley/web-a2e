@@ -2,26 +2,27 @@
 
 A cycle-accurate Apple II emulator running entirely in the browser. Built with WebAssembly (C++ backend) and WebGL rendering, it faithfully reproduces the 1.023 MHz processor, the memory architecture, all standard video modes, the Disk II controller, expansion cards, and speaker audio -- no plugins or installs required.
 
-Two machines are modelled: the **Apple //e Enhanced** and the **Apple II Plus**. The badge in the header names the one you are running, and clicking it switches. See [[Machines]].
+Four machines are modelled: the **Apple IIe Enhanced**, the **Apple II Plus**, the **Apple IIc** and the **Apple IIgs**. The badge in the header names the one you are running, and clicking it switches. See [[Machines]], and [[Apple-IIgs]] for the machine that is a different computer rather than a different set of numbers.
 
 ---
 
 ## Feature Highlights
 
-- **Two machines** -- Apple //e Enhanced and Apple II Plus, chosen from the header badge, each described by a profile and each remembering its own slot layout
-- **Cycle-accurate CPU** at 1.023 MHz -- a 65C02 on the //e, an NMOS 6502 on the II Plus, with full extended opcode support
-- **128KB memory** (64KB main + 64KB auxiliary) with Language Card and double hi-res capability
-- **All Apple IIe video modes** -- Text, Lo-Res, Hi-Res, Double Hi-Res, Double Lo-Res, and 80-column text
+- **Four machines** -- Apple IIe Enhanced, Apple II Plus, Apple IIc and Apple IIgs, chosen from the header badge, each described by a profile and each remembering its own slot layout, display settings and save states
+- **Cycle-accurate CPU** at 1.023 MHz -- a 65C02 on the //e and the //c, an NMOS 6502 on the II Plus, and a 65C816 on the IIgs at 2.8 MHz, verified against 5.1 million recorded states from real silicon
+- **128KB memory** (64KB main + 64KB auxiliary) with Language Card and double hi-res capability; the IIgs adds 256K to 8M of fast RAM on a 24-bit bus
+- **All Apple IIe video modes** -- Text, Lo-Res, Hi-Res, Double Hi-Res, Double Lo-Res, and 80-column text -- plus **Super Hi-Res** on the IIgs, 320 and 640 wide with a palette per scanline
+- **GS/OS and the Finder** -- the IIgs boots System 6.0.4 from its built-in SmartPort, with a working mouse, an Ensoniq for sound, and a battery-backed clock whose settings survive a reload
 - **Runs in a Web Worker** -- the emulator and WASM live off the main thread, with the framebuffer and audio ring shared through `SharedArrayBuffer`
 - **CRT shader effects** -- monitor presets (composite, RGB, monochrome green/amber), scanlines with a brightness-dependent beam, selectable shadow mask geometry, phosphor glow, curvature, and analog artefacts
 - **Disk II emulation** with DSK, DO, PO, NIB, and WOZ format support and real-time surface visualization
 - **SmartPort hard drives** -- two block devices with `.hdv`, `.po` and `.2mg` image support
-- **Expansion card system** -- Mockingboard, Thunderclock Plus, Mouse Card, SmartPort, Super Serial Card, Parallel Card, Microsoft Z-80 SoftCard, No-Slot Clock
+- **Expansion card system** -- Mockingboard, Thunderclock Plus, Mouse Card, SmartPort, Super Serial Card, Parallel Card, Microsoft Z-80 SoftCard, No-Slot Clock. A //c has no sockets but decodes every slot address to a part soldered to its board; a IIgs carries its SmartPort in slot 5
 - **Game port devices** -- the Apple resistive joystick and paddles, or a Sirius Joyport with two Atari-style digital sticks
 - **Virtual printers** -- Epson FX-80 and Apple DMP over the parallel card, ImageWriter I/II over the serial card, with a print browser
 - **Audio-driven timing** using Web Audio API at 48 kHz for accurate, drift-free emulation even when backgrounded
-- **Save states** -- autosave plus five manual slots stored in IndexedDB
-- **Built-in debugger suite** -- CPU debugger, memory browser, heat map, stack viewer, soft switch monitor, BASIC program viewer, rule builder, and more
+- **Save states** -- autosave plus five manual slots stored in IndexedDB, kept per machine, with a state that names the machine that wrote it and switches to it on load
+- **Built-in debugger suite** -- CPU debugger, memory browser, heat map, stack viewer, soft switch monitor, BASIC program viewer, rule builder, and more, asking every question at 24 bits so a 65816 and a 6502 answer the same windows
 - **Applesoft BASIC editor** and **6502 assembler** with direct memory injection
 - **File Explorer** for browsing DOS 3.3 and ProDOS disk contents
 - **AI agent interface** over MCP and AG-UI, so tools such as Claude Code can drive the emulator
@@ -48,7 +49,8 @@ See [[Getting-Started]] for a full walkthrough.
 | Page | Description |
 |------|-------------|
 | [[Getting-Started]] | First-time setup, powering on, inserting disks, keyboard basics, paste, and full-page mode |
-| [[Machines]] | Choosing a machine, what differs between the //e and the II Plus, ROMs, and what survives a switch |
+| [[Machines]] | Choosing a machine, what differs between the four, ROMs, and what survives a switch |
+| [[Apple-IIgs]] | The IIgs in detail -- the 65816, the 24-bit memory map, Super Hi-Res, the Ensoniq, the ADB, and GS/OS |
 | [[Display-Settings]] | Monitor presets, CRT effects, analog artefacts, image controls, and rendering options |
 | [[Disk-Drives]] | Disk formats, drive UI, surface visualization, write protection, and drive sounds |
 | [[SmartPort-Hard-Drives]] | Hard drive images, the SmartPort card, and ProDOS volumes |
@@ -66,10 +68,10 @@ See [[Getting-Started]] for a full walkthrough.
 |------|-------------|
 | [[Architecture-Overview]] | Two-layer design, the Worker split, audio-driven timing, WASM interface pattern |
 | [[Worker-Architecture]] | Web Worker isolation, `WasmProxy`, RPC, and the shared memory transport |
-| [[CPU-Emulation]] | 65C02 implementation, cycle accuracy, Klaus Dormann test compliance |
-| [[Memory-System]] | MMU soft switches, Language Card, bank switching, auxiliary memory |
-| [[Video-Rendering]] | Scanline rendering, WebGL pipeline, CRT shader architecture |
-| [[Audio-System]] | Speaker toggle emulation, Mockingboard synthesis, AudioWorklet pipeline |
+| [[CPU-Emulation]] | 65C02 and 65816 implementations, cycle accuracy, Klaus Dormann and SingleStepTests compliance |
+| [[Memory-System]] | MMU soft switches, Language Card, bank switching, auxiliary memory, and the IIgs's 24-bit map and shadowing |
+| [[Video-Rendering]] | Scanline rendering, NTSC decoding, Super Hi-Res, WebGL pipeline, CRT shader architecture |
+| [[Audio-System]] | Speaker toggle emulation, Mockingboard synthesis, the IIgs's Ensoniq, AudioWorklet pipeline |
 | [[Disk-System-Internals]] | GCR encoding, WOZ format handling, Disk II controller state machine |
 | [[Debugger]] | CPU debugger, breakpoints, rule builder, BASIC tools, memory windows |
 | [[Agent-Integration]] | MCP server, AG-UI protocol, and the frontend tool surface |

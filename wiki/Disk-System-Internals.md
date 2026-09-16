@@ -2,7 +2,9 @@
 
 This page covers the low-level implementation of the 5.25" drive controller and disk image format support. For user-facing disk drive operations, see [[Disk Drives]].
 
-Two machines drive a 5.25" disk with different parts: a //e or a II Plus has a **Disk II controller card** in slot 6, and a //c has an **IWM** soldered to the board. Everything below the chip is the same in both and lives in `DiskController` — the drives, the stepper, the motor and the sequencer — so read "the controller" here as either.
+The machines drive a 5.25" disk with different parts: a //e or a II Plus has a **Disk II controller card** in slot 6, while a //c and an Apple IIgs each have an **IWM** soldered to the board. Everything below the chip is the same in all of them and lives in `DiskController` — the drives, the stepper, the motor and the sequencer — so read "the controller" here as any of them.
+
+One difference matters on a IIgs and nowhere else. **ENABLE is not the motor**: a drive keeps turning for about a second after the CPU switches it off, which is right for reading, but the IWM's mode register is writable exactly while the *line* is low and the sequencer must not write flux when it is. The IIgs firmware exercises both in one instruction — it switches the drive off and writes the mode register at `$C0EF`, which is also Q7 — so a machine that asked about the mechanism instead of the wire would spin for a second and erase track zero while doing it. `DiskController::isDriveEnabled()` is the wire; `isMotorOn()` is the mechanism.
 
 ---
 

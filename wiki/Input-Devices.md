@@ -23,11 +23,20 @@ The emulator translates browser keycodes to Apple II ASCII codes in real time. A
 
 | Host Key | Apple II Function |
 |----------|-------------------|
-| Alt (Option) | Open Apple button |
-| Meta (Cmd/Win) | Closed Apple button |
+| Left Alt (Option) | Open Apple button |
+| Right Alt (Option) | Closed Apple button |
+| ⌘ | Open Apple **on a IIgs** — see below |
 | Shift | Shift (uppercase, shifted symbols) |
 | Ctrl | Control (generates control characters Ctrl+A through Ctrl+Z) |
 | Caps Lock | Uppercase letters (matches Apple II behavior) |
+
+**Which host key is Open Apple is the machine's choice.** On the 8-bit machines the two Option keys are the Apple keys and ⌘ is left to the browser. A IIgs's keyboard is a Mac's: ⌘ *is* its Open Apple and Option its Closed Apple, and GS/OS drives its menus with ⌘-letter, so on that machine the emulator takes ⌘ while it has the keyboard. **View > ⌘ as Open Apple** is the switch, remembered per machine and on by default for the IIgs only.
+
+With it on, ⌘ is sent to the core as the left Alt and either Option as the right, so the core's Apple-key tracking needs no second mapping. A browser still keeps ⌘W, ⌘Q and the like for itself, which is why this is a choice. And because macOS delivers no key-up for a key released while ⌘ is held, the keys pressed under ⌘ are released when ⌘ is — otherwise "any key down" would stay high.
+
+Shift, Control, Caps Lock and the Apple buttons deliberately do **not** assert "any key down": they are separate lines on real hardware, not keys in the matrix.
+
+On a IIgs the modifier keys are also reported through `$C025`, which the Event Manager reads on every event — a machine answering zero there has no shift-click and no ⌘-menu shortcut.
 
 **Special keys:**
 
@@ -218,6 +227,8 @@ On a **//e** or a **II Plus**, the Apple Mouse Interface Card must be installed 
 
 A **//c** has a mouse already: the connector is on the back panel and the mouse is wired into the IOU rather than into a card, so there is nothing to install and nothing to remove. See [[Machines]].
 
+An **Apple IIgs** has one too, on the Apple Desktop Bus. The ADB controller reports it through `$C024` — X then Y, seven bits of signed movement each — and there is nothing to install. The two top bits of a report are **two different buttons**: the X byte's is button 1, which this mouse does not have, and the Y byte's is button 0, the one everybody presses. Putting the same button in both made every press two presses, and the Finder opened a folder on a single click.
+
 ### Engaging Mouse Capture
 
 To start using the mouse with the emulator:
@@ -235,7 +246,9 @@ Press **Escape** to exit pointer lock mode. This is standard browser behavior fo
 
 While pointer lock is active, the browser sends relative movement deltas (not absolute positions). These deltas are forwarded to the WASM emulator via `_mouseMove(dx, dy)`, and the mouse firmware translates them into Apple II mouse coordinates through the standard screen-hole protocol.
 
-The two machines get there by different routes. A card is told a delta and works out the rest for itself. A //c's IOU counts nothing: every unit of travel is one interrupt, and its firmware reads which way the mouse went and adds one to a position it keeps in the screen holes — so ten units of movement is ten interrupts, delivered one at a time as the handler services them.
+The machines get there by different routes. A card is told a delta and works out the rest for itself. A //c's IOU counts nothing: every unit of travel is one interrupt, and its firmware reads which way the mouse went and adds one to a position it keeps in the screen holes — so ten units of movement is ten interrupts, delivered one at a time as the handler services them. A IIgs's ADB controller holds what is owed and makes a report when the processor comes to read one, carrying as much of the movement as seven bits will — so a pointer that has fallen behind catches up in one report rather than crawling through a queue of tiny ones.
+
+GS/OS runs its mouse on the ADB interrupt: it enables the mouse interrupt and waits, so a machine that never raised one had a Finder whose pointer never moved however much the mouse did. QuickDraw II then redraws the pointer from the **scan-line interrupt**, asked for by a Super Hi-Res line's control byte.
 
 ## Mobile Input
 

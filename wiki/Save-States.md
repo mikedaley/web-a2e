@@ -11,6 +11,7 @@ The emulator provides a complete save state system that captures the entire mach
 - [Loading a State](#loading-a-state)
 - [Clearing a Slot](#clearing-a-slot)
 - [Downloading and Importing State Files](#downloading-and-importing-state-files)
+- [States and Machines](#states-and-machines)
 - [What Is Included in a Save State](#what-is-included-in-a-save-state)
 - [Screenshots and Previews](#screenshots-and-previews)
 - [Storage](#storage)
@@ -41,7 +42,9 @@ The autosave toggle is in the **File** menu. The setting persists across session
 
 ### Restoring from Autosave
 
-When the emulator starts, if an autosave state exists, it is automatically restored. You can also manually load the autosave from the Save States window.
+When the emulator starts, if an autosave state exists for the machine you are running, it is automatically restored. You can also manually load the autosave from the Save States window.
+
+**The autosave is kept per machine.** A state only restores into the machine that wrote it, so one shared autosave slot would come back to nothing for every machine but the last one you used. Each machine has its own record, keyed by machine (`autosave:<key>`); the record from before there was more than one machine is the //e's.
 
 ## Save States Window
 
@@ -103,6 +106,25 @@ If the browser supports the File System Access API, a native save dialog appears
 
 Click **Load from File...** at the bottom of the Save States window to import a previously downloaded `.a2state` file. The file is validated by checking for the `A2ES` magic bytes in the header before attempting to restore the state.
 
+## States and Machines
+
+**Every machine writes the same twelve bytes first** — a magic number, a format version, and the id of the machine that wrote it. The host reads those without knowing the rest of the layout, which is how it can tell a //e's state from a IIgs's *before* handing either to the core.
+
+Everything after the header is laid out to the saving machine's shape, so a state restored into a different machine would be read as garbage rather than fail cleanly. The id is what prevents that.
+
+Asked to load a state saved on another machine, the emulator **switches to that machine first** rather than letting the core refuse — a save is a save of a whole computer, and loading one is asking for that computer back. It says so before it does it, because the switch rebuilds the machine and throws away whatever was running. A state whose machine the build cannot run (missing ROMs) is declined with a note saying so.
+
+The Save States window labels any slot that belongs to another machine.
+
+Two layouts exist, and they move independently:
+
+| Family | File | Version |
+|---|---|---|
+| Apple II (//e, II Plus, //c) | `emulator_state.cpp` | 9 |
+| Apple IIgs | `iigs_state.cpp` | 1 |
+
+They share nothing after the header, so there is no reason for the two to move together.
+
 ## What Is Included in a Save State
 
 A save state captures the complete machine state as a binary blob with a versioned header. The following data is serialized:
@@ -110,6 +132,7 @@ A save state captures the complete machine state as a binary blob with a version
 ### Header
 - Magic bytes (`A2ES`)
 - State format version number
+- The id of the machine that wrote it
 
 ### CPU State
 - Registers: A, X, Y, Stack Pointer, Status (P), Program Counter
@@ -147,10 +170,20 @@ All Apple IIe soft switch states are packed into a single 32-bit word, including
 - Speaker toggle state
 
 ### Expansion Cards
-- **Mockingboard** -- Full serialized state (AY-3-8910 registers, VIA 6522 timers)
-- **Thunderclock** -- Card-specific state
-- **Mouse Card** -- Card-specific state
-- Other expansion cards in slots 1-7 (excluding slot 4 Mockingboard and slot 6 Disk II, which use dedicated serialization)
+
+**Every slot is recorded by card id with that card's own state**, so a state refits the cards it was saved with rather than assuming a fixed list: a Mockingboard, a Thunderclock, a Mouse Card, a Super Serial Card, a parallel card, a SoftCard, a //c's built-in ports and its IWM's mode register all come back.
+
+A card's state is sized with 32 bits, because **a SmartPort card's state is its hard drive images** — which is why a state with two 32MB volumes attached is tens of megabytes rather than hundreds of kilobytes. Those bytes are written straight into the state rather than through a scratch buffer; copying them cost enough memory to stop the emulator outright.
+
+### A IIgs's state
+
+A IIgs's layout is its own from the header onwards:
+
+- The **65816** — mode first, then the flags, then the registers, because setting the mode and the flags each force the widths the mode requires
+- The **fast RAM**, refused on restore if a different amount is fitted
+- The **Mega II's** RAM, language cards, switches, and every register of the memory controller
+- The **devices**, each serializing itself — ADB (queues included), the clock chip (battery RAM, seconds, a transaction in flight), the SCC's two channels, and the Ensoniq (RAM, oscillators, registers, but not its output ring, which is the host's backlog)
+- The machine's own counters, the **IWM**, the floppies, and the **SmartPort** with its images
 
 ## Screenshots and Previews
 

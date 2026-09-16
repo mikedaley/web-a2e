@@ -429,6 +429,20 @@ PSG state includes the 17-bit noise shift register, envelope counter, and envelo
 
 ---
 
+## The IIgs's Ensoniq
+
+A IIgs has an Ensoniq 5503 DOC as well as a speaker. `IIgsSound` models the chip as GSSquared and MAME do: resolution-shifted table addressing, a zero byte halting every mode, the table's end wrapping free-run and halting the rest, swap mode handing over to the partner, sync mode restarting the oscillator below, and one scan per `8 × (oscillators + 2)` ticks of 7.16 MHz.
+
+It runs on the machine's clock rather than on demand, and it **interrupts**: an oscillator with its interrupt bit set raises one when it halts. The sound tools play every sample through swapped pairs refilled from those interrupts, so a chip that only ran when the host asked for a buffer played the first buffer of anything and then stopped.
+
+**Every oscillator is summed, whatever channel it is assigned to.** The chip has one analogue output pin: it visits its channels in turn and puts each one's sample on that same pin, with the channel strobes saying which channel is on it. A stock machine filters the pin and hears the sum; only a stereo card in a slot uses the strobes to pull the channels apart, and there is no such card here. Splitting by the channel field put a game's bass in one speaker and its melody in the other. The uppermost enabled oscillator is heard three times over, which is real silicon.
+
+**The volume nibble in `$C03C` reaches the speaker and not the Ensoniq.** One amplifier really does carry both on the machine, and modelling that sounded wrong: sound software drops the nibble to about 5 and puts it back to 15 around every burst of DOC access, in flips lasting well under ten milliseconds, so scaling the synthesiser by it wobbles a steady note at whatever rate the software happens to be transferring at. The host's volume control is the amplifier for the Ensoniq instead.
+
+Where the nibble *is* applied it is a **taper, not a ratio** — a cube root. That came out of a measurement: a plain ratio put the machine 9.5dB below a //e for the same speaker click at the setting its own firmware boots with. The taper keeps what the nibble is for — silence at zero, full output at fifteen, every step ordered — and puts the default within 3dB of the other machines. The nibble also reads back as it was written, which it did not: forcing it to 15 meant the Control Panel's volume setting and the toolbox's `SetSoundVolume`, which both change it by reading and writing it back, were working from a machine that claimed to be at full volume.
+
+The speaker's gain follows the nibble's writes at the slow-clock times they happened, applied per sample through a twenty-millisecond slew, because one gain per buffer made the ROM's bell fade a staircase and brought its decaying tail back at full level when the volume went back up.
+
 ## Source Files
 
 | File | Description |

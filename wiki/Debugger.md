@@ -476,6 +476,25 @@ See [[Keyboard Shortcuts]] for the complete shortcut reference.
 
 ---
 
+## Debugging Any Machine
+
+**Every debug question is asked once, at the widest shape, and a machine answers as much of it as it has.** A 6502's answer is a 65816's with the high halves zero and no banks, so addresses are 24 bits throughout the debug layer and A/X/Y/SP are 16. What a machine does not have — a program bank, a data bank, a direct page, a second mode — reads as zero rather than as an error, because "this machine has none" is the answer. The alternative was a second set of exports and a second set of windows to keep in step.
+
+`MachineDebug` is the shared mechanism: breakpoints (with the temporary one behind step over and step out), watchpoints, the trace ring, and beam breakpoints. None of them is about an instruction set, so none belongs to a machine.
+
+Two things are deliberately **not** shared:
+
+- **Cycle profiling** is a counter per address — 256KB for a 6502 and 64MB for a 65816 — so it stays //e-only, and the heat overlay switches itself off elsewhere.
+- **The call-stack summary** is built by the //e's run loop as it executes JSRs; the IIgs machine keeps no such list and reports none rather than showing a //e's.
+
+Other differences worth knowing:
+
+- **A watchpoint on a IIgs is checked on the processor's bus**, not inside the memory — the difference between the program touching an address and *anything* touching it. The Mega II's video reads the text page on every one of 192 lines, and a watchpoint there that fired for the scanner would stop the machine before a program had run.
+- **Disassembly is chosen by the core**, because only something holding the live processor can walk a 65816's code stream: its instruction lengths depend on the M and X flags. `_disassembleRange` emits three tab-separated fields — address, bytes, text — rather than one fixed-width string, which stopped working the moment an address needed six digits.
+- **The trace's rows are formatted in the core**, one round trip for the visible window instead of one heap read per row.
+- **The profile describes the processor** — address bits, register bits, whether there are banks, a direct page and modes, and the two sets of flag names a 65816 has — and the host builds its panels from it. Every window writes an address through the same formatter, so it is four digits or a bank and a slash as the machine's own monitor writes it.
+- **What only covers part of a IIgs says so.** The heat map tracks the Mega II's MMU — the side where the video, the firmware's workspace and Applesoft live — and its titles name the banks and note that fast RAM is not covered, rather than letting a sparse map read as an idle machine. The zero page watch shows the direct page register and marks it when it has moved.
+
 ## Source Files
 
 ### Core Debug Windows

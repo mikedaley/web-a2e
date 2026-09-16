@@ -4,6 +4,11 @@ The Apple IIe has seven expansion slots (1-7), each providing I/O space and ROM 
 
 **Slots belong to the machine.** An Apple II Plus has eight slots numbered from 0, a different set of fixed cards and different defaults, and it remembers its own layout separately from the //e's. Everything below describes the //e unless it says otherwise; see [Apple II Plus Slots](#apple-ii-plus-slots) and [[Machines]].
 
+**Two machines have no slot window at all**, and the menu item is hidden rather than greyed out on both:
+
+- An **Apple //c** has no expansion sockets. It still decodes all seven slot addresses, because the firmware and everything written for a //e depend on them, but each one answers to a part soldered to the board: two serial ports in slots 1 and 2, the 80-column firmware in slot 3, the mouse in slot 4, and the disk port in slot 6. Every slot is therefore *fixed*, and there is nowhere to put a card.
+- An **Apple IIgs** has real slots on the board, but the choice each one offers — the machine's own firmware, or a card you fitted — is not modelled here, and its core does not answer the host's request to change a slot. Its SmartPort lives in slot 5 as part of the machine rather than as a card you insert.
+
 ## Table of Contents
 
 - [Slot Map](#slot-map)

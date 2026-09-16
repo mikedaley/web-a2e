@@ -34,13 +34,24 @@ The emulator translates modern keyboard input to Apple IIe key codes. Standard a
 
 ## Special Keys
 
-| Your Keyboard | Apple //e Key | Notes |
-|---------------|---------------|-------|
-| Left Alt | Open Apple | Modifier key, joystick button 0 |
-| Right Alt / Windows key | Closed Apple (Solid Apple) | Modifier key, joystick button 1 |
+| Your Keyboard | Apple Key | Notes |
+|---------------|-----------|-------|
+| Left Alt / Option | Open Apple | Modifier key, joystick button 0 |
+| Right Alt / Option / Windows key | Closed Apple (Solid Apple) | Modifier key, joystick button 1 |
+| ⌘ | Open Apple, **on the IIgs** | See below |
 | Ctrl | Control | Control key modifier |
 | Shift | Shift | Shift modifier |
 | Caps Lock | Caps Lock | Tracked and sent to the emulator core |
+
+### Which key is Open Apple depends on the machine
+
+On the 8-bit machines the two Option keys are the Apple keys — left Open, right Closed — and ⌘ is left to the browser.
+
+A IIgs's keyboard is a Mac's. ⌘ *is* its Open Apple and Option its Closed Apple, and GS/OS drives its menus with ⌘-letter, so on that machine the emulator takes ⌘ while it has the keyboard.
+
+**View > ⌘ as Open Apple** is the switch. It is remembered per machine and is on by default for the IIgs only. With it on, every ⌘ combination is intercepted — though a browser still keeps ⌘W, ⌘Q and a few others for itself, which is why this is a choice rather than a rule. Because macOS delivers no key-up for a key released while ⌘ is held, keys pressed under ⌘ are released when ⌘ is.
+
+The Apple keys deliberately do not assert "any key down": they are separate lines on real hardware, not keys in the matrix.
 
 ## Apple II Control Key Combinations
 

@@ -651,6 +651,18 @@ All shader parameters are exposed through the [[Display-Settings]] window. Setti
 
 ---
 
+## Super Hi-Res and the IIgs Raster
+
+A IIgs has two video systems and `$C029` switches between them. In //e mode the Mega II's picture is drawn by the same `Video` class every other machine uses, reading the Mega II's MMU. In Super Hi-Res the VGC draws 320 or 640 pixels a line with **a palette per scanline**, chosen by that line's control byte — which is why it is not one mode but two hundred of them.
+
+**A IIgs's frame is the raster a monitor shows, border included.** The Mega II's line is 65 cycles — 40 of picture, 12 of blanking, 13 of border — and its frame 262 lines, of which 200 are picture and 40 border. What is drawn is the part of that a monitor's bezel does not hide: three cycles either side and twelve lines above and below, which keeps the border's shape and puts it at about the width it has on the glass. Drawing every border cycle made it a fifth of the picture's width, which no monitor of the period showed.
+
+At 16 pixels a cycle the frame is therefore **736x448** (lines doubled), with the 640x400 picture at (48, 24). The //e's 560x384 goes in the same width, **stretched to 640** — eight pixels for every seven dots — because a text screen and a Super Hi-Res screen are the same width on the monitor, and it is centred in the 200 lines. The profile's `text` rectangle says where the text screen landed, so text selection maps a pointer onto a cell through it rather than assuming the text fills the frame, and its `aspect` says the shape the monitor shows the frame at: a //e's own ratio for the 8-bit machines, and 4:3 for the IIgs raster.
+
+**A IIgs's text is drawn, not transmitted.** `$C022` holds the two colours the VGC substitutes for lit and unlit text dots, and the bottom nibble of `$C034` the border. A text line is decoded into those two colours instead of through an NTSC receiver. Monochrome still overrides it, because a monochrome monitor has one phosphor whatever the machine sent.
+
+**`$C029` bit 5 shows double hi-res in black and white.** The System 6 Finder and the 80-column desktop programs draw a 560-dot double hi-res picture with Super Hi-Res off and this bit set, and the VGC shows the dots as they are. Decoding them into colour instead fringed every letter red and green.
+
 ## See Also
 
 - [[Architecture-Overview]] -- Two-layer design, audio-driven timing, frame synchronization

@@ -4,6 +4,8 @@ The Disk Drives window provides a visual interface for the emulated Disk II cont
 
 The Apple //e supported two floppy drives connected to the Disk II controller card in Slot 6. Each drive reads and writes 5.25-inch floppy disks with 35 tracks and 16 sectors per track.
 
+**The controller differs by machine, the drives do not.** A //e and a II Plus fit a Disk II card in a slot. An Apple //c and an Apple IIgs have an **Integrated Woz Machine** built in instead — the same sixteen addresses at `$C0E0-$C0EF` meaning the same things, with the drives, the stepper, the motor and Woz's Logic State Sequencer shared with the card. What the IWM adds is the register file a read sees in front of it: data, status, handshake, and a mode register writable only with the drive line low. What it has no need of is a ROM, because the disk firmware on both machines is in the system ROM rather than in slot 6's 256 bytes. Everything in this window works the same way whichever is fitted.
+
 ---
 
 ## Table of Contents

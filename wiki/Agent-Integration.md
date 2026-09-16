@@ -143,3 +143,14 @@ Frontend tools reach the emulator through `WasmProxy`, so they are subject to th
 - [[Architecture-Overview]] -- where the agent layer sits
 - [[Worker-Architecture]] -- how tools reach the emulator
 - [[Debugger]] -- the same capabilities from the UI
+
+## Machines other than the //e
+
+The frontend tools and the MCP server are machine-agnostic where the core is: powering on, typing, screenshots, screen text, disk and SmartPort images, the printers and the window tools all work whichever machine is running, because the WASM interface routes them to whichever coordinator is live.
+
+Two areas are still shaped around the Apple II family's `Emulator`, and do nothing useful while an Apple IIgs is running:
+
+- **The BASIC and assembler tools.** They read and write Applesoft in the //e's memory map and assemble 65C02, neither of which describes a IIgs.
+- **The slot tools.** A IIgs's core does not answer a request to change a slot, and a //c has no sockets, so `slotsInstallCard` and friends apply to the //e and the II Plus.
+
+See [[Machines]] for what each machine has, and [[Apple-IIgs]] for the parts of the host that still assume an 8-bit machine.

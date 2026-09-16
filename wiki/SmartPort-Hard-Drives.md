@@ -19,6 +19,10 @@ The SmartPort card gives the emulator hard drive volumes -- a ProDOS disk large 
 
 A **SmartPort** card must be installed. By default it is in slot 7. If the window reports that no card is present, open **View > Expansion Slots** and drag SmartPort into slot 2, 4, 5 or 7.
 
+**On an Apple IIgs there is nothing to fit.** Its SmartPort is in slot 5 as part of the machine — no card to insert, no Control Panel setting — so the window is simply there. It answers where the machine's own firmware does: the real slot 5 firmware has its ProDOS entry at `$C50A` and its SmartPort entry at `$C50D`, and software written for a IIgs hard-codes those rather than reading the ROM's own entry byte. It reports the firmware's four removable, interrupting volumes whatever is fitted, because ProDOS 8 1.x needs the second drive that byte implies: its device-table builder only balances with two drives in the boot slot.
+
+**On an Apple //c there is no SmartPort and no menu item**, because it has nowhere to put one.
+
 The card provides **two** block devices, shown in the window as two drive bays.
 
 ## Image Formats

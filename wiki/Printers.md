@@ -23,8 +23,8 @@ Open **View > Printer...** for the printer and its paper, and **View > Print Bro
 |---------|-----------|-------|
 | **Epson FX-80** | Parallel Card | The de-facto standard dot-matrix printer; ESC/P command set |
 | **Apple DMP** | Parallel Card | Apple's Dot Matrix Printer |
-| **ImageWriter I** | Serial (SSC, or a //c's printer port) | Apple's serial dot-matrix printer |
-| **ImageWriter II** | Serial (SSC, or a //c's printer port) | Adds draft, standard and NLQ print qualities |
+| **ImageWriter I** | Serial (SSC, or a //c's or IIgs's printer port) | Apple's serial dot-matrix printer |
+| **ImageWriter II** | Serial (SSC, or a //c's or IIgs's printer port) | Adds draft, standard and NLQ print qualities |
 
 Each printer emulates its own character ROM, so the glyph shapes, character spacing and print quality modes are those of the machine being imitated rather than a generic font. The ImageWriter II, for instance, carries separate ROMs for draft, standard and near-letter-quality output in both fixed and proportional spacing.
 
@@ -111,3 +111,16 @@ The printer emulation is covered by characterization tests in `tests/js/`, which
 
 - [[Expansion-Slots]] -- installing the Parallel or Super Serial Card
 - [[Architecture-Overview]] -- where printer emulation sits in the JavaScript layer
+
+## Printing from a IIgs
+
+A IIgs's two sockets are the two halves of one Z8530, and **which half is which was measured rather than reasoned about**: slot 1's firmware programs one pair of registers and slot 2's the other, so the **printer port is channel A** — the opposite of what both the address order and the port numbering suggest.
+
+The host's printer manager needs to know none of that. The IIgs profile names `serial1` and `serial2` in slots 1 and 2, exactly as a //c does, so an ImageWriter is found reachable without anything being told about a third kind of machine.
+
+Two things in that path print nothing at all when they are wrong, and both are worth knowing if a IIgs ever stops printing:
+
+- **An unplugged port answers as a device that is present and ready** — both CTS and DCD — because what is on the end of it is an emulated printer, and the firmware polls both before every character. A port that answered honestly sat in that loop for ever.
+- **The loopback cable between the two ports is not fitted by default.** It is a test rig that only the Apple IIgs Diagnostic's External Serial Ports Test asks for, and with it on, a byte the printer driver sends goes round to the other socket instead of out of the machine. It is a tick box in the Serial Port window, deliberately not remembered across sessions.
+
+**A GS/OS print is graphics, not text.** The ImageWriter driver rasterises each page into 8-dot bands and writes `CR`, `ESC T 16`, `LF` before each one — 16/144" is exactly eight dots at the head's pitch, so the bands abut. That pairing of carriage return and line feed has to survive an escape sequence that prints nothing, or every band feeds twice and each line comes out sliced in half by a white stripe.
