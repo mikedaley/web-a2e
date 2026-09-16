@@ -22,6 +22,7 @@
     "deploy:staging": "scripts/deploy.sh staging"
   },
   "devDependencies": {
+    "fflate": "^0.8.2",
     "vite": "^7.3.1",
     "vitest": "^4.1.10",
     "ws": "^8.19.0"
