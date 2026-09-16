@@ -51,9 +51,12 @@ describe("menuAvailability", () => {
     expect(a.hardDrives).toBe(false);
   });
 
-  it("gives a IIgs its built-in SmartPort and ports, no slots window, no speed", () => {
+  it("gives a IIgs its built-in SmartPort and ports, a slots window, no speed", () => {
     const a = menuAvailability(iigs, { 1: "serial1", 2: "serial2" });
-    expect(a.slots).toBe(false);
+    // A IIgs has seven real sockets, and each one also has a built-in device
+    // assigned to it; the window offers both the socket and the Control
+    // Panel's setting that says which of the two answers.
+    expect(a.slots).toBe(true);
     expect(a.speed).toBe(false);
     expect(a.hardDrives).toBe(true);
     expect(a.serialPort).toBe(true);

@@ -476,6 +476,38 @@ firmware sizes memory by writing to one and reading it back. System 6.0.4 boots 
 with a working mouse; the built-in SmartPort in slot 5 serves it hard drive images
 through GS/OS's extended calls.
 
+**A IIgs's seven slots each hold two things, and `$C02D` says which answers.**
+Chapter 8 of the Hardware Reference: every slot is a real socket *and* has a
+built-in device assigned to it, and "only one device can be selected at a time
+for each slot". The register moves **both the ROM and the I/O** for slots 1, 2,
+5, 6 and 7; for slot 4 it moves the ROM only, because "I/O space for slots 3
+and 4 is always enabled"; and slot 3 is not in the register at all — bit 3 is
+reserved and its ROM follows the //e's own SLOTC3ROM. `IIgsMemory` holds the
+user's cards in `slotCards_`, separate from the Mega II's slots where the
+machine's own parts live, and `slotIOIsCard`/`slotRomIsCard` are those rules.
+A slot switched to a card that is not there reads the floating bus, and the
+machine's own device must *not* answer in its place.
+
+**The Control Panel's setting is held against the firmware, because we are the
+Control Panel.** On a real machine that choice lives in battery RAM and the
+firmware copies it into `$C02D` on every start. We cannot write that battery
+RAM — the checksum algorithm is not known here and the firmware would rewrite
+its defaults — so `IIgsMemory::overrideSlot` remembers the bits the user
+actually chose and a firmware write to `$C02D` is *merged* rather than obeyed
+for those. A slot nobody has touched is left entirely to the firmware, which is
+what keeps a machine with no cards behaving exactly as before. Without this a
+card fitted before boot was ignored from the first reset onwards.
+
+**`$C800-$CFFF` is one window seven cards share**, and a card claims it by
+having its own `$Cn00` read; `$CFFF` hands it back, as INTC8ROM does on a //e.
+Without it a card with more firmware than 256 bytes — a Super Serial Card, a
+Thunderclock, a parallel card — has nowhere to put the rest of it.
+
+**A card's samples are added after the `$C03C` amplifier, not through it.** A
+Mockingboard in a socket has its own output on the real machine, so scaling it
+by the volume nibble would fade a card's music along with the ROM's bell — the
+same reason the Ensoniq is kept off that nibble.
+
 **A slot given to "Your Card" with nothing in it reads the bus.** `$C02D`
 says which slots the internal firmware answers for; a slot switched away from
 it with no card fitted answers `$FF`, as an empty slot on any Apple II answers

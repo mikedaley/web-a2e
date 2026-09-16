@@ -126,6 +126,16 @@ public:
   const SoftSwitches &getSoftSwitches() const { return switches_; }
 
   /**
+   * What an unread address reads: whatever the video scanner is fetching.
+   *
+   * Public because a IIgs's memory controller sits in front of this one and
+   * has to answer for an empty socket itself — a slot the Slot register has
+   * switched to a card that is not there drives nothing, and the machine's own
+   * device for that slot must not answer in its place.
+   */
+  uint8_t floatingBus() { return getFloatingBusValue(); }
+
+  /**
    * The switches a save state carries, as one word, and how they come back.
    *
    * Restoring is done by writing the switches' own addresses rather than

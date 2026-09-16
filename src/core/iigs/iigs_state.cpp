@@ -28,7 +28,12 @@ namespace a2e::iigs {
  * the two to move together.
  */
 static constexpr uint32_t STATE_MAGIC = 0x53324541; // "A2ES"
-static constexpr uint32_t STATE_VERSION = 1;
+/*
+ * Version 2: the seven sockets. A IIgs's slots each have a built-in device as
+ * well as a socket, so a state has to carry both what the user fitted and the
+ * Control Panel's setting that says which of the two answers.
+ */
+static constexpr uint32_t STATE_VERSION = 2;
 
 const uint8_t *IIgsMachine::exportState(size_t *size) {
   stateBuffer_.clear();
@@ -99,6 +104,25 @@ const uint8_t *IIgsMachine::exportState(size_t *size) {
   writeDriveState(w, *disk_);
   writeCard(smartPort_);
 
+  // The seven sockets: what is in each, and the Control Panel's setting. The
+  // setting is the memory controller's override rather than $C02D itself,
+  // because $C02D is written by the firmware on every start and the override
+  // is what the user actually chose.
+  for (uint8_t slot = 1; slot <= 7; slot++) {
+    const std::string name = getSlotCardName(slot);
+    w.string(name);
+    ExpansionCard *card = memory_->slotCard(slot);
+    const size_t cardSize = (card && name != "empty") ? card->getStateSize() : 0;
+    if (cardSize == 0) {
+      w.u32(0);
+    } else {
+      w.blobFrom(cardSize,
+                 [&](uint8_t *dst) { return card->serialize(dst, cardSize); });
+    }
+    w.boolean(isSlotInternal(slot));
+  }
+  w.u8(memory_->slotOverrideMask());
+
   *size = stateBuffer_.size();
   return stateBuffer_.data();
 }
@@ -111,6 +135,7 @@ bool IIgsMachine::importState(const uint8_t *data, size_t size) {
   if (r.failed()) return false;
 
   reset();
+  bool slotSettings[8] = {true, true, true, true, true, true, true, true};
 
   // Mode first, then the flags, then the registers: setEmulation and setP
   // each force the widths the mode requires, and a 16-bit X restored before
@@ -156,6 +181,29 @@ bool IIgsMachine::importState(const uint8_t *data, size_t size) {
   if (!readDriveState(r, *disk_)) return false;
   readCard(smartPort_);
   if (r.failed()) return false;
+
+  // The sockets, refitted from their names so a state comes back with the
+  // cards it was saved with.
+  for (uint8_t slot = 1; slot <= 7; slot++) {
+    const std::string name = r.string();
+    if (r.failed()) return false;
+    setSlotCard(slot, name);
+
+    size_t cardSize = 0;
+    const uint8_t *cardState = r.blob(cardSize);
+    if (ExpansionCard *card = memory_->slotCard(slot)) {
+      if (cardState && cardSize > 0) card->deserialize(cardState, cardSize);
+    }
+    const bool internal = r.boolean();
+    if (r.failed()) return false;
+    slotSettings[slot] = internal;
+  }
+  const uint8_t overrides = r.u8();
+  if (r.failed()) return false;
+  memory_->clearSlotOverrides();
+  for (uint8_t slot = 1; slot <= 7; slot++) {
+    if (overrides & (1u << slot)) setSlotInternal(slot, slotSettings[slot]);
+  }
 
   // The video decodes from the switches as they are now, and the frame that
   // was in flight is gone.

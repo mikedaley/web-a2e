@@ -281,8 +281,18 @@ TEST_CASE("A slot given to Your Card with nothing in it reads the bus, not the f
   // Slot 5 is the machine's own SmartPort and is not switched by $C02D; with
   // no image in it its firmware still shows through (see setInternalCardSlot).
   memory.write(0x00C02D, 0xFE);
-  REQUIRE(memory.read(0x00C3F9) == 0xFF);
   REQUIRE(memory.read(0x00C7F9) == 0xFF);
+
+  // ...but slot 3 is not in this register at all. Bit 3 is reserved — Table
+  // 8-2 of the Hardware Reference — and slot 3's ROM follows the //e's own
+  // SLOTC3ROM "to maintain compatibility with existing Apple II products". So
+  // setting bit 3 changes nothing, and the internal firmware still answers.
+  REQUIRE(memory.read(0x00C3F9) == memory.peek(0x00C3F9));
+  const uint8_t slot3Firmware = memory.peek(0x00C3F9);
+  memory.write(0x00C00A, 0); // SETINTC3ROM
+  REQUIRE(memory.read(0x00C3F9) == slot3Firmware);
+  memory.write(0x00C00B, 0); // SETSLOTC3ROM: now the socket, which is empty
+  REQUIRE(memory.read(0x00C3F9) == 0xFF);
 }
 
 TEST_CASE("The state register is eight soft switches in one byte",

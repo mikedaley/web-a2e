@@ -1433,6 +1433,30 @@
     text-align: right;
 }
 
+/* A IIgs's rows carry the Control Panel's per-slot setting as well as a note,
+   so they need the room for it. */
+.mb-slot-note:has(.mb-slot-setting) {
+    width: 118px;
+}
+
+.mb-slot-setting {
+    display: block;
+    width: 100%;
+    margin-top: 3px;
+    padding: 2px 4px;
+    font-family: inherit;
+    font-size: 9px;
+    color: var(--text-primary);
+    background: var(--input-bg, var(--glass-bg-solid));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.mb-slot-setting:hover {
+    border-color: var(--accent-blue-border, var(--border-color));
+}
+
 /* Compatibility highlights during drag */
 .mb-slot-compat {
     border-color: var(--accent-green-border);

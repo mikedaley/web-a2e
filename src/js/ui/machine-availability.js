@@ -37,10 +37,10 @@ export function menuAvailability(profile, cards) {
   const iigs = profile?.family === "apple2gs";
   const caps = profile?.caps || {};
   return {
-    // The window changes cards through `_setSlotCard`, which a IIgs's core
-    // does not answer: its slots are "the card or the port" and that third
-    // state is not modelled yet. A //c has no sockets at all.
-    slots: caps.hasExpansionSlots !== false && !iigs,
+    // A //c has no sockets at all. A IIgs has seven, and each also has a
+    // built-in device assigned to it — the window offers both the socket and
+    // the Control Panel's setting that chooses between them.
+    slots: caps.hasExpansionSlots !== false,
     // The multiplier lives in Emulator, which a IIgs is not built from.
     speed: !iigs,
     // A IIgs has a SmartPort in slot 5 as part of the machine.

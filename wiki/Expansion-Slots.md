@@ -7,7 +7,7 @@ The Apple IIe has seven expansion slots (1-7), each providing I/O space and ROM 
 **Two machines have no slot window at all**, and the menu item is hidden rather than greyed out on both:
 
 - An **Apple //c** has no expansion sockets. It still decodes all seven slot addresses, because the firmware and everything written for a //e depend on them, but each one answers to a part soldered to the board: two serial ports in slots 1 and 2, the 80-column firmware in slot 3, the mouse in slot 4, and the disk port in slot 6. Every slot is therefore *fixed*, and there is nowhere to put a card.
-- An **Apple IIgs** has real slots on the board, but the choice each one offers — the machine's own firmware, or a card you fitted — is not modelled here, and its core does not answer the host's request to change a slot. Its SmartPort lives in slot 5 as part of the machine rather than as a card you insert.
+An **Apple IIgs** has seven real sockets and does show the window, but its rows work differently — see [Apple IIgs Slots](#apple-iigs-slots) below.
 
 ## Table of Contents
 
@@ -259,3 +259,33 @@ All expansion cards implement the `ExpansionCard` interface, which provides the 
 Cards can also generate IRQ interrupts via a callback mechanism, used by the Mockingboard's VIA timers and the Mouse Card's VBL interrupt.
 
 See also: [[Architecture-Overview]], [[Audio-System]], [[Disk-Drives]], [[SmartPort-Hard-Drives]], [[Printers]]
+
+## Apple IIgs Slots
+
+A IIgs's slots are neither a //e's plain sockets nor a //c's soldered-in parts. They are both at once. From Chapter 8 of the Hardware Reference:
+
+> "The Apple IIGS supports several built-in devices and traditional slot devices, with each device taking up one logical slot... **only one device (either the built-in device or the peripheral device) can be selected at a time for each slot.**"
+
+So each row in the window has two controls: **what is in the socket**, and **which of the two answers**. The second is the Control Panel's per-slot setting, which on real hardware you reach with Command-Control-Esc; the emulator offers it directly, because the firmware's Control Panel is not reachable here.
+
+| Slot | Built-in device |
+|---|---|
+| 1 | Printer port (serial A) |
+| 2 | Modem port (serial B) |
+| 3 | 80-column firmware |
+| 4 | Mouse |
+| 5 | SmartPort (3.5" drives) |
+| 6 | 5.25" drives |
+| 7 | AppleTalk |
+
+Three details come straight from the hardware and are worth knowing:
+
+- **The setting moves the I/O as well as the ROM** for slots 1, 2, 5, 6 and 7. A slot switched to a card that is not there reads the bus, and the machine's own device does *not* answer in its place — so switching slot 6 to "Your Card" with an empty socket really does take the 5.25" drives away.
+- **Slot 4's setting moves the ROM only.** Its I/O at `$C0C0-$C0CF` is always the card's, as is slot 3's at `$C0B0-$C0BF`.
+- **Slot 3 has no setting at all.** Bit 3 of the register is reserved, and slot 3's ROM follows the //e's own SLOTC3ROM "to maintain compatibility with existing Apple II products".
+
+Your choice sticks. On a real machine it lives in battery RAM and the firmware copies it into the register on every start; the emulator holds the slots you have actually set against the firmware's own writes, so a card fitted before booting is still selected afterwards. A slot you have never touched is left entirely to the firmware.
+
+**Which cards a IIgs offers:** Mockingboard, Mouse Card, Thunderclock, Super Serial Card, Parallel Card and SmartPort. There is no Disk II card — a IIgs's 5.25" port is an IWM on the board — and no SoftCard, which works by halting a 6502 that a IIgs does not have.
+
+This is also the supported way round the ProDOS 8 2.4.1 AppleTalk bug: set slot 7 to "Your Card" and the firmware's `ATLK` signature goes away, so ProDOS does not call into it.

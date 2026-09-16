@@ -242,3 +242,30 @@ TEST_CASE("A card with nothing to say writes an empty blob", "[iigs][state]") {
   REQUIRE(r.u8() == 0x42);
   REQUIRE_FALSE(r.failed());
 }
+
+TEST_CASE("A state carries the sockets and the Control Panel's slot settings",
+          "[iigs][state][slots]") {
+  // A IIgs's slots each have a built-in device as well as a socket, so a state
+  // has to carry both what was fitted and which of the two answers — and the
+  // setting has to come back as the user's choice rather than as whatever the
+  // firmware last wrote, or a restored machine boots with its card ignored.
+  IIgsMachine machine(1024 * 1024);
+  machine.init(nullptr, 0);
+  REQUIRE(machine.setSlotCard(4, "mockingboard"));
+  REQUIRE(machine.setSlotCard(2, "ssc"));
+  machine.setSlotInternal(4, false);
+  auto state = exported(machine);
+
+  IIgsMachine restored(1024 * 1024);
+  restored.init(nullptr, 0);
+  REQUIRE(restored.importState(state.data(), state.size()));
+
+  REQUIRE(restored.getSlotCardName(4) == "mockingboard");
+  REQUIRE(restored.getSlotCardName(2) == "ssc");
+  REQUIRE_FALSE(restored.isSlotInternal(4));
+  REQUIRE(restored.isSlotInternal(2)); // fitted, but never switched over
+
+  // ...and the choice still outlasts the firmware after a restore.
+  restored.memory().write(0x00C02D, 0x00);
+  REQUIRE_FALSE(restored.isSlotInternal(4));
+}

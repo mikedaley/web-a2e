@@ -13,6 +13,11 @@
 #include "../mmu/mmu.hpp"
 #include "../cards/disk_controller.hpp"
 #include "../cards/iwm/iwm.hpp"
+#include "../cards/mockingboard/mockingboard_card.hpp"
+#include "../cards/mouse/mouse_card.hpp"
+#include "../cards/parallel/parallel_card.hpp"
+#include "../cards/ssc/ssc_card.hpp"
+#include "../cards/thunderclock/thunderclock_card.hpp"
 #include "../cards/smartport/smartport_card.hpp"
 #include "../input/keyboard.hpp"
 #include "../machine/machine_profile.hpp"
@@ -84,7 +89,17 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
 
   // The interrupt line is a level the processor samples every instruction,
   // and it is the OR of everything in the machine that can hold it down.
-  cpu_->setIRQStatusCallback([this]() { return memory_->interruptPending(); });
+  // The IRQ input is a level, sampled every instruction. A card in a socket can
+  // hold it down, so the fitted ones are asked too — a short list built when a
+  // card is fitted rather than a walk of all seven sockets, because this runs
+  // on the hottest loop in the machine.
+  cpu_->setIRQStatusCallback([this]() {
+    if (memory_->interruptPending()) return true;
+    for (const ExpansionCard *card : fittedCards_) {
+      if (card->isIRQActive()) return true;
+    }
+    return false;
+  });
 
   // Vector pulls come from ROM, whatever bank zero's language card is showing.
   // That is the FPI answering the processor's VPB line, and it is the reason
@@ -276,6 +291,7 @@ int IIgsMachine::step() {
   // cycle, so it cannot drift away from where $C019 thinks vertical blanking
   // is — a program timing itself against the beam would see it wander.
   if (disk_) disk_->update(cycles);
+  for (ExpansionCard *card : fittedCards_) card->update(cycles);
   memory_->tickClocks();
   // The Ensoniq runs on the machine's clock, so its oscillators reach the ends
   // of their tables — and interrupt — when the machine says, not when the host
@@ -459,7 +475,25 @@ BeamPosition IIgsMachine::beam() const {
 
 // ===== The serial ports =====
 
+void IIgsMachine::setParallelTxCallback(ParallelTxCallback cb) {
+  parallelTxCallback_ = cb;
+  for (ExpansionCard *card : fittedCards_) {
+    if (std::strcmp(card->getName(), "Parallel Card") == 0) {
+      static_cast<ParallelCard *>(card)->setParallelTxCallback(cb);
+    }
+  }
+}
+
 void IIgsMachine::setSerialTxCallback(SerialTxCallback cb) {
+  serialTxCallback_ = cb;
+  for (ExpansionCard *card : fittedCards_) {
+    if (std::strcmp(card->getName(), "Super Serial Card") == 0) {
+      // A card's port is the slot it is in, as it is on a //e.
+      static_cast<SSCCard *>(card)->setSerialTxCallback(
+          cb ? [cb](uint8_t byte) { cb(1, byte); }
+             : SSCCard::SerialTxCallback());
+    }
+  }
   if (!cb) {
     memory_->scc().setTransmitCallback(nullptr);
     return;
@@ -673,6 +707,123 @@ std::string IIgsMachine::screenText(int startRow, int startColumn, int endRow,
 // What the host drives it through
 // ============================================================================
 
+void IIgsMachine::refreshFittedCards() {
+  fittedCards_.clear();
+  mockingboard_ = nullptr;
+  for (uint8_t slot = 1; slot <= 7; slot++) {
+    ExpansionCard *card = memory_->slotCard(slot);
+    if (!card) continue;
+    fittedCards_.push_back(card);
+    if (std::strcmp(card->getName(), "Mockingboard") == 0) {
+      mockingboard_ = static_cast<MockingboardCard *>(card);
+    }
+  }
+}
+
+std::string IIgsMachine::getSlotCardName(uint8_t slot) const {
+  if (slot < 1 || slot > 7) return "empty";
+  const ExpansionCard *card = memory_->slotCard(slot);
+  if (!card) return "empty";
+  const char *name = card->getName();
+  if (std::strcmp(name, "Mockingboard") == 0) return "mockingboard";
+  if (std::strcmp(name, "Mouse") == 0) return "mouse";
+  if (std::strcmp(name, "SmartPort") == 0) return "smartport";
+  if (std::strcmp(name, "Super Serial Card") == 0) return "ssc";
+  if (std::strcmp(name, "Parallel Card") == 0) return "parallel";
+  if (std::strcmp(name, "Thunderclock") == 0) return "thunderclock";
+  return "empty";
+}
+
+bool IIgsMachine::isSlotInternal(uint8_t slot) const {
+  if (slot < 1 || slot > 7 || slot == 3) return true;
+  return (memory_->slotRegister() & (1u << slot)) == 0;
+}
+
+void IIgsMachine::setSlotInternal(uint8_t slot, bool internal) {
+  // Remembered rather than merely written, because the firmware copies this
+  // register out of battery RAM on every start and would otherwise wipe the
+  // choice on the next boot. We are standing in for the Control Panel, so the
+  // choice has to outlast a reset the way the Control Panel's does.
+  memory_->overrideSlot(slot, internal);
+}
+
+bool IIgsMachine::setSlotCard(uint8_t slot, const std::string &cardId) {
+  if (slot < 1 || slot > 7) return false;
+
+  // Emptying a socket is always allowed. The machine's own device for that
+  // slot is untouched either way: it is on the other side of $C02D, not in
+  // the socket, so pulling a card out cannot take the disk port with it.
+  if (cardId.empty() || cardId == "empty") {
+    memory_->removeSlotCard(slot);
+    refreshFittedCards();
+    return true;
+  }
+
+  std::unique_ptr<ExpansionCard> card;
+
+  if (cardId == "mockingboard") {
+    auto made = std::make_unique<MockingboardCard>();
+    made->setIRQCallback([this]() { cpu_->irq(); });
+    // Its output rate comes from the profile, through setMachine() when the
+    // card goes in: a IIgs's slow side is 1.023MHz, the same clock a //e runs
+    // its slots at, so the card needs telling nothing extra.
+    card = std::move(made);
+  } else if (cardId == "mouse") {
+    auto made = std::make_unique<MouseCard>();
+    made->setSlotNumber(slot);
+    made->setCycleCallback([this]() { return memory_->slowCycles(); });
+    made->setIRQCallback([this]() { cpu_->irq(); });
+    card = std::move(made);
+  } else if (cardId == "thunderclock") {
+    card = std::make_unique<ThunderclockCard>();
+  } else if (cardId == "ssc") {
+    auto made = std::make_unique<SSCCard>();
+    made->setSlotNumber(slot);
+    made->setIRQCallback([this]() { cpu_->irq(); });
+    if (serialTxCallback_) {
+      auto cb = serialTxCallback_;
+      made->setSerialTxCallback([cb, slot](uint8_t byte) { cb(slot, byte); });
+    }
+    card = std::move(made);
+  } else if (cardId == "parallel") {
+    auto made = std::make_unique<ParallelCard>();
+    made->setSlotNumber(slot);
+    if (parallelTxCallback_) made->setParallelTxCallback(parallelTxCallback_);
+    card = std::move(made);
+  } else if (cardId == "smartport") {
+    auto made = std::make_unique<SmartPortCard>();
+    made->setSlotNumber(slot);
+    made->setMemReadCallback(
+        [this](uint16_t addr) { return memory_->read(addr); });
+    made->setMemWriteCallback(
+        [this](uint16_t addr, uint8_t val) { memory_->write(addr, val); });
+    made->setGetA([this]() { return static_cast<uint8_t>(cpu_->getA()); });
+    made->setSetA([this](uint8_t v) { cpu_->setA(v); });
+    made->setGetP([this]() { return cpu_->getP(); });
+    made->setSetP([this](uint8_t v) { cpu_->setP(v); });
+    made->setGetSP([this]() { return cpu_->getSP(); });
+    made->setSetSP([this](uint16_t v) { cpu_->setSP(v); });
+    made->setGetPC([this]() { return cpu_->getPC(); });
+    made->setSetPC([this](uint16_t v) { cpu_->setPC(v); });
+    made->setSetX([this](uint8_t v) { cpu_->setX(v); });
+    made->setSetY([this](uint8_t v) { cpu_->setY(v); });
+    // A 65816 has *not* moved the program counter past the opcode by the time
+    // a read reaches a card, where a 6502 has. The card must not guess.
+    made->setExecutingAt(
+        [this](uint16_t address) { return cpu_->getPC() == address; });
+    card = std::move(made);
+  } else {
+    return false;
+  }
+
+  memory_->insertSlotCard(slot, std::move(card));
+  refreshFittedCards();
+
+  // Fitting a card does not switch the slot to it — $C02D does, and that is
+  // the Control Panel's setting. See setSlotInternal.
+  return true;
+}
+
 int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
   // Producing the samples is what runs the machine: the worker asks for a
   // buffer, and the time that buffer represents is the time the machine gets.
@@ -717,6 +868,18 @@ int IIgsMachine::generateStereoAudioSamples(float *buffer, int sampleCount) {
                                      AUDIO_SAMPLE_RATE);
     for (size_t at = 0; at < ensoniqMix_.size(); at++) {
       buffer[at] += ensoniqMix_[at];
+    }
+
+    // A Mockingboard in a socket is added here rather than handed to `audio_`,
+    // for the same reason the Ensoniq is: $C03C's nibble is the machine's own
+    // amplifier, and a card in a slot has its own output. Scaling it by the
+    // nibble would fade a card's music along with the ROM's bell.
+    if (mockingboard_) {
+      cardMix_.assign(static_cast<size_t>(sampleCount) * 2, 0.0f);
+      mockingboard_->consumeStereoSamples(cardMix_.data(), sampleCount);
+      for (size_t at = 0; at < cardMix_.size(); at++) {
+        buffer[at] += cardMix_[at] * 0.5f;
+      }
     }
   }
   return sampleCount;

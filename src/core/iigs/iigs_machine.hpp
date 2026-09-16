@@ -20,13 +20,14 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
-#include <string>
 
 namespace a2e {
 class Audio;
 class CPU65816;
 class DiskController;
+class ExpansionCard;
 class Keyboard;
+class MockingboardCard;
 class SmartPortCard;
 class Video;
 } // namespace a2e
@@ -158,6 +159,10 @@ public:
   using SerialTxCallback = std::function<void(int port, uint8_t byte)>;
   void setSerialTxCallback(SerialTxCallback cb);
 
+  /** A byte on a fitted parallel card's Centronics port. */
+  using ParallelTxCallback = std::function<void(uint8_t byte)>;
+  void setParallelTxCallback(ParallelTxCallback cb);
+
   /** A byte from outside, into the modem port. */
   void serialReceive(uint8_t byte);
 
@@ -219,6 +224,34 @@ public:
   static constexpr uint8_t SMARTPORT_SLOT = 5;
 
   SmartPortCard &smartPort() { return *smartPort_; }
+
+  /**
+   * Fit or remove a card in one of the seven sockets.
+   *
+   * A IIgs has seven real slots, and each one also has a built-in device
+   * assigned to it; only one of the two answers at a time, and $C02D is the
+   * switch. So fitting a card does not take the machine's own part away — it
+   * puts something in the socket beside it, and the Slot register decides
+   * which the processor reaches. `setSlotCard` names a card by the same id the
+   * //e uses, or "empty".
+   */
+  bool setSlotCard(uint8_t slot, const std::string &cardId);
+  std::string getSlotCardName(uint8_t slot) const;
+
+  /**
+   * The Control Panel's per-slot setting, which is $C02D.
+   *
+   * On a real machine the user reaches this through the firmware's Control
+   * Panel; that is not reachable here (its hotkey needs an interrupt-driven
+   * Desk Manager that never starts), so the emulator offers the same switch
+   * directly. `internal` false hands the slot to whatever is in the socket.
+   *
+   * Slot 3 is not in the register — bit 3 is reserved and its ROM follows the
+   * //e's own SLOTC3ROM — so asking about it answers "internal" and setting it
+   * does nothing.
+   */
+  bool isSlotInternal(uint8_t slot) const;
+  void setSlotInternal(uint8_t slot, bool internal);
   bool insertBlockImage(int device, const uint8_t *data, size_t size,
                         const std::string &filename);
   void ejectBlockImage(int device);
@@ -329,6 +362,23 @@ private:
   std::unique_ptr<Keyboard> keyboard_;
   DiskController *disk_ = nullptr;   // Owned by the Mega II's slot
   SmartPortCard *smartPort_ = nullptr; // ...and so is this
+
+  // The cards the user fitted, by slot, so they can be stepped and asked
+  // about their interrupt line without walking the whole socket array on the
+  // hottest loop in the machine. `IIgsMemory` owns them.
+  std::vector<ExpansionCard *> fittedCards_;
+  void refreshFittedCards();
+
+  // A Mockingboard in a socket, if there is one: its samples are added after
+  // the $C03C amplifier rather than through it, so a card's music does not
+  // fade with the ROM's bell.
+  MockingboardCard *mockingboard_ = nullptr;
+  std::vector<float> cardMix_;
+
+  // Kept so a card fitted later reaches the host's printer the way one fitted
+  // earlier does. The machine's own two ports go straight to the SCC.
+  SerialTxCallback serialTxCallback_;
+  ParallelTxCallback parallelTxCallback_;
 
   std::vector<uint8_t> diskExportBuffer_;
   std::vector<uint8_t> diskSectorBuffer_;

@@ -41,6 +41,27 @@ const SLOT_UI = {
   7: { available: ["thunderclock", "smartport", "softcard"], note: "Hard Disk / Clock" },
 };
 
+// A IIgs's seven slots, and the device the machine has assigned to each.
+//
+// Chapter 8 of the Hardware Reference: every slot is a real socket, and every
+// slot also has a built-in device. "Only one device (either the built-in
+// device or the peripheral device) can be selected at a time for each slot",
+// and $C02D is the switch — the Control Panel's setting, in a register. So a
+// IIgs row shows both: what is in the socket, and which of the two answers.
+//
+// Slot 3 is the exception and has no switch. Bit 3 of the register is
+// reserved, and slot 3's ROM follows the //e's own SLOTC3ROM.
+const IIGS_CARDS = ["mockingboard", "mouse", "thunderclock", "ssc", "parallel", "smartport"];
+const IIGS_SLOT_UI = {
+  1: { builtIn: "Printer Port" },
+  2: { builtIn: "Modem Port" },
+  3: { builtIn: "80-Column", noSwitch: true },
+  4: { builtIn: "Mouse" },
+  5: { builtIn: "SmartPort" },
+  6: { builtIn: '5.25" Drives' },
+  7: { builtIn: "AppleTalk" },
+};
+
 // Cards a machine has permanently fitted. These never appear in the tray —
 // there is nothing to drag, because there is nothing the user could remove.
 //
@@ -250,8 +271,32 @@ export class SlotConfigurationWindow extends BaseWindow {
     // machine with real slots would show there.
     const sockets = machine.caps?.hasExpansionSlots !== false;
 
+    // A IIgs's slots are neither a //e's sockets nor a //c's soldered-in
+    // parts: they are both at once, and the Control Panel chooses.
+    this.iigs = machine.family === "apple2gs";
+
     this.slots = [];
     for (let slot = first; slot <= last; slot++) {
+      if (this.iigs) {
+        const ui = IIGS_SLOT_UI[slot] || {};
+        this.slots.push({
+          slot,
+          label: `Slot ${slot}`,
+          available: IIGS_CARDS,
+          // A switchable slot's built-in device is named by the dropdown's
+          // first option, so repeating it above would just be noise. Slot 3
+          // has no dropdown and needs the note.
+          note: ui.noSwitch && ui.builtIn ? `${ui.builtIn} (built in)` : "",
+          fixed: false,
+          fixedName: null,
+          builtIn: ui.builtIn || null,
+          // The register has no bit for slot 3, so there is nothing to offer.
+          switchable: !ui.noSwitch,
+          internal: true,
+        });
+        continue;
+      }
+
       const ui = SLOT_UI[slot] || { available: [], note: "" };
       const fixedCard = machine.slots?.find((s) => s.slot === slot)?.fixedCard;
       const fixed = FIXED_CARD_LABELS[fixedCard];
@@ -263,7 +308,24 @@ export class SlotConfigurationWindow extends BaseWindow {
         note: fixed ? fixed.note : sockets ? ui.note : "No socket",
         fixed: !!fixed,
         fixedName: fixed ? fixed.name : null,
+        builtIn: null,
+        switchable: false,
+        internal: true,
       });
+    }
+  }
+
+  /**
+   * Read the Control Panel's per-slot setting back out of the core.
+   *
+   * Only a IIgs has one; every other machine's slot is a socket and nothing
+   * else, and `_isSlotInternal` answers true for all of them.
+   */
+  async refreshSlotSettings() {
+    if (!this.iigs) return;
+    for (const info of this.slots) {
+      if (!info.switchable) continue;
+      info.internal = !!(await this.wasmModule._isSlotInternal(info.slot));
     }
   }
 
@@ -280,12 +342,20 @@ export class SlotConfigurationWindow extends BaseWindow {
     this.rebuildSlots();
     await this.applyInitialSettings();
     await this.initSlotAssignments();
+    await this.refreshSlotSettings();
     this.updateView();
   }
 
   getAvailableCards() {
     const installed = new Set(Object.values(this.slotAssignments));
-    return this.cards.filter((c) => !installed.has(c.id));
+    // Only cards some slot on this machine will actually take. A IIgs has no
+    // Disk II card — its 5.25" port is an IWM on the board — and no SoftCard,
+    // which works by halting a 6502 that a IIgs does not have. Offering either
+    // would put a card in the tray that the core declines to fit.
+    const takeable = new Set(this.slots.flatMap((info) => info.available || []));
+    return this.cards.filter(
+      (c) => !installed.has(c.id) && takeable.has(c.id),
+    );
   }
 
   /**
@@ -352,6 +422,8 @@ export class SlotConfigurationWindow extends BaseWindow {
             </div>`;
         }
 
+        const setting = this.slotSettingMarkup(slotInfo);
+
         if (card) {
           return `
             <div class="mb-slot-row" data-slot="${slotInfo.slot}">
@@ -363,7 +435,7 @@ export class SlotConfigurationWindow extends BaseWindow {
                   <div class="card-tile-name">${card.name}</div>
                 </div>
               </div>
-              <div class="mb-slot-note">${slotInfo.note}</div>
+              <div class="mb-slot-note">${slotInfo.note}${setting}</div>
             </div>`;
         }
 
@@ -374,10 +446,23 @@ export class SlotConfigurationWindow extends BaseWindow {
               <div class="mb-connector-teeth"></div>
               <div class="mb-slot-dropzone">Empty</div>
             </div>
-            <div class="mb-slot-note">${slotInfo.note}</div>
+            <div class="mb-slot-note">${slotInfo.note}${setting}</div>
           </div>`;
       })
       .join("");
+
+    // The Control Panel's per-slot setting. Changing it takes effect at once,
+    // because it is a register rather than something the machine reads at
+    // startup — which is also why it needs no Apply and no reset.
+    container.querySelectorAll(".mb-slot-setting").forEach((select) => {
+      select.addEventListener("change", async (e) => {
+        const slot = parseInt(select.dataset.slot, 10);
+        const internal = e.target.value === "internal";
+        await this.wasmModule._setSlotInternal(slot, internal);
+        const info = this.slots.find((s) => s.slot === slot);
+        if (info) info.internal = internal;
+      });
+    });
 
     // Attach drag listeners to installed cards
     container.querySelectorAll(".mb-slot-card").forEach((tile) => {
@@ -387,6 +472,24 @@ export class SlotConfigurationWindow extends BaseWindow {
         this.startCardDrag(tile.dataset.cardId, "slot", slot, e);
       });
     });
+  }
+
+  /**
+   * The per-slot "which of the two answers" control, for a IIgs.
+   *
+   * A real owner sets this in the firmware's Control Panel. That is not
+   * reachable here — its hotkey needs an interrupt-driven Desk Manager that
+   * never starts — so the emulator offers the same switch directly. It writes
+   * $C02D, which is exactly what the Control Panel writes.
+   */
+  slotSettingMarkup(slotInfo) {
+    if (!slotInfo.switchable || !slotInfo.builtIn) return "";
+    const internal = slotInfo.internal !== false;
+    return `
+      <select class="mb-slot-setting" data-slot="${slotInfo.slot}" title="Which device this slot answers for — the Control Panel's setting, at $C02D">
+        <option value="internal"${internal ? " selected" : ""}>${slotInfo.builtIn}</option>
+        <option value="card"${internal ? "" : " selected"}>Your Card</option>
+      </select>`;
   }
 
   // ---- Drag & Drop ----

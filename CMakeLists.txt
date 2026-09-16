@@ -280,6 +280,8 @@ if(EMSCRIPTEN)
                 \"_free\", \
                 \"_getSlotCard\", \
                 \"_setSlotCard\", \
+                \"_isSlotInternal\", \
+                \"_setSlotInternal\", \
                 \"_isSlotEmpty\", \
                 \"_getMockingboardWaveform\", \
                 \"_setMockingboardChannelMute\", \
@@ -683,6 +685,11 @@ else()
     add_catch2_test(test_iigs_video
         tests/unit/test_iigs_video.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/mouse/mouse_card.cpp
+        src/core/cards/parallel/parallel_card.cpp
+        src/core/cards/ssc/ssc_card.cpp
+        src/core/cards/ssc/acia6551.cpp
+        src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
@@ -722,6 +729,11 @@ else()
     add_catch2_test(test_iigs_debug
         tests/unit/test_iigs_debug.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/mouse/mouse_card.cpp
+        src/core/cards/parallel/parallel_card.cpp
+        src/core/cards/ssc/ssc_card.cpp
+        src/core/cards/ssc/acia6551.cpp
+        src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
@@ -766,6 +778,11 @@ else()
     add_catch2_test(test_iigs_boot
         tests/integration/test_iigs_boot.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/mouse/mouse_card.cpp
+        src/core/cards/parallel/parallel_card.cpp
+        src/core/cards/ssc/ssc_card.cpp
+        src/core/cards/ssc/acia6551.cpp
+        src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp
@@ -803,6 +820,11 @@ else()
     add_catch2_test(test_iigs_state
         tests/integration/test_iigs_state.cpp
         src/core/iigs/iigs_machine.cpp
+        src/core/cards/mouse/mouse_card.cpp
+        src/core/cards/parallel/parallel_card.cpp
+        src/core/cards/ssc/ssc_card.cpp
+        src/core/cards/ssc/acia6551.cpp
+        src/core/cards/thunderclock/thunderclock_card.cpp
         src/core/iigs/iigs_state.cpp
         src/core/disassembler/disassembler65816.cpp
         src/core/debug/machine_debug.cpp

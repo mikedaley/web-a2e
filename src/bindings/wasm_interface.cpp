@@ -2354,6 +2354,13 @@ const char* getSlotCard(int slot) {
   if (g_emulator) {
     return g_emulator->getSlotCardName(static_cast<uint8_t>(slot));
   }
+  if (g_iigs) {
+    // Held in a static because the caller reads the string after this returns
+    // and IIgsMachine hands back a value.
+    static std::string name;
+    name = g_iigs->getSlotCardName(static_cast<uint8_t>(slot));
+    return name.c_str();
+  }
   return "invalid";
 }
 
@@ -2361,6 +2368,10 @@ EMSCRIPTEN_KEEPALIVE
 bool setSlotCard(int slot, const char* cardId) {
   if (g_emulator) {
     return g_emulator->setSlotCard(static_cast<uint8_t>(slot), cardId);
+  }
+  if (g_iigs) {
+    return g_iigs->setSlotCard(static_cast<uint8_t>(slot),
+                               cardId ? cardId : "empty");
   }
   return false;
 }
@@ -2370,7 +2381,30 @@ bool isSlotEmpty(int slot) {
   if (g_emulator) {
     return g_emulator->isSlotEmpty(static_cast<uint8_t>(slot));
   }
+  if (g_iigs) {
+    return g_iigs->getSlotCardName(static_cast<uint8_t>(slot)) == "empty";
+  }
   return true;
+}
+
+// ============================================================================
+// The IIgs's Control Panel slot settings ($C02D)
+//
+// A IIgs's seven slots each have a built-in device as well as a socket, and
+// only one of the two answers at a time. On a real machine the user picks in
+// the firmware's Control Panel; that is not reachable here, so these two are
+// how the emulator offers the same switch. Slot 3 is not in the register.
+// ============================================================================
+
+EMSCRIPTEN_KEEPALIVE
+bool isSlotInternal(int slot) {
+  if (g_iigs) return g_iigs->isSlotInternal(static_cast<uint8_t>(slot));
+  return true; // every other machine's slots are sockets and nothing else
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setSlotInternal(int slot, bool internal) {
+  if (g_iigs) g_iigs->setSlotInternal(static_cast<uint8_t>(slot), internal);
 }
 
 // ============================================================================

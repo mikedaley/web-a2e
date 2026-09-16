@@ -439,8 +439,12 @@ TEST_CASE("A IIgs boots ProDOS from its own SmartPort", "[iigs][boot][smartport]
   REQUIRE(text.find("PRODOS.2.4.3") != std::string::npos);
   REQUIRE(text.find("BITSY.BOOT") != std::string::npos);
 
-  // The Control Panel was not touched to make that happen.
-  REQUIRE(machine.memory().peek(0x00C02D) == 0x00);
+  // The Control Panel was not touched to make that happen: $C02D is whatever
+  // the firmware itself wrote from battery RAM on the way up, with no slot
+  // overridden. Bits 0 and 3 are reserved and stay clear.
+  const uint8_t slotRegister = machine.memory().peek(0x00C02D);
+  INFO("slot register: $" << std::hex << (int)slotRegister);
+  REQUIRE((slotRegister & 0x09) == 0);
 }
 
 TEST_CASE("A IIgs SmartPort traps execution, not reads",
@@ -1091,4 +1095,100 @@ TEST_CASE("Control-Reset keeps a IIgs's memory and the power switch does not", "
     REQUIRE(machine.memory().read(0x020123) == 0x00);
     REQUIRE(machine.memory().megaII().readRAM(0x0300, false) == 0x00);
   }
+}
+
+// ============================================================================
+// The seven sockets
+// ============================================================================
+
+TEST_CASE("A card in a socket answers only when the Slot register says so",
+          "[iigs][slots]") {
+  // Chapter 8 of the Hardware Reference: a IIgs has seven real slots, and each
+  // one also has a built-in device assigned to it. "Only one device (either
+  // the built-in device or the peripheral device) can be selected at a time
+  // for each slot", and $C02D is the switch — the Control Panel's setting, in
+  // a register.
+  IIgsMachine machine(1024 * 1024);
+  machine.init(nullptr, 0);
+
+  REQUIRE(machine.getSlotCardName(4) == "empty");
+  REQUIRE(machine.setSlotCard(4, "mockingboard"));
+  REQUIRE(machine.getSlotCardName(4) == "mockingboard");
+
+  // Slot 4's I/O is always the card's: "I/O space for slots 3 ($C0B0-$C0BF)
+  // and 4 ($C0C0-$C0CF) is always enabled."
+  REQUIRE(machine.isSlotInternal(4));
+  machine.memory().write(0x00C0C0, 0x00); // reaches the card either way
+
+  // Its ROM is not, and slot 4's bit does move that.
+  machine.setSlotInternal(4, false);
+  REQUIRE_FALSE(machine.isSlotInternal(4));
+  machine.setSlotInternal(4, true);
+  REQUIRE(machine.isSlotInternal(4));
+
+  REQUIRE(machine.setSlotCard(4, "empty"));
+  REQUIRE(machine.getSlotCardName(4) == "empty");
+}
+
+TEST_CASE("Slot 3 is not in the Slot register", "[iigs][slots]") {
+  // Bit 3 is reserved, and slot 3's ROM follows the //e's own SLOTC3ROM "to
+  // maintain compatibility with existing Apple II products". So the Control
+  // Panel has nothing to say about it.
+  IIgsMachine machine(1024 * 1024);
+  machine.init(nullptr, 0);
+
+  REQUIRE(machine.isSlotInternal(3));
+  machine.setSlotInternal(3, false);
+  REQUIRE(machine.isSlotInternal(3)); // unchanged: there is no bit to set
+  REQUIRE((machine.memory().slotRegister() & 0x09) == 0); // reserved bits stay clear
+}
+
+TEST_CASE("An empty socket switched to Your Card does not let the machine's "
+          "own device answer", "[iigs][slots]") {
+  // The register moves the I/O as well as the ROM for slots 1, 2, 5, 6 and 7.
+  // Slot 6 internal is the 5.25" drive at $C0E0-$C0EF; switched to a card that
+  // is not there, those addresses are the bus, not the IWM.
+  IIgsMachine machine(1024 * 1024);
+  machine.init(nullptr, 0);
+
+  machine.setSlotInternal(6, false);
+  REQUIRE_FALSE(machine.isSlotInternal(6));
+  // Reading the drive's own addresses must not reach the drive.
+  const uint8_t before = machine.disk().isMotorOn() ? 1 : 0;
+  machine.memory().read(0x00C0E9); // motor on, were the IWM listening
+  REQUIRE((machine.disk().isMotorOn() ? 1 : 0) == before);
+
+  machine.setSlotInternal(6, true);
+  machine.memory().read(0x00C0E9);
+  REQUIRE(machine.disk().isMotorOn());
+}
+
+TEST_CASE("The Control Panel's slot setting outlasts the firmware",
+          "[iigs][slots]") {
+  // On a real machine this setting lives in battery RAM and the firmware
+  // copies it into $C02D on every start. We cannot write that battery RAM —
+  // the firmware validates a checksum whose algorithm is not known here, and
+  // writes its own defaults over anything it does not like — so the emulator
+  // stands in for the Control Panel and holds the bits the user chose against
+  // the firmware's own writes. Without that, a choice made before booting is
+  // wiped by the next boot and the card in the socket never answers.
+  IIgsMachine machine(1024 * 1024);
+  machine.init(nullptr, 0);
+
+  machine.setSlotInternal(4, false);
+  REQUIRE_FALSE(machine.isSlotInternal(4));
+
+  // The firmware writing the whole register must not take it back.
+  machine.memory().write(0x00C02D, 0x00);
+  REQUIRE_FALSE(machine.isSlotInternal(4));
+
+  // A slot nobody has touched is still entirely the firmware's.
+  machine.memory().write(0x00C02D, 0x80);
+  REQUIRE_FALSE(machine.isSlotInternal(7));
+  machine.memory().write(0x00C02D, 0x00);
+  REQUIRE(machine.isSlotInternal(7));
+
+  // ...and the choice can be given back.
+  machine.setSlotInternal(4, true);
+  REQUIRE(machine.isSlotInternal(4));
 }

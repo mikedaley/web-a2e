@@ -166,6 +166,7 @@ Bit 5 of `$C029` shows double hi-res in black and white, which is what the Syste
 - **A battery-backed clock** and the 256 bytes of settings beside it, kept by the host between sessions exactly as the firmware wrote them, checksum included — alter one byte and the firmware writes its defaults over the lot, which is what a machine with a dead battery does
 - **A Z8530 SCC** behind two serial ports, with a loopback cable available as a tick box for the Apple IIgs Diagnostic's external test
 - **A SmartPort in slot 5**, part of the machine rather than a card, serving hard drive images through GS/OS's extended calls
+- **Seven real expansion sockets**, each with a built-in device beside it and a Control Panel setting saying which of the two answers — see [[Expansion-Slots]]
 - **A speaker** as well, because `$C030` is a Mega II address; the volume nibble in `$C03C` is the speaker's amplifier and is applied as a taper rather than a ratio
 
 See [[Apple-IIgs]] for the full account — the memory map, the interrupt sources, the video raster's numbers, and what is still missing.

@@ -14,6 +14,7 @@
 #include "iigs_sound.hpp"
 #include "iigs_spec.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -240,7 +241,27 @@ public:
    * for each, and this is where that setting ends up.
    */
   uint8_t slotRegister() const { return slotSelect_; }
-  void setSlotRegister(uint8_t value) { slotSelect_ = value; }
+  void setSlotRegister(uint8_t value) { slotSelect_ = applySlotOverrides(value); }
+
+  /**
+   * Hold a slot's setting against the firmware, because we are the Control
+   * Panel.
+   *
+   * On a real machine the Control Panel's per-slot choice lives in battery RAM
+   * and the firmware copies it into $C02D on every start. We cannot write that
+   * battery RAM — the firmware validates a checksum whose algorithm is not
+   * known here, and rewrites its defaults over anything it does not like — so
+   * a setting made through the emulator's own UI would be wiped by the next
+   * boot. Instead the bits the user has actually chosen are remembered, and a
+   * firmware write to $C02D is merged rather than obeyed for those.
+   *
+   * A slot nobody has touched is left entirely to the firmware, which is what
+   * keeps a machine with no cards in it behaving exactly as before.
+   */
+  void overrideSlot(uint8_t slot, bool internal);
+  void clearSlotOverrides() { slotOverrideMask_ = 0; slotOverrideValue_ = 0; }
+  /** Which slots the user has set, for a save state. */
+  uint8_t slotOverrideMask() const { return slotOverrideMask_; }
 
   /**
    * $C031 DISKREG: which drive the one IWM is talking to.
@@ -282,6 +303,36 @@ public:
    * it in, and it needs no setting changed before it answers.
    */
   void setInternalCardSlot(uint8_t slot) { internalCardSlot_ = slot; }
+
+  // ===== The seven expansion slots =====
+  //
+  // A IIgs has seven real sockets, and every one of them also has a built-in
+  // device assigned to it. Only one of the two answers at a time, and $C02D is
+  // the switch — the Control Panel's per-slot setting, in a register. So a
+  // card fitted here does not replace the machine's own part; it sits beside
+  // it, and the register decides which the processor reaches.
+  //
+  // The machine's own parts stay where they are, in the Mega II's slots, and
+  // these are the user's. Chapter 8 of the Hardware Reference is the
+  // authority for what the register switches:
+  //
+  //   - Slots 1, 2, 5, 6, 7: the bit moves **both** the ROM at $Cn00 and the
+  //     I/O at $C0n0. An internal slot's I/O is the machine's device; an
+  //     external one's is the card's, and the bus if the socket is empty.
+  //   - Slot 4: the bit moves the ROM only. Its I/O is always the card's.
+  //   - Slot 3: not in the register at all — bit 3 is reserved. Its I/O is
+  //     always the card's, and its ROM follows the //e's own SLOTC3ROM, "to
+  //     maintain compatibility with existing Apple II products".
+
+  /** Fit a card, returning whatever was in the socket. */
+  std::unique_ptr<ExpansionCard> insertSlotCard(uint8_t slot,
+                                                std::unique_ptr<ExpansionCard> card);
+  /** Empty a socket, returning what was in it. */
+  std::unique_ptr<ExpansionCard> removeSlotCard(uint8_t slot);
+  /** What is in a socket, whether or not the register is showing it. */
+  ExpansionCard *slotCard(uint8_t slot) const {
+    return (slot < slotCards_.size()) ? slotCards_[slot].get() : nullptr;
+  }
 
   /**
    * The machine's interrupt sources, and whether any is asking.
@@ -535,6 +586,25 @@ private:
   // cardForSlotRom and setInternalCardSlot.
   uint8_t internalCardSlot_ = 0;
 
+  // The user's cards, indexed by slot. Separate from the Mega II's slots,
+  // which hold the parts the machine came with.
+  std::array<std::unique_ptr<ExpansionCard>, 8> slotCards_{};
+
+  // Which card owns $C800-$CFFF, or 0 for the machine's own firmware. A card
+  // claims it by having its $Cn00 read, and $CFFF hands it back — the same
+  // arbitration a //e does with INTC8ROM, which is what lets seven cards share
+  // one 2KB window.
+  uint8_t expansionRomSlot_ = 0;
+
+  // Which bits of $C02D the user has chosen, and what they chose. See
+  // overrideSlot.
+  uint8_t slotOverrideMask_ = 0;
+  uint8_t slotOverrideValue_ = 0;
+  uint8_t applySlotOverrides(uint8_t value) const {
+    return static_cast<uint8_t>((value & ~slotOverrideMask_) |
+                                (slotOverrideValue_ & slotOverrideMask_));
+  }
+
   // Whether banks $00/$01 show I/O and the language card at all, which is the
   // one shadow bit that changes what an address *is* rather than where a write
   // also goes.
@@ -570,6 +640,15 @@ private:
 
   /** A slot the Control Panel gave to "Your Card", with no card in it. */
   bool slotIsExternalAndEmpty(uint16_t offset) const;
+
+  /** Which slot a peripheral I/O address belongs to, or 0 for none. */
+  static uint8_t slotForIO(uint16_t offset) {
+    if (offset < 0xC090 || offset > 0xC0FF) return 0;
+    return static_cast<uint8_t>((offset - 0xC080) >> 4);
+  }
+  bool slotIOIsCard(uint8_t slot) const;
+  bool slotRomIsCard(uint8_t slot) const;
+  ExpansionCard *cardForExpansionRom() const;
 
   IIgsADB adb_;
   IIgsClock clock_;

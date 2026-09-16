@@ -388,7 +388,22 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
   // register. A IIgs comes up with slots 1 to 6 internal and slot 7 expecting
   // a card, and the firmware writes exactly that.
   if (offset >= 0xC100) {
+    // $C800-$CFFF is one 2KB window that every card shares. A card claims it
+    // by having its own $Cn00 read, and $CFFF hands it back — the arbitration
+    // a //e does with INTC8ROM. Without it a card with more firmware than 256
+    // bytes (a Super Serial Card, a Thunderclock, a parallel card) has
+    // nowhere to put the rest of it.
+    if (offset >= 0xC800) {
+      if (offset == 0xCFFF) expansionRomSlot_ = 0;
+      if (ExpansionCard *card = cardForExpansionRom()) {
+        return card->readExpansionROM(static_cast<uint16_t>(offset - 0xC800));
+      }
+      return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
+    }
+
+    const uint8_t slot = static_cast<uint8_t>((offset >> 8) & 0x07);
     if (ExpansionCard *card = cardForSlotRom(offset)) {
+      if (card->hasExpansionROM()) expansionRomSlot_ = slot;
       return card->readROM(static_cast<uint8_t>(offset & 0xFF));
     }
     // A slot the Control Panel has given to "Your Card" with nothing in the
@@ -398,6 +413,9 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
     // 7 and calls into it, which ends in a BRK on a ROM 01, and the known
     // way round that is to set slot 7 to Your Card.
     if (slotIsExternalAndEmpty(offset)) return 0xFF; // nothing driving the bus
+    // Reading the machine's own firmware for a slot releases the window too,
+    // exactly as INTC8ROM does on a //e.
+    if (slot >= 1 && slot <= 7) expansionRomSlot_ = 0;
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
   }
 
@@ -410,6 +428,19 @@ uint8_t IIgsMemory::readIO(uint16_t offset) {
   // executing BRK after BRK on the spot where its handler should be.
   if (offset > 0xC070 && offset < 0xC080) {
     return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
+  }
+
+  // A slot's sixteen I/O addresses. Whose they are is the Slot register's
+  // business for slots 1, 2, 5, 6 and 7, and always the card's for 3 and 4.
+  if (const uint8_t slot = slotForIO(offset)) {
+    if (slotIOIsCard(slot)) {
+      if (ExpansionCard *card = slotCard(slot)) {
+        return card->readIO(static_cast<uint8_t>(offset & 0x0F));
+      }
+      // Switched to a card, with no card: the socket drives nothing, and the
+      // machine's own device must not answer in its place.
+      return megaII_->floatingBus();
+    }
   }
 
   return megaII_->read(offset);
@@ -469,7 +500,9 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
     sound_.writeAddressHigh(value);
     return;
   case REG_SLOT_SELECT:
-    slotSelect_ = value;
+    // Merged, not obeyed, for any slot the user has set through the
+    // emulator's stand-in for the Control Panel. See overrideSlot.
+    slotSelect_ = applySlotOverrides(value);
     return;
   case REG_DISK_SELECT:
     diskSelect_ = value;
@@ -503,7 +536,21 @@ void IIgsMemory::writeIO(uint16_t offset, uint8_t value) {
     break;
   }
 
-  if (offset >= 0xC100) return; // Firmware space: nothing to write to
+  if (offset >= 0xC100) {
+    // Writing the expansion ROM window releases it, as reading $CFFF does.
+    if (offset == 0xCFFF) expansionRomSlot_ = 0;
+    return; // Firmware space: nothing else to write to
+  }
+
+  if (const uint8_t slot = slotForIO(offset)) {
+    if (slotIOIsCard(slot)) {
+      if (ExpansionCard *card = slotCard(slot)) {
+        card->writeIO(static_cast<uint8_t>(offset & 0x0F), value);
+      }
+      return; // an empty socket takes the write nowhere
+    }
+  }
+
   megaII_->write(offset, value);
 }
 
@@ -554,10 +601,18 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
     return speed_;
   case REG_STATE:
     return stateRegister();
+  case REG_SLOT_SELECT:
+    return slotSelect_;
   default:
     break;
   }
   if (offset >= 0xC100) {
+    if (offset >= 0xC800) {
+      if (ExpansionCard *card = cardForExpansionRom()) {
+        return card->readExpansionROM(static_cast<uint16_t>(offset - 0xC800));
+      }
+      return readROM((static_cast<uint32_t>(ROM_TOP_BANK) << 16) | offset);
+    }
     if (ExpansionCard *card = cardForSlotRom(offset)) {
       return card->peekROM(static_cast<uint8_t>(offset & 0xFF));
     }
@@ -576,6 +631,56 @@ uint8_t IIgsMemory::peekIO(uint16_t offset) const {
 // ROM
 // ============================================================================
 
+void IIgsMemory::overrideSlot(uint8_t slot, bool internal) {
+  if (slot < 1 || slot > 7 || slot == 3) return; // bit 3 is reserved
+  const uint8_t bit = static_cast<uint8_t>(1u << slot);
+  slotOverrideMask_ |= bit;
+  if (internal) {
+    slotOverrideValue_ &= static_cast<uint8_t>(~bit);
+  } else {
+    slotOverrideValue_ |= bit;
+  }
+  slotSelect_ = applySlotOverrides(slotSelect_);
+}
+
+std::unique_ptr<ExpansionCard>
+IIgsMemory::insertSlotCard(uint8_t slot, std::unique_ptr<ExpansionCard> card) {
+  if (slot >= slotCards_.size()) return card;
+  if (card) card->setMachine(machineProfile(MachineId::AppleIIgs));
+  std::unique_ptr<ExpansionCard> previous = std::move(slotCards_[slot]);
+  slotCards_[slot] = std::move(card);
+  // A card that leaves cannot go on owning the expansion ROM window.
+  if (expansionRomSlot_ == slot) expansionRomSlot_ = 0;
+  return previous;
+}
+
+std::unique_ptr<ExpansionCard> IIgsMemory::removeSlotCard(uint8_t slot) {
+  return insertSlotCard(slot, nullptr);
+}
+
+bool IIgsMemory::slotIOIsCard(uint8_t slot) const {
+  if (slot < 1 || slot > 7) return false;
+  // "I/O space for slots 3 ($C0B0-$C0BF) and 4 ($C0C0-$C0CF) is always
+  // enabled" — Table 8-2. The register does not reach them.
+  if (slot == 3 || slot == 4) return true;
+  return (slotSelect_ & (1u << slot)) != 0;
+}
+
+bool IIgsMemory::slotRomIsCard(uint8_t slot) const {
+  if (slot < 1 || slot > 7) return false;
+  // Slot 3's ROM is the //e's business, not the Slot register's: bit 3 is
+  // reserved, and SLOTC3ROM decides, exactly as on a //e.
+  if (slot == 3) return megaII_->getSoftSwitches().slotc3rom;
+  return (slotSelect_ & (1u << slot)) != 0;
+}
+
+ExpansionCard *IIgsMemory::cardForExpansionRom() const {
+  if (expansionRomSlot_ == 0) return nullptr;
+  ExpansionCard *card = slotCard(expansionRomSlot_);
+  if (!card || !card->hasExpansionROM()) return nullptr;
+  return slotRomIsCard(expansionRomSlot_) ? card : nullptr;
+}
+
 ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
   // $C100-$C7FF is a slot's own 256 bytes; above that is the expansion ROM
   // space, which is not modelled here yet.
@@ -584,22 +689,32 @@ ExpansionCard *IIgsMemory::cardForSlotRom(uint16_t offset) const {
   const uint8_t slot = static_cast<uint8_t>((offset >> 8) & 0x07);
   if (slot < 1 || slot > 7) return nullptr;
 
+  // The socket first, when the register is showing it. A card fitted here does
+  // not replace the machine's own part for that slot — the two take turns, and
+  // this is whose turn it is.
+  if (slotRomIsCard(slot)) {
+    ExpansionCard *fitted = slotCard(slot);
+    return (fitted && fitted->hasROM()) ? fitted : nullptr;
+  }
+
   ExpansionCard *card = megaII_->getCard(slot);
   if (!card || !card->hasROM()) return nullptr;
 
   // A slot the machine fitted itself answers whatever $C02D says, because it
   // is not a card in a socket — it is the machine's firmware for that slot,
-  // the way the disk port in slot 6 is. Anything else answers only when the
-  // Control Panel has been set to "Your Card".
+  // the way the disk port in slot 6 is.
   if (slot == internalCardSlot_) return card;
-  return (slotSelect_ & (1u << slot)) ? card : nullptr;
+  return nullptr;
 }
 
 bool IIgsMemory::slotIsExternalAndEmpty(uint16_t offset) const {
   if (offset < 0xC100 || offset >= 0xC800) return false;
   const uint8_t slot = static_cast<uint8_t>((offset >> 8) & 0x07);
   if (slot < 1 || slot > 7 || slot == internalCardSlot_) return false;
-  if ((slotSelect_ & (1u << slot)) == 0) return false; // internal firmware
+  if (!slotRomIsCard(slot)) return false; // internal firmware
+  if (ExpansionCard *fitted = slotCard(slot)) {
+    if (fitted->hasROM()) return false;
+  }
   ExpansionCard *card = megaII_->getCard(slot);
   return !card || !card->hasROM();
 }
