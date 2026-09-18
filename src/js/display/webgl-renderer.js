@@ -44,6 +44,10 @@ export class WebGLRenderer {
       scanlineWidth: 0.25,
       // How much a bright line's beam spot widens over a dark one's
       beamBloom: 0.6,
+      // Magnification sharpness: 0 is plain bilinear, 1 confines the seam
+      // between two source dots to a single output pixel. See sharpenUV() in
+      // crt.glsl.
+      sharpness: 0.0,
       shadowMask: 0.3,
       // Mask geometry: 0 = aperture grille (stripes), 1 = shadow mask (triad)
       maskType: 0,
@@ -234,6 +238,7 @@ export class WebGLRenderer {
       ),
       scanlineWidth: gl.getUniformLocation(this.program, "u_scanlineWidth"),
       beamBloom: gl.getUniformLocation(this.program, "u_beamBloom"),
+      sharpness: gl.getUniformLocation(this.program, "u_sharpness"),
       shadowMask: gl.getUniformLocation(this.program, "u_shadowMask"),
       maskType: gl.getUniformLocation(this.program, "u_maskType"),
       pixelRatio: gl.getUniformLocation(this.program, "u_pixelRatio"),
@@ -665,6 +670,7 @@ export class WebGLRenderer {
       );
       gl.uniform1f(this.uniforms.scanlineWidth, this.crtParams.scanlineWidth);
       gl.uniform1f(this.uniforms.beamBloom, this.crtParams.beamBloom);
+      gl.uniform1f(this.uniforms.sharpness, this.crtParams.sharpness);
       gl.uniform1f(this.uniforms.shadowMask, this.crtParams.shadowMask);
       gl.uniform1i(this.uniforms.maskType, this.crtParams.maskType);
       gl.uniform1f(this.uniforms.glowIntensity, this.crtParams.glowIntensity);

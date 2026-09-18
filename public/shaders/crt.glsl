@@ -15,6 +15,9 @@ uniform float u_curvature;
 uniform float u_scanlineIntensity;
 uniform float u_scanlineWidth;
 uniform float u_beamBloom;
+// How hard the edge between two source dots is when the picture is magnified.
+// 0 is plain bilinear, 1 puts the whole transition inside one output pixel.
+uniform float u_sharpness;
 uniform float u_shadowMask;
 uniform float u_pixelRatio;
 // Mask geometry: 0 = aperture grille (stripes), 1 = shadow mask (dot triad)
@@ -266,6 +269,41 @@ vec3 applyAmbientLight(vec3 color, vec2 uv) {
 // `luma` is the luminance actually being displayed at this fragment, so the
 // width responds to the final image (bleed, fringing and selection overlay
 // included) rather than to a raw texture sample.
+// ============================================
+// Magnification
+// ============================================
+
+// Sharp bilinear: interpolate only across the seam between two source dots,
+// and keep each dot's interior flat.
+//
+// A 560 wide picture magnified past 1400 output pixels gives every dot a two
+// to five pixel ramp under plain bilinear, and that is horizontal blur laid on
+// top of a signal the core has already band limited. Plain nearest is the
+// other extreme: hard dots, but they alias and crawl once curvature or jitter
+// move the sampling grid. This sits between the two. The seam gets a ramp
+// about one output pixel wide, which is enough to stay alias free, and the
+// rest of the dot is left alone.
+//
+// The width of that ramp is worked out from the uniforms rather than from
+// fwidth(), because derivatives are an extension in GLSL ES 1.00 and this
+// shader has to run on WebGL 1 as well.
+vec2 sharpenUV(vec2 uv) {
+    if (u_sharpness < 0.001) return uv;
+
+    vec2 px = uv * u_textureSize;
+    vec2 seam = floor(px + 0.5);
+    vec2 offset = px - seam;
+
+    // Source texels per output pixel. Clamped to 1 so a picture being shrunk
+    // is never *softened* by this: below one texel per pixel there is no
+    // magnification seam to sharpen.
+    vec2 span = min(u_textureSize / max(u_resolution, vec2(1.0)), vec2(1.0));
+    span = max(span, vec2(1e-4));
+
+    vec2 hard = clamp(offset / span, -0.5, 0.5);
+    return (seam + mix(offset, hard, u_sharpness)) / u_textureSize;
+}
+
 float scanlines(vec2 uv, float luma) {
     if (u_scanlineIntensity < 0.001) return 1.0;
 
@@ -677,6 +715,10 @@ void main() {
     // Content coordinates use the distorted beam position
     vec2 contentUV = applyOverscan(curvedUV);
     contentUV = applyScreenMargin(contentUV);
+    // Harden the seams between source dots before anything samples them, so
+    // the rgb shift and the colour bleed read the same picture the scanlines
+    // and the mask will be laid over.
+    contentUV = sharpenUV(contentUV);
 
     // Dark bezel color for areas outside content
     vec3 darkBezelColor = vec3(0.0); // Black

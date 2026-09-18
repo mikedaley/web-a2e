@@ -204,6 +204,11 @@ export class DisplaySettingsWindow extends BaseWindow {
       // false the window opened saying Pixel Exact while the pixels were being
       // smoothed by linear filtering, and the label was simply wrong.
       sharpPixels: true,
+      // How hard the seam between two source dots is when the picture is
+      // magnified. 0 is plain bilinear, which is what this has always been;
+      // 100 confines the transition to one output pixel. See sharpenUV() in
+      // crt.glsl. Defaults to 0 so nothing changes until it is asked for.
+      sharpness: 0,
       // Color bleed (vertical inter-scanline blending)
       colorBleed: 0,
       // Monochrome mode (0=color, 1=green, 2=amber, 3=white)
@@ -450,6 +455,11 @@ export class DisplaySettingsWindow extends BaseWindow {
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="setting-row">
+          <label title="How hard the seam is between two source dots when the picture is magnified. 0 is plain bilinear; 100 keeps each dot flat and puts the whole transition in one output pixel. Has no effect with Sharp Pixels on, which is already hard.">Edge Sharpness</label>
+          <input type="range" id="ds-sharpness" min="0" max="100" value="${this.settings.sharpness}">
+          <span class="setting-value" id="ds-val-sharpness">${this.settings.sharpness}%</span>
+        </div>
       </div>`;
   }
 
@@ -569,6 +579,21 @@ export class DisplaySettingsWindow extends BaseWindow {
           this.renderer.setNearestFilter(this.settings.sharpPixels);
         }
         this._markModified("sharpPixels");
+        this.saveSettings();
+      });
+    }
+
+    // Edge Sharpness slider (shader-based)
+    const sharpnessInput = this.contentElement.querySelector("#ds-sharpness");
+    const sharpnessValueSpan =
+      this.contentElement.querySelector("#ds-val-sharpness");
+    if (sharpnessInput) {
+      sharpnessInput.addEventListener("input", (e) => {
+        const value = parseInt(e.target.value, 10);
+        this.settings.sharpness = value;
+        if (sharpnessValueSpan) sharpnessValueSpan.textContent = `${value}%`;
+        this.applyToRenderer("sharpness", value / 100);
+        this._markModified("sharpness");
         this.saveSettings();
       });
     }
@@ -1000,6 +1025,16 @@ export class DisplaySettingsWindow extends BaseWindow {
     }
     if (this.renderer) {
       this.renderer.setNearestFilter(this.settings.sharpPixels);
+    }
+
+    // Apply edge sharpness (shader-based)
+    {
+      const input = this.contentElement.querySelector("#ds-sharpness");
+      const valueSpan = this.contentElement.querySelector("#ds-val-sharpness");
+      const value = this.settings.sharpness ?? 0;
+      if (input) input.value = value;
+      if (valueSpan) valueSpan.textContent = `${value}%`;
+      this.applyToRenderer("sharpness", value / 100);
     }
 
     // Apply color bleed settings (shader-based)
