@@ -109,18 +109,7 @@ export class DisplaySettingsWindow extends BaseWindow {
           horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 10,
           // The core now demodulates the real signal, so the picture arrives
           // already soft and already fringed. This is only phosphor overlap.
-          //
-          // sharpPixels stays on, which looks wrong for a composite preset and
-          // is not. Turning it off puts gl.LINEAR on the source texture, and a
-          // 560x384 frame magnified past 1400 pixels wide then has every dot
-          // smeared across two or three output pixels before a single shader
-          // effect runs. That is horizontal blur applied twice: the signal is
-          // already band limited by the decoder, and the beam's own spot is
-          // already modelled by beamBloom. A real composite monitor is soft
-          // because of its bandwidth and its beam, not because something
-          // interpolated its pixels, and the doubled blur is what made text
-          // far fuzzier here than on the glass.
-          colorBleed: 30, monochromeMode: 0, sharpPixels: true,
+          colorBleed: 30, monochromeMode: 0, sharpPixels: false,
           colorMode: COLOR_MODE.COMPOSITE,
         },
       },
