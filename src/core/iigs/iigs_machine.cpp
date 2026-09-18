@@ -204,17 +204,8 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
       [this]() { memory_->adb().clearKeyboardStrobe(); });
   memory_->megaII().setAnyKeyDownCallback(
       [this]() { return memory_->adb().isAnyKeyDown(); });
-  memory_->megaII().setButtonCallback([this](int button) -> uint8_t {
-    // The Apple keys and the game port's buttons are the same three lines, so
-    // either one pressed reads as pressed — which is why a joystick's fire
-    // button works in software that asks about Open Apple, and why holding an
-    // Apple key looks like a fire button.
-    if (button < 0 || button > 2) return 0x00;
-    bool pressed = buttonState_[static_cast<size_t>(button)];
-    if (button == 0) pressed = pressed || keyboard_->isOpenApplePressed();
-    if (button == 1) pressed = pressed || keyboard_->isClosedApplePressed();
-    return pressed ? 0x80 : 0x00;
-  });
+  memory_->megaII().setButtonCallback(
+      [this](int button) -> uint8_t { return buttonLine(button); });
   video_->setCycleCallback([this]() { return memory_->slowCycles(); });
 
   // $C030 is the Mega II's, and so is the speaker behind it: the toggle is
@@ -249,6 +240,12 @@ void IIgsMachine::reset() {
   speakerNibble_ = 0;
   frameReady_ = false;
   samplesGenerated_ = 0;
+
+  // The Joyport lets go of PB0/PB1 for a moment: both idle high, which is a
+  // held Open and Closed Apple to the firmware deciding how to start.
+  joyport_.reset();
+  buttonState_ = {false, false, false};
+  joyportResetGuardCycle_ = memory_->slowCycles() + JOYPORT_RESET_GUARD_CYCLES;
 
   // The reset vector is read from bank zero, where $D000 upward is the
   // language card — and a machine that has just been powered on is reading ROM
@@ -555,6 +552,13 @@ void IIgsMachine::warmReset() {
   samplesGenerated_ = 0;
   debug_.reset();
   paused_ = false;
+
+  // The Joyport lets go of PB0/PB1 for a moment: both idle high, which is a
+  // held Open and Closed Apple to the firmware deciding how to start.
+  joyport_.reset();
+  buttonState_ = {false, false, false};
+  joyportResetGuardCycle_ = memory_->slowCycles() + JOYPORT_RESET_GUARD_CYCLES;
+
   // Emulation mode, the vector from ROM, exactly as at power on.
   cpu_->reset();
 }
@@ -687,6 +691,45 @@ int IIgsMachine::getPaddleValue(int paddle) const {
 void IIgsMachine::setButton(int button, bool pressed) {
   if (button < 0 || button > 2) return;
   buttonState_[static_cast<size_t>(button)] = pressed;
+}
+
+uint8_t IIgsMachine::buttonLine(int button) const {
+  if (button < 0 || button > 2) return 0x00;
+
+  if (gamePortDevice_ == GamePortDevice::SiriusJoyport) {
+    // See joyportResetGuardCycle_: both lines idle high on a Joyport, which
+    // is a held Open and Closed Apple as far as the startup firmware can
+    // tell, so they are let go of until it has looked. A *closed* switch reads
+    // low too, so a fire button held through a reset is not lost, and PB2 is
+    // never held back because no Apple key is wired to it.
+    if (button < 2 && memory_->slowCycles() < joyportResetGuardCycle_) {
+      return 0x00;
+    }
+    const SoftSwitches &sw = memory_->megaII().getSoftSwitches();
+    return joyport_.readPushButton(button, sw.an0, sw.an1);
+  }
+
+  // The Apple keys and the game port's buttons are the same three lines, so
+  // either one pressed reads as pressed — which is why a joystick's fire
+  // button works in software that asks about Open Apple, and why holding an
+  // Apple key looks like a fire button.
+  bool pressed = buttonState_[static_cast<size_t>(button)];
+  if (button == 0) pressed = pressed || keyboard_->isOpenApplePressed();
+  if (button == 1) pressed = pressed || keyboard_->isClosedApplePressed();
+  return pressed ? 0x80 : 0x00;
+}
+
+void IIgsMachine::setGamePortDevice(GamePortDevice device) {
+  if (device == gamePortDevice_) return;
+  gamePortDevice_ = device;
+  // Whatever was held on the old device is not held on the new one, and a
+  // switch mid-game would otherwise leave a direction stuck down.
+  joyport_.reset();
+  buttonState_ = {false, false, false};
+}
+
+void IIgsMachine::setJoyportStick(int stick, int switches) {
+  joyport_.setStickState(stick, static_cast<uint8_t>(switches));
 }
 
 void IIgsMachine::mouseMove(int dx, int dy) {

@@ -551,9 +551,21 @@ through the same three calls.** The paddle timers are the Mega II's, so
 keys in the button callback, because `$C061`/`$C062` are one line each rather
 than two. The bindings for all three used to answer only `g_emulator`, which
 returns early while a IIgs is running, so a joystick, a gamepad and the
-Joystick window's cursor keys moved nothing at all on that machine. The Sirius
-Joyport is still the 8-bit machines' alone: it is selectable on a IIgs and the
-core has nowhere to put it.
+Joystick window's cursor keys moved nothing at all on that machine.
+
+**The Sirius Joyport fits that connector too**, and the multiplexing works
+here as it does on a //e: the annunciators choose the stick and the axis pair,
+and the Joyport answers `$C061-$C063` *instead of* the Apple keys, active low.
+**Its reset guard has to be a hundred times longer than a //e's.** Both lines
+idle high, which is a held Open and Closed Apple to firmware deciding how to
+start, and a IIgs asks twice — measured at about 229,000 and 396,000 cycles of
+the Mega II's clock, after its power-on diagnostics, and never again — where a
+//e's reset routine asks within a few milliseconds. With the //e's 50,000-cycle
+window a machine with a Joyport fitted went into the self test and drew nothing
+at all; `IIgsMachine::JOYPORT_RESET_GUARD_CYCLES` is a second's worth, which
+covers both looks and is still far shorter than the time anything takes to boot
+off a disk and ask about a stick. `test_iigs_boot.cpp` pins the table and the
+boot.
 
 **A mouse report's two top bits are two buttons.** `$C024` gives X then Y,
 seven bits of movement each; the X byte's bit 7 is button 1, which the mouse

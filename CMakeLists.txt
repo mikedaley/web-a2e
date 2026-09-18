@@ -710,6 +710,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/input/keyboard.cpp
+        src/core/input/joyport.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_adb.cpp
@@ -750,6 +751,7 @@ else()
         src/core/video/ntsc.cpp
         src/core/audio/audio.cpp
         src/core/input/keyboard.cpp
+        src/core/input/joyport.cpp
         src/core/input/mouse_iou.cpp
         src/core/noslot_clock.cpp
         src/core/debug/debug_log.cpp
@@ -803,6 +805,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/input/keyboard.cpp
+        src/core/input/joyport.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp
@@ -845,6 +848,7 @@ else()
         src/core/iigs/iigs_memory.cpp
         src/core/iigs/iigs_clock.cpp
         src/core/input/keyboard.cpp
+        src/core/input/joyport.cpp
         src/core/iigs/iigs_sound.cpp
         src/core/iigs/iigs_video.cpp
         src/core/iigs/iigs_adb.cpp

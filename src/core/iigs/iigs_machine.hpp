@@ -12,6 +12,7 @@
 #include "iigs_video.hpp"
 
 #include "../debug/machine_debug.hpp"
+#include "../input/joyport.hpp"
 #include "../disk-image/disk_converter.hpp"
 
 #include <string>
@@ -300,6 +301,43 @@ public:
   void setPaddleValue(int paddle, int value);
   int getPaddleValue(int paddle) const;
   void setButton(int button, bool pressed);
+  /** What $C061-$C063 read: the buttons, or the Joyport's switches. */
+  uint8_t buttonLine(int button) const;
+
+  /**
+   * What is plugged into that port: the Apple joystick, or a Sirius Joyport.
+   *
+   * A IIgs has the same 9-pin connector and the same three pushbutton inputs,
+   * so the Joyport's multiplexing works here exactly as it does on a //e —
+   * the annunciators choosing which stick and which axis pair the three lines
+   * are reporting. It is a host preference like the speed multiplier: reset
+   * releases the switches but keeps the device, and it is not written into a
+   * save state.
+   */
+  void setGamePortDevice(GamePortDevice device);
+  GamePortDevice gamePortDevice() const { return gamePortDevice_; }
+  /**
+   * How long after a reset the Joyport stays off PB0/PB1.
+   *
+   * The same trouble a //e has, an order of magnitude later. Both lines idle
+   * high on a Joyport, which is indistinguishable from a held Open and Closed
+   * Apple, and the startup firmware reads exactly those to choose between a
+   * normal start, the Control Panel and the self test — so a machine with a
+   * Joyport fitted went into the self test and drew nothing at all. A //e
+   * looks within a few milliseconds of reset; this machine looks twice, at
+   * about 229,000 and 396,000 cycles of the Mega II's clock — a fifth and
+   * four tenths of a second, after its power-on diagnostics — and then never
+   * again. A second's worth of window covers both with room to spare, and is
+   * still far shorter than the time it takes anything to boot off a disk and
+   * ask about a joystick.
+   */
+  static constexpr uint64_t JOYPORT_RESET_GUARD_CYCLES = 1000000;
+
+  /** Set one Joyport stick's switches (a mask of Joyport::SwitchBit). */
+  void setJoyportStick(int stick, int switches);
+  int getJoyportStick(int stick) const { return joyport_.stickState(stick); }
+
+
 
   /** Mouse movement and its button, which reach the machine through the ADB. */
   void mouseMove(int dx, int dy);
@@ -374,6 +412,12 @@ private:
   std::unique_ptr<Keyboard> keyboard_;
   // The game port's three pushbuttons, ORed with the Apple keys on read.
   std::array<bool, 3> buttonState_ = {false, false, false};
+  // ...unless a Joyport is fitted, which drives those same three lines itself
+  // and reads them active low, so it answers *instead of* the buttons.
+  GamePortDevice gamePortDevice_ = GamePortDevice::AppleJoystick;
+  Joyport joyport_;
+  // Cycle after which the Joyport may drive PB0/PB1 again following a reset.
+  uint64_t joyportResetGuardCycle_ = 0;
   DiskController *disk_ = nullptr;   // Owned by the Mega II's slot
   SmartPortCard *smartPort_ = nullptr; // ...and so is this
 

@@ -24,6 +24,7 @@
 #include "audio/audio.hpp"
 #include "cards/disk_controller.hpp"
 #include "iigs_video.hpp"
+#include "input/joyport.hpp"
 #include "machine/machine_profile.hpp"
 #include "video/video.hpp"
 #include "roms.cpp"
@@ -1242,4 +1243,88 @@ TEST_CASE("A IIgs has a game port, and the host can drive it", "[iigs][gameport]
     REQUIRE((machine.memory().read(0x00C063) & 0x80) != 0);
     machine.setButton(2, false);
   }
+}
+
+TEST_CASE("A Joyport fits a IIgs's game port too", "[iigs][gameport][joyport]") {
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the Joyport test");
+    return;
+  }
+
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  machine.setGamePortDevice(GamePortDevice::SiriusJoyport);
+  REQUIRE(machine.gamePortDevice() == GamePortDevice::SiriusJoyport);
+
+  // Past the window where the Joyport lets go of PB0/PB1 for the startup
+  // firmware's benefit. Measured from the reset inside init(), so this runs
+  // past its length from wherever the clock has got to rather than assuming
+  // it started at zero.
+  const uint64_t past = machine.memory().slowCycles() +
+                        IIgsMachine::JOYPORT_RESET_GUARD_CYCLES + 1000;
+  while (machine.memory().slowCycles() < past) machine.step();
+
+  SECTION("the annunciators choose the stick and the axis pair") {
+    machine.memory().read(0xE0C058); // AN0 off — stick 1
+    machine.memory().read(0xE0C05A); // AN1 off — horizontal
+
+    // Active low: nothing held reads high, the opposite of an Apple button.
+    REQUIRE((machine.memory().read(0xE0C061) & 0x80) == 0x80);
+    REQUIRE((machine.memory().read(0xE0C062) & 0x80) == 0x80);
+    REQUIRE((machine.memory().read(0xE0C063) & 0x80) == 0x80);
+
+    machine.setJoyportStick(0, Joyport::LEFT | Joyport::FIRE);
+    REQUIRE((machine.memory().read(0xE0C061) & 0x80) == 0x00); // fire
+    REQUIRE((machine.memory().read(0xE0C062) & 0x80) == 0x00); // left
+    REQUIRE((machine.memory().read(0xE0C063) & 0x80) == 0x80); // not right
+
+    machine.memory().read(0xE0C05B); // AN1 on — vertical
+    REQUIRE((machine.memory().read(0xE0C062) & 0x80) == 0x80); // left is not up
+    machine.setJoyportStick(0, Joyport::DOWN);
+    REQUIRE((machine.memory().read(0xE0C063) & 0x80) == 0x00);
+
+    // Stick 2 is behind AN0 and must not answer for stick 1.
+    machine.setJoyportStick(1, Joyport::UP);
+    REQUIRE((machine.memory().read(0xE0C062) & 0x80) == 0x80);
+    machine.memory().read(0xE0C059); // AN0 on — stick 2
+    REQUIRE((machine.memory().read(0xE0C062) & 0x80) == 0x00);
+  }
+
+  SECTION("and it answers instead of the Apple keys, not beside them") {
+    machine.memory().read(0xE0C058);
+    machine.memory().read(0xE0C05A);
+
+    // An Apple key held reads as *not pressed* here, because the Joyport is
+    // driving the line and reads the other way up.
+    machine.setButton(0, true);
+    REQUIRE((machine.memory().read(0xE0C061) & 0x80) == 0x80);
+
+    machine.setGamePortDevice(GamePortDevice::AppleJoystick);
+    REQUIRE((machine.memory().read(0xE0C061) & 0x80) == 0x00); // released with it
+    machine.setButton(0, true);
+    REQUIRE((machine.memory().read(0xE0C061) & 0x80) == 0x80);
+  }
+}
+
+TEST_CASE("A IIgs still starts with a Joyport fitted", "[iigs][gameport][joyport]") {
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the Joyport boot test");
+    return;
+  }
+
+  // Both of the Joyport's idle-high lines look like a held Open and Closed
+  // Apple, and the startup firmware reads exactly those to choose between a
+  // normal start, the Control Panel and the self test. Without the guard
+  // window this machine never reaches its own splash screen.
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+  machine.setGamePortDevice(GamePortDevice::SiriusJoyport);
+
+  runToPrompt(machine);
+  const std::string screen = machine.screenText();
+  INFO("screen:\n" << screen);
+  REQUIRE(screen.find("Fatal") == std::string::npos);
+  REQUIRE(screen.find("Check startup device") != std::string::npos);
 }

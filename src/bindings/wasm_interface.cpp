@@ -607,15 +607,24 @@ int getPaddleValue(int paddle) {
 }
 
 // Game I/O connector device: 0 = Apple resistive joystick, 1 = Sirius Joyport.
+// A IIgs has the same connector and the same three pushbutton lines, so it
+// takes the same device.
 EMSCRIPTEN_KEEPALIVE
 void setGamePortDevice(int device) {
+  const a2e::GamePortDevice chosen = device == 1
+                                         ? a2e::GamePortDevice::SiriusJoyport
+                                         : a2e::GamePortDevice::AppleJoystick;
+  if (g_iigs) {
+    g_iigs->setGamePortDevice(chosen);
+    return;
+  }
   REQUIRE_EMULATOR();
-  g_emulator->setGamePortDevice(device == 1 ? a2e::GamePortDevice::SiriusJoyport
-                                            : a2e::GamePortDevice::AppleJoystick);
+  g_emulator->setGamePortDevice(chosen);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getGamePortDevice() {
+  if (g_iigs) return static_cast<int>(g_iigs->gamePortDevice());
   REQUIRE_EMULATOR_OR(0);
   return static_cast<int>(g_emulator->gamePortDevice());
 }
@@ -624,12 +633,17 @@ int getGamePortDevice() {
 // switches at once, and this is a fire-and-forget RPC on an input path.
 EMSCRIPTEN_KEEPALIVE
 void setJoyportStick(int stick, int switches) {
+  if (g_iigs) {
+    g_iigs->setJoyportStick(stick, switches);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->setJoyportStick(stick, switches);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getJoyportStick(int stick) {
+  if (g_iigs) return g_iigs->getJoyportStick(stick);
   REQUIRE_EMULATOR_OR(0);
   return g_emulator->getJoyportStick(stick);
 }
