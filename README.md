@@ -44,13 +44,13 @@ The emulator runs one machine at a time, and the badge in the header names it �
 | Colour burst in text | Inhibited | Always sent (text fringes) | Inhibited | Inhibited |
 | Expansion slots | 1–7, slot 3 fixed | 0–7, slot 0 fixed | None — every slot address is a soldered-in part | Slot 5 is the built-in SmartPort |
 | Disk controller | Disk II card | Disk II card | IWM (built in) | IWM (built in) |
-| ROMs | Included | **Supply your own** | Included | **Supply your own** |
+| ROMs | Included | Included | Included | Included |
 
 A machine's differences are data in its profile rather than special cases scattered through the code, so the II+'s missing auxiliary bank is what makes 80 columns and double hi-res genuinely unreachable rather than merely hidden.
 
 The IIgs is the exception to that rule, and deliberately: it belongs to its own `MachineFamily` and is built from its own classes in `src/core/iigs/` — a 65816, a 24-bit memory controller that shadows banks, a second display system, an Ensoniq, an ADB controller and a Z8530. A number or a flag goes in the profile; a different mechanism goes in a different class that the profile names. The [Machines wiki page](https://github.com/mikedaley/web-a2e/wiki/Machines) covers each machine in full, and [Apple IIgs](https://github.com/mikedaley/web-a2e/wiki/Apple-IIgs) covers that one in depth.
 
-Switching rebuilds the emulator, so inserted media and anything in memory are lost exactly as they would be on a page reload — the menu says so first. Volume, character set and CPU speed follow you across, because those were your choices rather than the machine's. Each machine remembers its own slot layout, display settings and save states, and the machine you last chose is restored at startup. A machine whose ROMs are missing is still listed, but marked unavailable rather than quietly failing to reach a prompt.
+Switching rebuilds the emulator, so inserted media and anything in memory are lost exactly as they would be on a page reload — the menu says so first. Volume, character set and CPU speed follow you across, because those were your choices rather than the machine's. Each machine remembers its own slot layout, display settings and save states, and the machine you last chose is restored at startup.
 
 Menu items for hardware the running machine does not have are hidden rather than disabled: a greyed-out "Expansion Slots" on a //c only invites the question of how to enable it, and the answer is a different computer.
 
@@ -78,12 +78,11 @@ An alternate character ROM variant `341-0160-A-US-UK.bin` (8KB) is also supporte
 
 ### The other machines' ROMs
 
-A machine can be fully described and still be unable to start. Where its ROMs
-are absent the profile still exists and the machine is still listed, but it is
-marked unavailable rather than quietly running someone else's ROM or none at
-all — `Emulator::isMachineRunnable()` is what the chooser asks.
+Every machine's ROMs are in `roms/` and are embedded at compile time, so all
+four run out of the box. The rest of this section matters only if you want to
+substitute a different dump.
 
-**Apple II Plus** — either the six motherboard ROMs in address order, or one
+**Apple II Plus**, either the six motherboard ROMs in address order or one
 pre-combined 12KB image:
 
 | File | Size | Description |
@@ -93,7 +92,7 @@ pre-combined 12KB image:
 | `apple2plus.rom` | 12KB | ...or one pre-combined image instead of the six |
 | `341-0036.bin` | 2KB | II+ character generator |
 
-**Apple //c** — the system ROM is 16KB because everything a //c would have put
+**Apple //c**, whose system ROM is 16KB because everything a //c would have put
 in a slot is inside it:
 
 | File | Size | Description |
@@ -101,7 +100,7 @@ in a slot is inside it:
 | `342-0272-A.bin` (or `apple2c.rom`) | 16KB | //c system ROM |
 | `342-0265-A.bin` (or `341-0265-A.bin`) | 4KB | //c character generator |
 
-**Apple IIgs** — a ROM 01 image, either as the two socket ROMs or pre-combined.
+**Apple IIgs**, a ROM 01 image, either as the two socket ROMs or pre-combined.
 `loadROM` looks for the emulation reset vector at `$FF:FFFC` to work out which
 way round the banks are, so either order loads:
 

@@ -312,10 +312,6 @@ export class DocumentationWindow extends BaseWindow {
           <li><strong>Slot 0 exists</strong> and holds the language card, which is how a 48K machine becomes the 64K one nearly all II+ software expects. Slot 3 is free for anything, since there is no built-in 80-column card to occupy it.</li>
         </ul>
 
-        <div class="info-box warning">
-          <p><strong>The Apple II Plus needs its own ROMs.</strong> They are not distributed with the emulator. Without them the machine is still listed but marked unavailable, rather than quietly failing to reach a prompt. See the project README for which ROM images to supply and where to put them before building.</p>
-        </div>
-
         <h4>Apple //c</h4>
         <p>The 1984 portable: a //e folded into a slab. The same 65C02, the same 128KB, the same timing &mdash; what differs is the back of it.</p>
         <ul>
@@ -336,10 +332,6 @@ export class DocumentationWindow extends BaseWindow {
           <li><strong>A battery-backed clock</strong> whose Control Panel settings survive a reload.</li>
           <li><strong>A SmartPort in slot 5</strong>, part of the machine rather than a card you fit, serving hard drive images to GS/OS.</li>
         </ul>
-
-        <div class="info-box warning">
-          <p><strong>The Apple IIgs needs its own ROMs too.</strong> A ROM 01 image, either as its two socket ROMs or pre-combined. As with the II Plus, without them the machine is listed but marked unavailable.</p>
-        </div>
 
         <h4>Switching machines</h4>
         <p>Switching rebuilds the machine from scratch, so anything in the drives or in memory is lost &mdash; exactly as it would be on a page reload. The menu warns you before it does it. What follows you across is what was your choice rather than the machine's: volume, character set and CPU speed. What is remembered <em>per machine</em> is its expansion slot layout, its display settings, its save states, and whether &#8984; acts as Open Apple &mdash; so returning to a machine brings back the way you had it. The machine you last chose is restored the next time you open the emulator.</p>

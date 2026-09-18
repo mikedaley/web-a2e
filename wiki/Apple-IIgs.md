@@ -812,7 +812,7 @@ Known places where the rest of the emulator assumes an 8-bit Apple II. None is a
 
 **The banks can be either way round.** The obvious reading of a 128KB ROM 01 image is that it ends at `$FF:FFFF`, so its first half is bank `$FE` — and the dump this was written against is stored the other way. It is not a subtle difference: the emulation reset vector lives at `$FF:FFFC`, and reading it out of the wrong half gives zero and a machine that resets to `$00:0000` and sits there. So `IIgsMemory::loadROM` asks the image which way round it is, by looking for a usable reset vector at the top of each candidate bank.
 
-Not distributed. A IIgs ROM 01 is a single 128KB image; a ROM 3 is 256KB across two chips, concatenated in bank order:
+The ROM 01 image is part of the build. A IIgs ROM 01 is a single 128KB image; a ROM 3 is 256KB across two chips, concatenated in bank order:
 
 - `342-0077-B.bin` (128KB, ROM 01, banks `$FE-$FF`)
 - **or** `341-0728.bin` (banks `$FC-$FD`) and `341-0749.bin` or `341-0748.bin` (banks `$FE-$FF`) for ROM 3

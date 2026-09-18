@@ -16,7 +16,7 @@ export const RELEASE_NOTES = [
       {
         title: "Two more machines: the Apple IIc and the Apple IIgs",
         description:
-          "The IIc is a //e in a slab, with no expansion sockets but every slot address answered by a part soldered to the board: two serial ports, the 80-column firmware, an IOU mouse and an IWM driving the drive in its case. The IIgs is a different computer, built from its own parts: a 65C816 at 2.8 MHz on a 24-bit bus, 256K to 8M of fast RAM, Super Hi-Res, an Ensoniq, ADB, and a battery-backed clock. It boots GS/OS System 6.0.4 to the Finder with a working mouse and sound.",
+          "The IIc is a //e in a slab: no expansion sockets, but every slot address answered by a part soldered to the board, including two serial ports, an IOU mouse and an IWM driving the drive in its case. The IIgs is a different computer, with a 65C816 at 2.8 MHz on a 24-bit bus, 256K to 8M of fast RAM, Super Hi-Res, an Ensoniq and a battery-backed clock. It boots GS/OS System 6.0.4 to the Finder.",
       },
       {
         title: "Save states know which machine wrote them",
@@ -78,17 +78,17 @@ export const RELEASE_NOTES = [
       {
         title: "There is a second machine: the Apple II Plus",
         description:
-          "The badge in the header is no longer a picture of a //e — it names the machine you are running, and clicking it lets you choose one. There are two: the Apple //e, and the Apple II Plus, the machine most of the software you remember was written on. Its differences are real rather than cosmetic. It has an NMOS 6502 instead of a 65C02, no auxiliary bank at all — which is what makes 80 columns and every double-resolution mode genuinely unavailable rather than merely hidden — its own character generator, only one character set, and it never switches off the colour burst, so its text fringes green and violet in every mode exactly as the real machine's did. Slot 0 exists and holds the language card that turns a 48K machine into the 64K one nearly all II+ software expects. Switching machines rebuilds the machine from scratch, so anything in the drives or in memory is lost just as it would be on a reload — the menu says so before it does it — but your display settings, volume, character set and speed follow you across, because those were your choices and not the machine's. Each machine remembers its own slot layout, so a card you fitted to one does not turn up in the other. The Apple II Plus needs its own ROMs, which are not distributed with the emulator; without them the machine is still listed but is marked as unavailable rather than quietly failing to start.",
+          "The badge in the header names the machine you are running, and clicking it lets you choose one. The II Plus is a real II Plus: an NMOS 6502, no auxiliary bank (which is what makes 80 columns and double hi-res genuinely unreachable), one character set, and a colour burst it never switches off. Switching machines rebuilds the machine, so anything in memory is lost.",
       },
       {
         title: "A Sirius Joyport, for two digital joysticks",
         description:
-          "The Joystick window has a new Game port selector, and it chooses what is plugged into the machine's game connector: the usual Apple joystick, or a Sirius Joyport. The Joyport was Sirius Software's 1981 adapter, and it put two Atari-style digital sticks on the same connector — switches instead of potentiometers, so there was no capacitor to wait for, and two players instead of one. Look at almost any Sirius game and it offers you \"Apple Joystick\" or \"Joyport\"; now the second option works. Choose it and the window swaps its paddle knob for a pair of digital sticks you can work with the mouse, and a connected game controller drives one from either its D-pad or its left stick. Connect two controllers and each one gets a stick; with only one connected it drives both, so a game that reads the second stick still plays. Your choice is remembered, and survives a reset and a change of machine. One small liberty is taken with the hardware: a Joyport holds the machine's two button lines high when nothing is pressed, and on a //e those lines are the Open and Closed Apple keys, so a real //e with a Joyport fitted ran its self test at every reset instead of booting. Here the Joyport lets go of them for an instant after a reset, so the machine starts normally and the sticks work the rest of the time.",
+          "The Joystick window has a Game port selector: the usual Apple joystick, or a Sirius Joyport. Sirius put two Atari style digital sticks on the game connector in 1981, and plenty of their games offer you the choice. Two controllers get a stick each; one drives both.",
       },
       {
         title: "A font editor for the printers",
         description:
-          "The glyph banks the virtual printers render from — ImageWriter I and II, the Epson FX-80, the Apple DMP — can now be authored in a standalone editor at /printers/rom-editor.html. It draws characters dot by dot, handles the alternate-language code points each printer swapped in per locale, imports and exports either as a ROM module or as ASCII dot art, and can trace over a scan of a manual's character chart so a font can be rebuilt from the page it was printed on. It is one plain page with no build step, so it opens straight off disk.",
+          "The glyph banks the virtual printers render from can now be edited at /printers/rom-editor.html. It draws characters dot by dot, handles each printer's alternate-language code points, imports and exports as a ROM module or as ASCII dot art, and can trace over a scan of a manual's character chart. One plain page, no build step.",
       },
     ],
   },
@@ -98,19 +98,19 @@ export const RELEASE_NOTES = [
       {
         title: "A shared link can start the machine for you",
         description:
-          "Add ?autostart to a link and the //e powers on and boots as the page finishes loading, with nothing to click. Send someone a link to a disk and they watch it boot, rather than arriving at a dark screen and having to work out which button starts a computer they have never used. The machine starts silent, because no browser will let a page make sound until someone has interacted with it — click or type anything and the speaker joins in. Clicking the power button yourself still works exactly as before, and the \"No disk? Press Ctrl+Reset\" hint stays out of the way when the link has already put a disk in the drive.",
+          "Add ?autostart to a link and the machine powers on and boots as the page loads, with nothing to click. Send someone a link to a disk and they watch it boot. It starts silent, because no browser will let a page make sound before someone interacts with it; click or type anything and the speaker joins in.",
       },
     ],
     fixes: [
       {
         title: "A powered-on machine could sit frozen instead of running",
         description:
-          "The emulation is paced by the audio hardware clock — it runs the processor for exactly as long as the sound card asks for sound — which is what keeps the speed steady. But a browser refuses to start audio until someone has interacted with the page, so on a page nobody had touched yet there was nothing asking, and a machine that had been switched on stood still: powered, lit, and not running. The emulator now paces itself from a timer for as long as audio is asleep, and hands back to the audio clock the moment it wakes, so the machine runs from the instant it is switched on whether or not anyone has touched anything yet.",
+          "The emulation is paced by the audio clock, which is what keeps its speed steady. But a browser will not start audio until someone has interacted with the page, so on a page nobody had touched there was nothing asking for samples, and a machine that had been switched on stood still. It now paces itself from a timer while audio is asleep, and hands back the moment it wakes.",
       },
       {
         title: "The agent could not load source into the Assembler window",
         description:
-          "Setting the assembler's source through the agent — pasting a program in, or loading one from a file — failed outright, because it was still calling a routine the editor dropped when its gutter started coming from the real assembler. The editor now simply revalidates and redraws, which is what the removed routine had been there to prompt.",
+          "Setting the assembler's source through the agent failed outright, because it still called a routine the editor dropped when its gutter started coming from the real assembler. The editor now revalidates and redraws instead.",
       },
     ],
   },
@@ -120,36 +120,36 @@ export const RELEASE_NOTES = [
       {
         title: "A real Merlin assembler",
         description:
-          "The Assembler window used to accept a plain list of 65C02 instructions and little else. It is now a Merlin-compatible assembler in the emulator's core, and Merlin source written in 1985 assembles as written: macros with parameters and their own local labels, conditional assembly, LUP loops, dummy sections for laying out structures, local labels and variables, the full set of data and string directives, PUT and USE reading included source straight off the disk in a drive, DSK and SAV writing the object back to one, and SW for Woz's Sweet-16 interpreter. It follows Merlin's conventions rather than a generic assembler's — expressions run strictly left to right with no operator precedence, so 1+2*3 is 9, because that is what the sources you might load were written against. Directives that need a linker, and the 65816 ones a //e cannot run, are reported instead of quietly doing nothing. A Problems panel lists every error and warning from the last assembly, and clicking one goes to its line.",
+          "The Assembler window is now a Merlin-compatible assembler in the core, and Merlin source written in 1985 assembles as written: macros, conditional assembly, LUP loops, dummy sections, PUT and USE reading source off a disk, DSK and SAV writing the object back, and SW for Sweet-16. Expressions run left to right with no precedence, as Merlin's do, so 1+2*3 is 9.",
       },
       {
         title: "The gutter now shows what was really assembled",
         description:
-          "The addresses, cycle counts and bytes beside each line used to come from a second, simpler assembler living in the editor, which meant it could not follow a macro or a conditional and quietly disagreed with the code that was actually produced. The gutter is now filled in by the real assembler, so a line inside a conditional that was not taken shows nothing, a macro call is credited with the bytes its expansion produced, and cycle counts are per opcode rather than per instruction name — LDA $10 and LDA $1000 differ, as they do on the chip.",
+          "The addresses, cycle counts and bytes beside each line came from a second, simpler assembler inside the editor, which could not follow a macro or a conditional. The real assembler fills the gutter in now, so an untaken conditional shows nothing, a macro call is credited with the bytes it produced, and cycle counts are per opcode.",
       },
     ],
     fixes: [
       {
         title: "Pasted text was arriving with characters missing",
         description:
-          "Paste a program into some titles and roughly every second character vanished, while other programs took the same paste perfectly — which made it look like the paste was too fast rather than wrong. Clearing the keyboard strobe twice is how an Apple II flushes the keyboard, and the ROM, DOS and countless programs do it before settling down to wait for input. A person typing leaves nothing pending for a flush to throw away; the emulator was handing each flush a fresh character. Pasted text now goes into a type-ahead buffer inside the machine, and a character becomes available a short interval after the last one was taken — longer after a carriage return, because the machine has a line to tokenise and a command to run before it asks for the next one. Nothing can now be overwritten before it has been read.",
+          "Roughly every second character vanished when pasting into some titles. Clearing the keyboard strobe twice is how an Apple II flushes the keyboard, and the emulator was handing each flush a fresh character. Pasted text now goes into a type-ahead buffer inside the machine, so nothing is overwritten before it is read.",
       },
       {
         title: "The machine thought a key was held down forever",
         description:
-          "The //e reports whether a key is physically held on a separate line from the one that reports a key waiting to be read, and games and key-repeat code watch it. It went high on the first keystroke of a session and stayed there, because something asserted it with nothing to release it. It is now derived from the only two things that can hold a key down — a key you are actually holding, and a pasted character the program has not read yet — so it releases on its own. Held keys are tracked by the physical key, so letting go of Shift first cannot strand one, auto-repeat cannot double-count, and clicking away from the window releases everything rather than losing the key-up.",
+          "The //e reports a physically held key on a separate line from the one saying a key is waiting, and games watch it. It went high on the first keystroke of a session and stayed there. It is now derived from the only two things that can hold a key down, so it releases on its own, and held keys are tracked by the physical key so releasing Shift first cannot strand one.",
       },
       {
         title: "Typing on a phone or tablet dropped characters",
         description:
-          "An on-screen keyboard can deliver several characters in one go — autocorrect finishing a word, a swipe, a paste into the input field — and each one was written straight into the keyboard latch, overwriting whatever the machine had not read yet. Mobile typing now goes through the same type-ahead buffer as a paste, so the machine gets all of it at its own pace.",
+          "An on-screen keyboard can deliver several characters at once, from autocorrect, a swipe or a paste, and each was written straight into the keyboard latch over whatever the machine had not read. Mobile typing now goes through the same type-ahead buffer as a paste.",
       },
     ],
     improvements: [
       {
         title: "Pasting no longer fights the emulator for time",
         description:
-          "The old paste ran the CPU itself from the browser's main thread in small bursts, asking the emulator whether the keyboard was ready once per character and translating each character with a separate call — three round trips per key, competing with the audio-driven emulation for the same machine. The text now crosses into the emulator in whole lines, a paste of any size costs a fixed handful of calls, and the machine pulls characters out at its own pace. All the host still does is drop the speed boost and notice when the paste has finished.",
+          "The old paste ran the CPU from the browser's main thread in small bursts, asking whether the keyboard was ready once per character and translating each one separately, three round trips per key. Text now crosses into the emulator in whole lines, a paste of any size costs a fixed handful of calls, and the machine pulls characters out at its own pace.",
       },
     ],
   },
@@ -159,41 +159,41 @@ export const RELEASE_NOTES = [
       {
         title: "Run the machine faster than a real one",
         description:
-          "View > CPU Speed picks 1x, 2x, 4x or 8x of the //e's 1.023 MHz — 8x is roughly what an accelerator card gave you in 1986, and it turns a slow BASIC listing, a long compile or a ProDOS copy from something you wait for into something that is simply done. The sound speeds up with it. Everything the speaker and the Mockingboard do happens in a fraction of the time and rises in pitch to match, exactly as it did on accelerated hardware, so you can hear how fast the machine is going rather than only see it. The picture still runs at sixty frames a second; the machine just gets more done between them. Any setting above 1x shows a small chip in the Monitor title bar so a fast machine is never a mystery, and your choice is remembered between sessions and survives a reset or a reboot — a speed you chose is not something a restart should quietly take away from you. Pasting still sprints to 8x for the duration of the paste and then hands the machine back to whatever speed you picked.",
+          "View > CPU Speed picks 1x, 2x, 4x or 8x of the //e's 1.023 MHz, roughly what an accelerator card gave you in 1986. The sound speeds up and rises in pitch with it, as it did on accelerated hardware. The picture still runs at sixty frames a second. Any setting above 1x shows a chip in the Monitor title bar, and your choice survives a reset.",
       },
       {
         title: "Save As for assembly and BASIC source",
         description:
-          "There was no way to choose the name of a source file once one was in play. Save asked for a name the first time and never again, and opening a file meant never being asked at all, so the only way to save under a different name was to start a new file and lose what you had. Both editors now have a Save As button next to Save, on Ctrl or Cmd with Shift and S. Save writes back to the file you are working on without interrupting; Save As always asks. On Safari and Firefox, which cannot offer a system save dialog, saving used to drop a file into your downloads under a name chosen for you — the BASIC editor always called it program.bas whatever the program was — so both now ask for a name whenever it is not already settled, the same way saving a disk image does.",
+          "Both editors now have a Save As button beside Save, on Ctrl or Cmd with Shift and S. Save writes back to the file you are working on; Save As always asks. On Safari and Firefox, which have no system save dialog, saving used to drop a file into your downloads under a name chosen for you, so both now ask whenever the name is not already settled.",
       },
       {
         title: "Real composite colour, decoded from the real signal",
         description:
-          "An Apple //e does not send a monitor pixels. It sends one bit per 14.31818 MHz dot, four dots to a cycle of the colour subcarrier, and every colour you have ever seen on one was manufactured by the monitor from that stream of bits. The emulator used to skip all of that: it looked up colours from a table and then tinted the edges afterwards to suggest fringing. It now generates the dot stream the machine really produces and decodes it the way a monitor does, and several things that were previously approximated fall out of that on their own. The high bit of a hi-res byte is a real half-pixel delay again rather than a swap to a different set of colours, which is the actual reason orange and blue exist and why they sit half a pixel to the right of green and violet. Colour burst is modelled, so text is colourless because the machine stops sending a colour reference during it, not because white was written into the code. And artifact colours and lo-res colours are finally the same sixteen colours, because they are the same mechanism — something the old hand-tuned tables disagreed about. Text on a mixed graphics screen fringes green and violet, exactly as it does on real hardware, while a full screen of text stays crisp and white.",
+          "An Apple //e sends a monitor one bit per 14.31818 MHz dot, and every colour you have seen on one was manufactured by the monitor from that stream. The emulator used to look colours up in a table and tint the edges afterwards; it now generates the real dot stream and decodes it as a monitor does. Artifact colour, the hi-res half-dot shift and colour burst all follow from the signal rather than being drawn on.",
       },
       {
         title: "Save your own display profiles",
         description:
-          "The Monitor dropdown offered five monitors and no way to keep one of your own. Tune the picture however you like and Save As gives it a name; it then appears under My Profiles alongside the built-in monitors. Adjusting a saved profile keeps its name and offers Save, which writes the changes back without asking anything, so refining one does not mean naming it again every time. Unlike the built-in monitors, which deliberately leave your brightness, contrast, saturation and bezel alone, a profile remembers everything — it is a snapshot of a picture you liked, so selecting it gives that picture back whole. Profiles are kept separately from the rest of the display settings, so Reset to Defaults does not delete them.",
+          "Tune the picture however you like and Save As gives it a name, which then appears under My Profiles alongside the built-in monitors. Adjusting a saved profile keeps its name and offers Save. Unlike a built-in monitor, a profile remembers everything, including your brightness and contrast, so selecting it gives that picture back whole. Profiles survive Reset to Defaults.",
       },
     ],
     fixes: [
       {
         title: "Double hi-res was showing the wrong colours",
         description:
-          "Every double hi-res picture was a quarter turn out around the colour wheel — greens for blues, pinks for lavenders — which is subtle enough to look like a stylistic choice rather than a fault. The 80-column video path is clocked one dot later than the 40-column one, so the same pattern of dots lands on the next point of the colour cycle and comes out a different colour. That one dot was missing.",
+          "Every double hi-res picture was a quarter turn out around the colour wheel, greens for blues and pinks for lavenders, which is subtle enough to look like a stylistic choice. The 80-column video path is clocked one dot later than the 40-column one, so the same dots land on the next point of the colour cycle. That dot was missing.",
       },
       {
         title: "Colour where there should have been none",
         description:
-          "Pixel Exact was quietly applying a composite effect. It worked out each pixel's colour by looking at its neighbours, which meant colour bled onto dots that were switched off and spilled past the edges of white shapes — the left edge of a white block ran magenta, violet and lavender before reaching white. A sharp mode should not do that. Unlit dots are now black, colour stops at the last lit dot, and edges are hard. Hi-res pixels and text keep the colours their dot patterns really produce; what they no longer do is smear them.",
+          "Pixel Exact was quietly applying a composite effect, working out each pixel's colour from its neighbours, so colour bled onto unlit dots and spilled past the edges of white shapes. Unlit dots are now black, colour stops at the last lit dot, and edges are hard.",
       },
     ],
     improvements: [
       {
         title: "Composite no longer bends the picture",
         description:
-          "The Composite Color monitor came with a curved screen. Real colour sets were curved, but curvature is not what that setting is about — the composite look is in how the colour is decoded, and the barrel distortion mostly made the picture harder to read. It is now flat, and this reaches anyone who already had Composite selected rather than only new users. Screen Curvature is still under Advanced.",
+          "The Composite Color monitor came with a curved screen. Real colour sets were curved, but curvature is not what that setting is about, and the barrel distortion mostly made the picture harder to read. It is now flat, and this reaches anyone who already had Composite selected. Screen Curvature is still under Advanced.",
       },
       {
         title: "The NTSC Fringing slider has gone",
@@ -209,14 +209,14 @@ export const RELEASE_NOTES = [
       {
         title: "Colour fringing now behaves like a real tube's",
         description:
-          "The RGB Offset effect pulls the red, green and blue images slightly apart, imitating the three electron beams not landing in quite the same place. It was doing so evenly across the screen, which left visible colour fringing in the middle of the picture and no more of it in the corners than at the edges — the reverse of a real monitor, where the beams are aligned dead centre and drift further apart the further out they are steered. It is now clean through the middle and worst in the corners, slightly stronger left-to-right than top-to-bottom because a picture tube deflects the beam through a wider angle horizontally. The fringing is also fixed to the screen rather than sliding about with the Jitter and Horizontal Sync effects, since where the beams land is a property of the tube and not of the signal.",
+          "RGB Offset pulls the red, green and blue images apart, imitating three beams not landing in the same place. It was doing so evenly across the screen, the reverse of a real monitor, where the beams are aligned dead centre and drift apart the further out they are steered. It is now clean through the middle, worst in the corners, and fixed to the screen.",
       },
     ],
     improvements: [
       {
         title: "The bezel no longer pretends to reflect the screen",
         description:
-          "The surround around the picture tried to show a reflection of what was on screen. A bezel is matte plastic, and a matte surface scatters light instead of forming an image, so there is no reflection to see on a real monitor however hard you look — the effect was imitating something that does not happen. What a real bezel does is simply catch a little light from a bright screen, which amounts to a faint lightening of the innermost few millimetres and nothing more, so it has been taken out rather than approximated. The Spill Reach and Spill Intensity sliders have gone with it. The bezel keeps its own shading, colour and texture; it just no longer changes with the picture.",
+          "The surround tried to show a reflection of what was on screen. A bezel is matte plastic, which scatters light instead of forming an image, so there is no reflection to see on a real monitor. What a real bezel does is catch a little light from a bright screen, which is a faint lightening of the innermost few millimetres and nothing more, so the effect has been removed rather than approximated. The Spill sliders have gone with it.",
       },
     ],
   },
@@ -228,7 +228,7 @@ export const RELEASE_NOTES = [
       {
         title: "Phosphor that fades like phosphor",
         description:
-          "The Burn In effect, which leaves a fading afterimage behind moving graphics, was subtracting a fixed amount of brightness on every pass. That made a dim trail take just as long to disappear as a bright one, and gave the fade an abrupt end where it hit black. Real phosphor fades quickly at first and then lingers, which is why a trail on a picture tube has a long faint tail rather than simply stopping. It now does the same. A colour tube's three phosphors also do not fade together — green holds on longest and blue goes first — so the trail behind moving white text now tints green as it dies, exactly as it does on real hardware. The green and amber monochrome modes instead fade every colour at one rate, because a monochrome tube has a single phosphor coating and nothing to tint, and they hold their image around half again as long. The Burn In slider now sets how long the phosphor holds rather than how much brightness to remove, and the fade no longer runs faster or slower depending on how busy your machine is.",
+          "Burn In was subtracting a fixed amount of brightness on every pass, so a dim trail took as long to disappear as a bright one and the fade ended abruptly at black. Real phosphor fades quickly then lingers, and a colour tube's three phosphors do not fade together: green holds longest and blue goes first, so a white trail now tints green as it dies. The monochrome modes fade every colour at one rate and hold about half again as long. The slider now sets how long the phosphor holds.",
       },
     ],
   },
@@ -239,7 +239,7 @@ export const RELEASE_NOTES = [
       {
         title: "Ejecting a disk kept saving a copy of it",
         description:
-          "Ejecting a disk produced a saved image whether or not anything had been written to it, which quietly filled the downloads folder with copies. There were two reasons. A blank disk was marked as changed the moment it was created, so ejecting one you had never written to always offered to save an empty disk; creating a disk is not a change to it, and it now starts clean. And the emulator was only asking whether a write had happened at some point rather than whether the disk was actually different — software rewrites parts of a disk with identical content as a matter of course. It now compares the disk against the one that went in, and ejects silently when they match. A disk you really have changed still offers to save, as before.",
+          "Ejecting produced a saved image whether or not anything had been written, filling the downloads folder with copies. A blank disk was marked changed the moment it was created, and the emulator only asked whether a write had happened rather than whether the disk was different. It now compares the disk against the one that went in and ejects silently when they match.",
       },
       {
         title: "Naming a disk image when saving it",
@@ -261,7 +261,7 @@ export const RELEASE_NOTES = [
       {
         title: "The no-signal screen no longer shows a power symbol",
         description:
-          "The screen shown while the machine is off had a power symbol drawn beneath the message. It was part of the picture rather than a control — the emulator's screen does nothing with a click — so it invited people to press the one thing on screen that could not work, instead of the power button in the toolbar. It has been removed and the message re-centred.",
+          "The screen shown while the machine is off had a power symbol drawn beneath the message. It was part of the picture rather than a control, so it invited people to click the one thing on screen that could not work. It has been removed and the message re-centred.",
       },
     ],
     improvements: [],
@@ -272,51 +272,51 @@ export const RELEASE_NOTES = [
       {
         title: "Monitor presets",
         description:
-          "Display Settings now opens with a single choice: which monitor you are pretending to have. Composite Color for a colour television or composite monitor, RGB Monitor for the sharp separate-signal look, Monochrome Green or Monochrome Amber for the two phosphor tubes, or Pixel Exact for no simulation at all. Each sets the whole picture at once, and the values follow from the real hardware — the composite set gets a dot triad mask and colour fringing, the RGB monitor gets neither because there is no encoded signal to decode, and the monochrome tubes get long persistence and no mask at all, since a mask exists only to keep three beams apart and a monochrome tube has a single one. Every individual slider is still there under Advanced. Presets leave your brightness, contrast, saturation and bezel alone, and adjusting anything a preset covers relabels it as Custom without changing what you set.",
+          "Display Settings opens with a single choice: which monitor you are pretending to have. Composite Color, RGB Monitor, Monochrome Green, Monochrome Amber, or Pixel Exact for no simulation at all. Each sets the whole picture at once, with values that follow from the real hardware. Every individual slider is still there under Advanced. Presets leave your brightness, contrast, saturation and bezel alone.",
       },
       {
         title: "Cursor Keys as joystick is now in the View menu",
         description:
-          "The toggle that makes the arrow keys drive the joystick only existed in the Monitor window's title bar, which is not on screen in the Play, Code or Debug layouts — so in those layouts the setting could not be reached at all. It is now in the View menu as well, and the two stay in step with each other.",
+          "The toggle that makes the arrow keys drive the joystick only existed in the Monitor window's title bar, which is not on screen in the Play, Code or Debug layouts. It is now in the View menu as well, and the two stay in step.",
       },
       {
         title: "A shadow mask you can actually see",
         description:
-          "The Shadow Mask slider was measuring its pattern in screen pixels rather than in the fixed spacing a real mask has, so on a high-resolution display the whole red-green-blue triad spanned three physical pixels and was very nearly invisible — and it changed size if you moved the window to a different monitor. It now keeps a constant apparent size everywhere. There is also a choice of geometry: the vertical stripes it has always drawn, or the dot triad an Apple Monitor //e actually used.",
+          "The Shadow Mask slider measured its pattern in screen pixels rather than the fixed spacing a real mask has, so on a high-resolution display the whole triad spanned three physical pixels and was nearly invisible. It now keeps a constant apparent size everywhere, and you can choose vertical stripes or the dot triad an Apple Monitor //e used.",
       },
     ],
     fixes: [
       {
         title: "Arrow keys stopped working when Cursor Keys was on",
         description:
-          "With the Joystick window's Cursor Keys toggle switched on, the arrow keys drove the joystick and nothing else — anything that navigates with them, such as a ProDOS file selector, a catalogue menu or editing a line of BASIC, simply stopped responding. The arrows were being taken by the joystick and never passed on. They now do both jobs at once: the toggle decides whether the arrows also move the joystick, not whether they still work as keys. Reported by anomixer.",
+          "With the Cursor Keys toggle on, the arrows drove the joystick and nothing else, so a ProDOS file selector, a catalogue menu or editing a line of BASIC stopped responding. They now do both jobs: the toggle decides whether the arrows also move the joystick, not whether they still work as keys. Reported by anomixer.",
       },
       {
         title: "Every key press was being handled twice",
         description:
-          "Each keystroke was picked up by two separate listeners and sent to the emulator twice over. The machine latches a key press, so the second copy made no visible difference and it went unnoticed for a long time — but it meant twice the work for every key typed, and anything attached to a key press happening twice as well.",
+          "Each keystroke was picked up by two listeners and sent to the emulator twice. The machine latches a key press, so the second copy made no visible difference and went unnoticed, but it meant twice the work for every key typed.",
       },
       {
         title: "The BASIC viewer lost track of a running program after loading a state",
         description:
-          "Save a state while a BASIC program was running, load it back, and the BASIC Program Viewer showed the program as idle: no line highlighting, no live variables, no trace. The emulator works out that a program is running by watching for the moment BASIC starts one, and a restored state resumes in the middle of the program, so that moment never came around again. It now works this out from the restored machine itself. Existing saved states load correctly too.",
+          "Save a state while a BASIC program was running, load it back, and the viewer showed the program as idle. The emulator spotted a running program by watching for the moment BASIC starts one, and a restored state resumes in the middle. It now works this out from the restored machine itself, and existing saved states load correctly.",
       },
       {
         title: "Two effects could trigger photosensitive seizures",
         description:
-          "The television static shown when the machine was off rebuilt a full screen of high-contrast noise fifty times a second and varied the brightness of the whole screen twelve times a second on top of that. The Flicker slider did something similar during normal use, holding a random brightness level for a fifteenth of a second at a time. Both sat squarely in the range of flash rates known to trigger seizures, and both exceeded the published limits for how much the brightness of a screen may change and how often. The static has been removed entirely and replaced with a message telling you to switch the machine on. Flicker is now a slow, gentle undulation, which is closer to what a real set does anyway — its brightness drifts as its field rate beats against the mains rather than jumping about. Anyone who had either effect turned up will notice the difference; this is why.",
+          "The television static shown when the machine was off rebuilt a screen of high-contrast noise fifty times a second, with the whole screen's brightness varying twelve times a second on top. The Flicker slider did something similar during use. Both sat in the range of flash rates known to trigger seizures and exceeded the published limits. The static has been removed, and Flicker is now a slow undulation, which is closer to what a real set does anyway.",
       },
       {
         title: "The picture did not follow a change of display",
         description:
-          "Dragging the window from a high-resolution display to an ordinary one, or the other way, left the picture being drawn at the old display's resolution — too soft or needlessly oversampled — until something else happened to resize the window. It now follows the change immediately.",
+          "Dragging the window between a high-resolution display and an ordinary one left the picture drawn at the old resolution, too soft or needlessly oversampled, until something else resized the window. It now follows the change immediately.",
       },
     ],
     improvements: [
       {
         title: "Television static that looks like television static",
         description:
-          "The static shown when the machine is off had a horizontal grain to it — rows of speckle that appeared to slide sideways rather than the shifting snow of a detuned set. The pattern changed each frame by sliding the same speckle across the screen instead of making a fresh one, two parts of it were banded by row on purpose, and the scanlines laid over the top were strong enough to be the most obvious thing on screen. It is now a white field of black grain that is genuinely different every frame, with a faint colour speckle and an occasional drifting interference bar. The Static Noise slider under display settings has had the same treatment, and now adds grain that darkens as well as lightens rather than washing the picture out.",
+          "The static had a horizontal grain to it, rows of speckle that appeared to slide sideways rather than the shifting snow of a detuned set, because each frame slid the same speckle across the screen instead of making a fresh one. It is now a white field of black grain that is genuinely different every frame, with a faint colour speckle and an occasional drifting interference bar.",
       },
       {
         title: "Tidier File menu",
@@ -326,12 +326,12 @@ export const RELEASE_NOTES = [
       {
         title: "Scanlines that thicken with brightness",
         description:
-          "A real picture tube's beam grows wider as it gets brighter, so bright lines are fatter than dark ones and fill more of the gap to their neighbours. It is why white text on a CRT looks bolder than the same text in a screenshot. The scanlines here were a fixed pattern that dimmed everything equally regardless of what was on it, which reads as stripes laid over the picture rather than as a picture made of lines. They now respond to brightness, with a Beam Bloom slider to control how strongly.",
+          "A real picture tube's beam grows wider as it gets brighter, which is why white text on a CRT looks bolder than the same text in a screenshot. The scanlines here were a fixed pattern that dimmed everything equally, reading as stripes laid over the picture rather than a picture made of lines. They now respond to brightness, with a Beam Bloom slider to set how strongly.",
       },
       {
         title: "A no-signal screen instead of snow",
         description:
-          "The television static reworked earlier this week is gone, for the accessibility reasons above. With the machine switched off you now get NO SIGNAL, a line telling you to switch it on, and a power symbol — drawn as though the machine itself were producing it, so it picks up whatever screen curvature, scanlines, colour and phosphor settings you have chosen. It is also more accurate than snow: snow is something a television tuner produces, and a //e is plugged into a monitor that has no tuner. Pull the signal from one of those and you get a black screen.",
+          "The television static reworked earlier this week is gone, for the accessibility reasons above. With the machine off you now get NO SIGNAL, a line telling you to switch it on, and a power symbol, drawn as though the machine were producing it so it picks up your curvature, scanline and phosphor settings. It is also more accurate: snow comes from a tuner, and a //e is plugged into a monitor that has none.",
       },
     ],
   },
@@ -342,39 +342,39 @@ export const RELEASE_NOTES = [
       {
         title: "The Memory Browser only showed a single row",
         description:
-          "Opening the Memory Browser as a floating window showed one row of memory no matter how large you made it. The list works out how many rows to draw by measuring the space available, but that space was being decided by how much had already been drawn — so one row measured as room for one row, and it never recovered. It now fills the window and follows it as you resize. Docked in a workspace it was always fine, which is why it went unnoticed.",
+          "Opening the Memory Browser as a floating window showed one row however large you made it. The list measures the space available to decide how many rows to draw, but that space was decided by how much had already been drawn, so one row measured as room for one row. It now fills the window and follows it as you resize.",
       },
       {
         title: "Run to Cursor never stopped",
         description:
-          "Right-clicking a line and choosing Run to Cursor set the breakpoint and then quietly removed it again a fraction of a second later, so the program ran on forever. The debugger was watching the program counter a few dozen times a second to spot arrival, and in a loop it would catch the target address while the processor was still running and treat that as having arrived. It now waits for the emulator itself to report that it has halted. Step Over and Step Out were leaning on the same unreliable check and are steadier for it.",
+          "Run to Cursor set the breakpoint and quietly removed it a fraction of a second later, so the program ran on forever. The debugger was polling the program counter and, in a loop, would catch the target address while the processor was still running. It now waits for the emulator to report that it has halted. Step Over and Step Out are steadier for the same reason.",
       },
       {
         title: "The installed app did not work offline",
         description:
-          "Installing the emulator as an app appeared to work but it could not start without a network connection. The list of files to store for offline use still named stylesheets that no longer exist under those names, and storing that list fails completely if any single file is missing — so nothing was ever stored. The list is now correct, includes files that were missing outright (the emulator's worker and the screen shaders, both required to start), works out the bundled files for itself so it cannot fall out of date again, and tolerates a missing file rather than giving up on everything.",
+          "Installing the emulator as an app appeared to work but it could not start without a network connection. The list of files to store named stylesheets that no longer exist, and storing that list fails completely if any one file is missing, so nothing was ever stored. The list is now correct, works out the bundled files for itself, and tolerates a missing file.",
       },
       {
         title: "The emulator could freeze after loading a saved state",
         description:
-          "Loading a state left the screen stuck on the restored image with no sound, and nothing typed had any effect until the page was clicked. Restoring used to switch the emulator off and on again, which rebuilds the sound system — and the sound card is what paces the emulator, so when the browser held it back until the next click, the machine sat there doing nothing. A machine that is already on now keeps running through the restore. Loading a state from a file also reported success even when the file could not be read.",
+          "Loading a state left the screen stuck with no sound until the page was clicked. Restoring used to switch the emulator off and on, which rebuilds the sound system, and the sound card is what paces the emulator. A machine that is already on now keeps running through the restore. Loading from a file also reported success when the file could not be read.",
       },
     ],
     improvements: [
       {
         title: "Debug windows no longer slow the machine down",
         description:
-          "The emulator runs on a separate thread, and every question a debug window asked it had to wait in the same queue as the emulation itself — so watching the machine actually slowed it down, sometimes enough to make the sound crackle. The CPU Debugger was the worst offender, asking around 120 separate questions every time it redrew its disassembly, thirty times a second; it now asks once. The disk lights, the Stack Viewer and the Memory Browser were tidied up the same way, and nothing is asked at all while the machine is switched off.",
+          "Every question a debug window asked waited in the same queue as the emulation, so watching the machine slowed it down, sometimes enough to make the sound crackle. The CPU Debugger asked around 120 separate questions each time it redrew, thirty times a second; it now asks once. The disk lights, Stack Viewer and Memory Browser were tidied the same way, and nothing is asked while the machine is off.",
       },
       {
         title: "Smoother picture and less stuttering",
         description:
-          "Each frame of the screen was being copied into a brand new block of memory and handed across to be drawn, roughly fifty megabytes a second of throwaway work that the browser periodically had to stop and clean up — the cause of the occasional hitch. The picture and the sound now travel through memory shared between the threads instead, which also takes the sound out of the main thread's hands so a busy interface can no longer interrupt it. Drawing also happens at the right moment in the frame now rather than just after it.",
+          "Each frame was copied into a brand new block of memory to be drawn, roughly fifty megabytes a second of throwaway work the browser had to stop and clean up. The picture and the sound now travel through memory shared between the threads, which also takes the sound out of the main thread's hands so a busy interface cannot interrupt it.",
       },
       {
         title: "Windows are solid instead of frosted",
         description:
-          "Window and panel backgrounds are now opaque. The frosted glass effect meant the screen behind every open window had to be blurred again for every frame the emulator drew, whether or not anything in the window had changed — expensive with several windows open, and text sat on a busy background. Windows also move and resize more smoothly, as dragging no longer re-measures the page on every mouse movement.",
+          "Window and panel backgrounds are now opaque. The frosted glass effect meant the screen behind every open window was blurred again for every frame the emulator drew, whether or not anything in the window had changed. Windows also move and resize more smoothly.",
       },
     ],
   },
@@ -384,7 +384,7 @@ export const RELEASE_NOTES = [
       {
         title: "Share a link that opens with a disk already loaded",
         description:
-          "Add a disk image URL to the address and the emulator starts with it in the drive: ?disk= for drive 1, ?disk2= for drive 2, ?hd= and ?hd2= for the SmartPort devices. Images hosted alongside the emulator can use a plain path, such as ?disk=/disks/demo.dsk. Disks loaded this way are not saved to your browser storage or your Recent list, and autosave pauses for the session, so a link someone sends you never replaces the disks in your own drives — open the plain address again and everything is as you left it. The file's host has to allow other sites to read it, which GitHub, Google Drive and Dropbox do but most classic archive mirrors do not; where a URL has no filename, ?name= supplies one, which .nib and .2mg images need.",
+          "Add a disk image URL to the address and the emulator starts with it in the drive: ?disk= for drive 1, ?disk2= for drive 2, ?hd= and ?hd2= for the SmartPort. Disks loaded this way are not saved to your browser storage or Recent list, and autosave pauses for the session, so a shared link never replaces the disks in your own drives. Where a URL has no filename, ?name= supplies one.",
       },
     ],
     fixes: [],
@@ -392,7 +392,7 @@ export const RELEASE_NOTES = [
       {
         title: "Expansion slot hints follow Apple's slot assignments",
         description:
-          "The hints beside each slot now match Apple's documented conventions — slot 1 printer, slot 2 modem, slot 4 mouse, slot 5 3.5\" drives, slot 7 hard disk — instead of listing secondary uses first. Slot 7 no longer suggests a RAM card, which the emulator does not offer.",
+          "The hints beside each slot now match Apple's documented conventions: slot 1 printer, slot 2 modem, slot 4 mouse, slot 5 3.5\" drives, slot 7 hard disk. Slot 7 no longer suggests a RAM card, which the emulator does not offer.",
       },
       {
         title: "SmartPort now starts in slot 7 and Thunderclock in slot 5",
@@ -408,7 +408,7 @@ export const RELEASE_NOTES = [
       {
         title: "Apple buttons could stick down",
         description:
-          "Releasing right Alt while Ctrl was held cleared the wrong button, and holding a key while switching to another window never released it at all — either way the button stayed pressed until it was tapped again. Key handling now derives the buttons from which keys are actually held rather than toggling them, so a missed or misreported release cannot latch one on. Note that macOS browsers report nothing when one of two held Option keys is released, so that button stays down until the second key is released; this cannot be detected by a web page.",
+          "Releasing right Alt while Ctrl was held cleared the wrong button, and holding a key while switching windows never released it. The buttons are now derived from which keys are actually held rather than toggled. Note that macOS browsers report nothing when one of two held Option keys is released, which a web page cannot detect.",
       },
       {
         title: "Left and right Alt now select different Apple keys",
@@ -465,7 +465,7 @@ export const RELEASE_NOTES = [
       {
         title: "Joystick window shows live button state",
         description:
-          "The PB0 and PB1 indicators now light for Open and Closed Apple however they are pressed — keyboard, on-screen button, or gamepad. Previously they only responded to clicking the on-screen buttons, so keyboard presses showed nothing.",
+          "The PB0 and PB1 indicators now light for Open and Closed Apple however they are pressed, by keyboard, on-screen button or gamepad. Previously only the on-screen buttons registered.",
       },
       {
         title: "Faster BASIC variable inspector",
@@ -501,7 +501,7 @@ export const RELEASE_NOTES = [
       {
         title: "Reading unformatted tracks no longer freezes the drive",
         description:
-          "When the head is parked over an empty or unformatted track — as some protection checks do by seeking to the inner head stop — the drive now returns random weak-bit noise like real hardware instead of a frozen data register. Fixes disks such as Elite that hung after seeking to track 39.",
+          "With the head parked over an empty or unformatted track, as some protection checks arrange by seeking to the inner head stop, the drive now returns random weak-bit noise like real hardware instead of a frozen data register. Fixes disks such as Elite that hung after seeking to track 39.",
       },
     ],
     improvements: [],
@@ -708,7 +708,7 @@ export const RELEASE_NOTES = [
       {
         title: "AI Agent integration",
         description:
-          "Full AI agent control via Model Context Protocol (MCP) and AG-UI event protocol. Agents can manage the emulator, load disks and hard drive images, read/write BASIC programs, assemble code, browse disk files, and configure expansion slots — all programmatically.",
+          "Full AI agent control through the Model Context Protocol and the AG-UI event protocol. Agents can manage the emulator, load disks and hard drive images, read and write BASIC programs, assemble code, browse disk files, and configure expansion slots.",
       },
       {
         title: "Agent version checking",
@@ -740,7 +740,7 @@ export const RELEASE_NOTES = [
       {
         title: "Condition-only rules",
         description:
-          "Add breakpoint rules that aren't tied to a specific line — they evaluate on every BASIC statement and break wherever the condition becomes true. Access via the 'if...' button in the breakpoint toolbar.",
+          "Breakpoint rules that are not tied to a line. They evaluate on every BASIC statement and break wherever the condition becomes true. Added with the 'if...' button in the breakpoint toolbar.",
       },
       {
         title: "Breakpoint trigger indicators",
@@ -752,7 +752,7 @@ export const RELEASE_NOTES = [
       {
         title: "BASIC editor gutter scroll",
         description:
-          "The breakpoint gutter no longer scrolls independently of the editor — it stays locked to the editor content.",
+          "The breakpoint gutter no longer scrolls independently of the editor. It stays locked to the editor content.",
       },
       {
         title: "2D array breakpoint formula",
@@ -824,7 +824,7 @@ export const RELEASE_NOTES = [
       {
         title: "Click-to-focus windows",
         description:
-          "Clicking an unfocused window now only brings it to front — buttons and inputs don't activate until the window has focus.",
+          "Clicking an unfocused window now only brings it to front. Buttons and inputs do not activate until the window has focus.",
       },
       {
         title: "Window switcher completeness",

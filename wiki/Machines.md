@@ -21,7 +21,7 @@ There are four: the **Apple //e**, the **Apple II Plus**, the **Apple //c** and 
 
 ## Choosing a Machine
 
-The badge to the right of the Apple logo is a live control, not decoration. Click it and a menu lists every machine the build knows about, each drawn with its own picture, its CPU, memory and column count, a tick against the one in use, and a note against any whose ROMs are missing.
+The badge to the right of the Apple logo is a live control, not decoration. Click it and a menu lists every machine, each drawn with its own picture, its CPU, memory and column count, and a tick against the one in use. Every machine is ready to run: their ROMs are part of the build, so there is nothing to supply and nothing to set up.
 
 The badge wears the machine's own logotype rather than the name you would write in a sentence. A II Plus is badged `][`, because rendering "II+" in that heavy oblique face produces "//+", a designation Apple never used.
 
@@ -197,7 +197,7 @@ Save states are per machine because a state only restores into the machine that 
 
 ## ROMs
 
-The //e's and the //c's ROMs are part of the build. **The Apple II Plus and Apple IIgs ROMs are not distributed with the emulator** and have to be supplied before building.
+**Every machine's ROMs are part of the build**, so all four run out of the box. What follows is only of interest if you are building the emulator yourself and want to substitute a different dump.
 
 A II Plus motherboard carries six 2KB ROMs in sockets D0 to F8 covering `$D000-$FFFF`: five of Applesoft and the Autostart monitor at `$F800`. Supply either those six images or one pre-combined 12KB image, plus the 2KB character generator:
 
@@ -219,7 +219,7 @@ The IIgs takes a ROM 01 image, either as its two socket ROMs or pre-combined:
 
 A ROM image's banks can be either way round, and the loader asks rather than assumes: it looks for the emulation reset vector, which every IIgs ROM has at `$FF:FFFC`. Get it wrong and the machine resets to `$00:0000`.
 
-Put them in `roms/` and rebuild. Without them the machine is still fully described and still listed in the menu, but is marked **unavailable** — a machine that could never reach a prompt is not offered rather than failing silently.
+They live in `roms/` and are embedded into the WebAssembly binary at compile time.
 
 ## How It Works
 
