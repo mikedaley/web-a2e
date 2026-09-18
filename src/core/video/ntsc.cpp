@@ -60,7 +60,11 @@ std::vector<double> boxcar(int n) {
 }
 
 // Hann-windowed sinc low pass, normalised to unity DC gain.
-std::vector<double> hannSinc(int len, double cutoffHz) {
+//
+// Unused since the luma path stopped cascading one on top of its boxcar (see
+// lumaKernel), and kept because it is the tool for shaping a response without
+// disturbing a notch, which is what any future change here will want.
+[[maybe_unused]] std::vector<double> hannSinc(int len, double cutoffHz) {
   std::vector<double> h(static_cast<size_t>(len));
   const double c = (len - 1) / 2.0;
   double sum = 0.0;
@@ -90,9 +94,30 @@ std::array<double, WINDOW> centre(const std::vector<double> &h) {
 }
 
 std::array<double, WINDOW> lumaKernel() {
-  // One subcarrier cycle of integration, cascaded with a 4 MHz low pass:
-  // 14 taps, roughly 1.6 MHz of luma bandwidth, hard zeros at 3.58 and 7.16 MHz.
-  return centre(convolve(boxcar(4), hannSinc(11, 4.0e6)));
+  // One subcarrier cycle of integration, and nothing else: four taps, with
+  // hard zeros at 3.58 and 7.16 MHz.
+  //
+  // This used to be cascaded with an 11-tap 4 MHz low pass, which is where a
+  // composite picture's extra softness came from. The two filters agree to
+  // within a decibel below 3 MHz, so the cascade bought nothing in the band
+  // that carries the shape of a character; what it did was take 13 to 30 dB
+  // out of the 4 to 6 MHz band, which is where the *edges* live. Text came
+  // out blurred to a degree no composite monitor ever managed.
+  //
+  //             2MHz    3MHz    4MHz    5MHz    6MHz
+  //   cascade   -4.92  -15.77  -24.62  -26.15  -45.88
+  //   boxcar    -4.76  -14.02  -18.62  -11.49  -13.16
+  //
+  // Dropping it is also the more faithful model. A period set's luma path was
+  // a trap at the subcarrier, not a brick wall at 4 MHz, and the boxcar *is*
+  // that trap: averaging over exactly one colour cycle annihilates the cycle
+  // and its second harmonic, which is the whole job. Nothing above 7.16 MHz
+  // exists in the input to leak back in, since that is the dot rate's Nyquist.
+  //
+  // The centroid is unchanged at 6.5 dots, so luma keeps the same group delay
+  // against chroma that it always had, and a boxcar's taps are all positive,
+  // so there is no ringing to overshoot an edge.
+  return centre(boxcar(4));
 }
 
 std::array<double, WINDOW> chromaKernel() {

@@ -1245,9 +1245,17 @@ Four things here are load-bearing:
 colour *is* a subcarrier-frequency pattern, so subcarrier leaking into luma makes
 greys ripple; leakage at the second harmonic makes a colour's brightness depend
 on which subcarrier phase a dot lands on, which shows up as faint banding. A
-four-tap boxcar — integrate exactly one colour cycle — annihilates both, and is
-cascaded with a windowed sinc for the rest of the response. Do not replace it
-with a plain low pass.
+four-tap boxcar, integrating exactly one colour cycle, annihilates both, and it
+is now the whole filter. Do not replace it with a plain low pass, and do not
+cascade anything on top of it without a reason: it used to be followed by an
+11-tap 4 MHz windowed sinc, and that cascade was where a composite picture's
+extra softness came from. The two agree to within a decibel below 3 MHz, so the
+sinc bought nothing where the shape of a character lives; what it did was take
+13 to 30 dB out of the 4 to 6 MHz band, which carries the edges. The boxcar
+alone is also the more faithful model, because a period set's luma path was a
+trap at the subcarrier rather than a brick wall at 4 MHz, and nothing above
+7.16 MHz exists in the input to leak back in. `hannSinc` is kept, unused and
+marked so, because it is the right tool if a future change does need shaping.
 
 **The calibration constants in `ntsc.hpp` were fitted, not chosen.**
 `BURST_PHASE`, `CHROMA_GAIN` and `LUMA_GAMMA` come from a least-squares fit
