@@ -39,6 +39,16 @@ export const RELEASE_NOTES = [
           "All seven sockets accept a Mockingboard, Mouse Card, Thunderclock, Super Serial Card, Parallel Card or SmartPort. Each slot also has a device built into the machine, and only one of the two answers at a time, so the Expansion Slots window carries the Control Panel's per-slot setting beside each socket. Your choice survives a reboot, which the firmware would otherwise overwrite.",
       },
       {
+        title: "Composite is sharper",
+        description:
+          "The luma path of the composite decoder was a four tap boxcar followed by a 4 MHz low pass. The boxcar is the part that matters, since averaging over exactly one colour cycle is what stops greys rippling and colours banding; the low pass was taking 13 to 30 dB out of the band that carries the edges of a character, and blurring the picture further than any real monitor did. It is gone. A period set's luma path was a trap at the subcarrier, not a brick wall at 4 MHz.",
+      },
+      {
+        title: "An Edge Sharpness slider",
+        description:
+          "Under Display Settings > Advanced. When the picture is magnified, each source dot is normally ramped across two to five output pixels by the browser's bilinear filter. This slider confines that ramp to about one output pixel instead, so dots keep hard edges without the shimmering that switching to plain nearest causes. It makes the most difference on the IIgs, whose picture is not band limited by a composite decoder.",
+      },
+      {
         title: "A long print no longer runs off the end of the paper",
         description:
           "The paper now scrolls through a window of live pages, so a print of any length comes out whole. Exports cover the whole job rather than whatever was still on screen.",
@@ -59,6 +69,11 @@ export const RELEASE_NOTES = [
         title: "A GS/OS print came out sliced in half",
         description:
           "The ImageWriter driver sets the paper feed for each 8-dot band, and that escape sequence was breaking the carriage return and line feed pairing, so every band fed twice.",
+      },
+      {
+        title: "The US and UK character set switch showed the wrong side",
+        description:
+          "The switch reads US on the left and UK on the right, and it was lighting the opposite label to the set actually in use. The right glyphs were always loaded, so only the switch was wrong. It was also only half hidden on machines with a single character set, leaving the words US and UK in the title bar with nothing between them, and on a IIgs, which is always US, it showed UK permanently.",
       },
       {
         title: "The screen could refuse to draw at all",
