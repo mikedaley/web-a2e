@@ -214,6 +214,11 @@ class AppleIIeEmulator {
       // Set up mouse handler for Apple Mouse Interface Card
       this.mouseHandler = new MouseHandler(this.wasmModule);
       this.mouseHandler.init();
+      // The reminder is advice about a click the visitor has not made yet, so
+      // it goes the moment capture is taken and comes back when it is released,
+      // and it follows a mouse appearing or disappearing with the slots.
+      this.mouseHandler.onLockChanged = () => this.updateMouseReminder();
+      this.mouseHandler.onEnabledChanged = () => this.updateMouseReminder();
 
       // Set up window manager
       this.windowManager = new WindowManager();
@@ -692,6 +697,22 @@ class AppleIIeEmulator {
     } else {
       this.mouseHandler.disable();
     }
+    this.updateMouseReminder();
+  }
+
+  /**
+   * Show the mouse capture reminder whenever it has something to say.
+   *
+   * That is: a running machine that has a mouse, with the pointer not already
+   * captured. It is deliberately not a one-off — ⌥-click is not a gesture
+   * anybody arrives knowing — so it returns every session until the visitor
+   * presses its own "Don't show again", which is remembered.
+   */
+  updateMouseReminder() {
+    if (!this.reminderController) return;
+    const wanted =
+      this.running && !!this.mouseHandler?.enabled && !this.mouseHandler?.locked;
+    this.reminderController.showMouseReminder(wanted);
   }
 
   /**
@@ -767,6 +788,7 @@ class AppleIIeEmulator {
     this.running = true;
     this.renderer.setNoSignal(false);
     this.audioDriver.start();
+    this.updateMouseReminder();
     if (this.uiController) {
       this.uiController.updatePowerButton(true);
     }
@@ -778,6 +800,7 @@ class AppleIIeEmulator {
 
     this.running = false;
     this.audioDriver.stop();
+    this.updateMouseReminder();
 
     this.wasmModule._stopDiskMotor();
 

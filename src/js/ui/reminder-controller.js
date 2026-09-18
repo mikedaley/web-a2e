@@ -5,6 +5,12 @@
  *  Mike Daley <michael_daley@icloud.com>
  */
 
+/** The user's "Don't show again" for the mouse capture reminder. */
+const MOUSE_REMINDER_DISMISSED_KEY = "a2e-mouse-reminder-dismissed";
+
+/** How far above the bottom of the picture the mouse reminder sits. */
+const MOUSE_REMINDER_INSET_PX = 24;
+
 /**
  * ReminderController - Manages floating reminder tooltips
  * Handles power, resize, and drives toggle reminders with positioning and persistence
@@ -14,6 +20,15 @@ export class ReminderController {
   constructor() {
     this.isPowerReminderVisible = false;
     this.isBasicReminderVisible = false;
+    this.isMouseReminderVisible = false;
+    this._followHandle = 0;
+
+    this._nameTheCaptureKey();
+
+    const dismiss = document.getElementById("btn-mouse-reminder-dismiss");
+    if (dismiss) {
+      dismiss.addEventListener("click", () => this.dismissMouseReminder());
+    }
 
     window.addEventListener("resize", () => this.repositionAll());
   }
@@ -125,6 +140,123 @@ export class ReminderController {
     localStorage.setItem("a2e-basic-reminder-dismissed", "true");
   }
 
+  // Mouse capture reminder (shows while a machine with a mouse is running)
+
+  /**
+   * Name the modifier the visitor's own keyboard has.
+   *
+   * Capture is an Alt-click, and Alt is the key marked Option on a Mac and Alt
+   * everywhere else — telling a Windows visitor to hold Option names a key
+   * their keyboard does not have.
+   */
+  _nameTheCaptureKey() {
+    const el = document.getElementById("mouse-reminder-modifier");
+    if (!el) return;
+    const platform =
+      navigator.userAgentData?.platform || navigator.platform || "";
+    const isMac = /mac/i.test(platform);
+    el.textContent = isMac ? "\u2325 Option" : "Alt";
+  }
+
+  /**
+   * Centre the reminder over the bottom of the picture.
+   *
+   * It is not anchored to a control the way the others are: what it asks for
+   * is a click on the screen, so it sits on the screen, near its bottom edge
+   * and out of the way of whatever the machine is drawing at the top.
+   */
+  repositionMouseReminder() {
+    const reminder = document.getElementById("mouse-reminder");
+    // The canvas, not the monitor frame around it: in the docked layout the
+    // screen is moved into a window of its own and the frame is left empty and
+    // display:none, so its rectangle is all zeroes and the reminder landed
+    // above the top of the page.
+    const screen = document.getElementById("screen");
+    if (!reminder || !screen) return;
+
+    const rect = screen.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const width = reminder.offsetWidth;
+    const padding = 16;
+
+    let left = rect.left + rect.width / 2 - width / 2;
+    left = Math.max(padding, Math.min(left, window.innerWidth - width - padding));
+
+    reminder.style.left = `${left}px`;
+    reminder.style.top = `${rect.bottom - reminder.offsetHeight - MOUSE_REMINDER_INSET_PX}px`;
+  }
+
+  /**
+   * Show or hide the mouse capture reminder.
+   *
+   * Unlike the power reminder this one comes back every session — capturing
+   * the mouse is a keystroke nobody guesses and few remember — which is why it
+   * carries its own "Don't show again" button. That choice is the only thing
+   * that stops it.
+   */
+  showMouseReminder(show) {
+    const reminder = document.getElementById("mouse-reminder");
+    if (!reminder) return;
+
+    if (show && localStorage.getItem(MOUSE_REMINDER_DISMISSED_KEY)) {
+      return;
+    }
+
+    if (show) {
+      if (this.isMouseReminderVisible) return;
+      this._showReminder(
+        reminder,
+        () => this.repositionMouseReminder(),
+        "isMouseReminderVisible",
+      );
+      this._followScreen();
+    } else {
+      this.isMouseReminderVisible = false;
+      reminder.classList.add("hidden");
+    }
+  }
+
+  /**
+   * Keep the reminder on the picture while it is shown.
+   *
+   * The screen lives in a window the user can drag as well as resize, and a
+   * drag fires no resize event, so the reminder follows the canvas rectangle
+   * itself. The loop runs only while the reminder is up and does nothing until
+   * the rectangle actually moves.
+   */
+  _followScreen() {
+    if (this._followHandle) return;
+    let last = "";
+    const tick = () => {
+      if (!this.isMouseReminderVisible) {
+        this._followHandle = 0;
+        return;
+      }
+      const screen = document.getElementById("screen");
+      if (screen) {
+        const rect = screen.getBoundingClientRect();
+        const key = `${rect.left},${rect.bottom},${rect.width}`;
+        if (key !== last) {
+          last = key;
+          this.repositionMouseReminder();
+        }
+      }
+      this._followHandle = requestAnimationFrame(tick);
+    };
+    this._followHandle = requestAnimationFrame(tick);
+  }
+
+  /** Hide it for good, and remember that across sessions. */
+  dismissMouseReminder() {
+    this.showMouseReminder(false);
+    localStorage.setItem(MOUSE_REMINDER_DISMISSED_KEY, "true");
+  }
+
+  /** Has the user asked never to see the mouse reminder again? */
+  isMouseReminderDismissed() {
+    return !!localStorage.getItem(MOUSE_REMINDER_DISMISSED_KEY);
+  }
+
   /**
    * Reposition all visible reminders (call after resize)
    */
@@ -134,6 +266,9 @@ export class ReminderController {
     }
     if (this.isBasicReminderVisible) {
       this.repositionBasicReminder();
+    }
+    if (this.isMouseReminderVisible) {
+      this.repositionMouseReminder();
     }
   }
 }

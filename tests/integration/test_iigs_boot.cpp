@@ -1192,3 +1192,54 @@ TEST_CASE("The Control Panel's slot setting outlasts the firmware",
   machine.setSlotInternal(4, true);
   REQUIRE(machine.isSlotInternal(4));
 }
+
+TEST_CASE("A IIgs has a game port, and the host can drive it", "[iigs][gameport]") {
+  if (!romAvailable()) {
+    WARN("IIgs ROM not built in; skipping the game port test");
+    return;
+  }
+
+  IIgsMachine machine;
+  machine.init(roms::ROM_SYSTEM_IIGS, roms::ROM_SYSTEM_IIGS_SIZE,
+               roms::ROM_CHAR, roms::ROM_CHAR_SIZE);
+
+  SECTION("a paddle's timer runs for as long as the value says") {
+    // $C070 starts the timers and $C064 reads one: bit 7 stays high while the
+    // timer is running, so software counts the loops until it drops. A machine
+    // that never received the value read the same number whatever the stick
+    // was doing, which is a joystick that does not move.
+    machine.setPaddleValue(0, 255);
+    REQUIRE(machine.getPaddleValue(0) == 255);
+
+    machine.memory().read(0x00C070); // PTRIG
+    REQUIRE((machine.memory().read(0x00C064) & 0x80) != 0);
+
+    // Let the timer expire. It is counted on the Mega II's clock, which runs
+    // as the machine does.
+    for (int i = 0; i < 4000 && (machine.memory().read(0x00C064) & 0x80); i++) {
+      machine.step();
+    }
+    REQUIRE((machine.memory().read(0x00C064) & 0x80) == 0);
+
+    // A centred stick's timer expires sooner than a stick pushed to the stop.
+    machine.setPaddleValue(0, 0);
+    machine.memory().read(0x00C070);
+    REQUIRE((machine.memory().read(0x00C064) & 0x80) == 0);
+  }
+
+  SECTION("and its buttons are the Apple keys' own lines") {
+    REQUIRE((machine.memory().read(0x00C061) & 0x80) == 0);
+    machine.setButton(0, true);
+    REQUIRE((machine.memory().read(0x00C061) & 0x80) != 0);
+    machine.setButton(0, false);
+    REQUIRE((machine.memory().read(0x00C061) & 0x80) == 0);
+
+    machine.setButton(1, true);
+    REQUIRE((machine.memory().read(0x00C062) & 0x80) != 0);
+    machine.setButton(1, false);
+
+    machine.setButton(2, true);
+    REQUIRE((machine.memory().read(0x00C063) & 0x80) != 0);
+    machine.setButton(2, false);
+  }
+}

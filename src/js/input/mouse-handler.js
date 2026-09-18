@@ -18,6 +18,10 @@ export class MouseHandler {
     this.canvas = null;
     this.enabled = false;
     this.locked = false;
+    /** Called with the new lock state whenever capture is taken or released. */
+    this.onLockChanged = null;
+    /** Called with the new enabled state when a mouse appears or goes away. */
+    this.onEnabledChanged = null;
 
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
@@ -36,11 +40,15 @@ export class MouseHandler {
   }
 
   enable() {
+    const changed = !this.enabled;
     this.enabled = true;
+    if (changed) this.onEnabledChanged?.(true);
   }
 
   disable() {
+    const changed = this.enabled;
     this.enabled = false;
+    if (changed) this.onEnabledChanged?.(false);
     if (this.locked) {
       document.exitPointerLock();
     }
@@ -79,6 +87,7 @@ export class MouseHandler {
       document.removeEventListener("mousedown", this._onMouseDown);
       document.removeEventListener("mouseup", this._onMouseUp);
     }
+    this.onLockChanged?.(this.locked);
   }
 
   _onMouseMove(event) {

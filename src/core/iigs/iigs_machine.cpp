@@ -205,10 +205,15 @@ IIgsMachine::IIgsMachine(size_t fastRamSize)
   memory_->megaII().setAnyKeyDownCallback(
       [this]() { return memory_->adb().isAnyKeyDown(); });
   memory_->megaII().setButtonCallback([this](int button) -> uint8_t {
-    // The Apple keys, which are buttons rather than keys on every Apple II.
-    if (button == 0) return keyboard_->isOpenApplePressed() ? 0x80 : 0x00;
-    if (button == 1) return keyboard_->isClosedApplePressed() ? 0x80 : 0x00;
-    return 0x00;
+    // The Apple keys and the game port's buttons are the same three lines, so
+    // either one pressed reads as pressed — which is why a joystick's fire
+    // button works in software that asks about Open Apple, and why holding an
+    // Apple key looks like a fire button.
+    if (button < 0 || button > 2) return 0x00;
+    bool pressed = buttonState_[static_cast<size_t>(button)];
+    if (button == 0) pressed = pressed || keyboard_->isOpenApplePressed();
+    if (button == 1) pressed = pressed || keyboard_->isClosedApplePressed();
+    return pressed ? 0x80 : 0x00;
   });
   video_->setCycleCallback([this]() { return memory_->slowCycles(); });
 
@@ -669,6 +674,19 @@ void IIgsMachine::handleRawKeyUp(int browserKeycode, bool shift, bool ctrl,
 void IIgsMachine::keyDown(int keycode) {
   memory_->adb().queueKeyboard(static_cast<uint8_t>(keycode & 0x7F));
   memory_->adb().setAnyKeyDown(true);
+}
+
+void IIgsMachine::setPaddleValue(int paddle, int value) {
+  memory_->megaII().setPaddleValue(paddle, static_cast<uint8_t>(value & 0xFF));
+}
+
+int IIgsMachine::getPaddleValue(int paddle) const {
+  return memory_->megaII().getPaddleValue(paddle);
+}
+
+void IIgsMachine::setButton(int button, bool pressed) {
+  if (button < 0 || button > 2) return;
+  buttonState_[static_cast<size_t>(button)] = pressed;
 }
 
 void IIgsMachine::mouseMove(int dx, int dy) {

@@ -570,3 +570,39 @@ div.modal.hidden {
     border: 1px solid var(--accent-red);
     color: var(--accent-red);
 }
+
+/*
+ * Mouse capture reminder.
+ *
+ * It sits over the picture rather than pointing at a control, because what it
+ * asks for is a click on the screen itself; so it has no arrow, and it does
+ * not bob — a moving hint over live video reads as a fault. Its dismiss button
+ * is the one part that takes clicks, the reminder itself staying transparent
+ * to them so it never eats a capture click aimed at the screen behind it.
+ */
+.floating-reminder.mouse-reminder {
+    animation: fadeIn 0.5s ease-out;
+}
+
+.floating-reminder.mouse-reminder .reminder-content {
+    gap: var(--space-md);
+}
+
+.reminder-dismiss {
+    pointer-events: auto;
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--accent-blue);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.7rem;
+    padding: 2px var(--space-sm);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.reminder-dismiss:hover {
+    background: var(--accent-blue);
+    color: var(--bg-primary);
+}

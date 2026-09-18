@@ -723,6 +723,30 @@
                 <div class="reminder-arrow"></div>
             </div>
 
+            <!-- Mouse capture reminder (shown over the screen on power on) -->
+            <div id="mouse-reminder" class="floating-reminder mouse-reminder hidden">
+                <div class="reminder-content">
+                    <div class="reminder-text">
+                        <span class="reminder-hint"
+                            >Mouse: hold
+                            <strong id="mouse-reminder-modifier"
+                                >&#8997; Option</strong
+                            >
+                            and click the screen to capture it,
+                            <strong>Esc</strong> to release</span
+                        >
+                    </div>
+                    <button
+                        type="button"
+                        id="btn-mouse-reminder-dismiss"
+                        class="reminder-dismiss"
+                        title="Stop showing this reminder"
+                    >
+                        Don't show again
+                    </button>
+                </div>
+            </div>
+
             <div id="basic-reminder" class="floating-reminder hidden">
                 <div class="reminder-content">
                     <div class="reminder-text">

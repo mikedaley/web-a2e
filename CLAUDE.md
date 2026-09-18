@@ -544,6 +544,17 @@ nothing inserted the SmartPort has no ROM and that firmware shows through.
 its entry point rather than reading it — a 6502 has already advanced the program
 counter by then and a 65816 has not, and the card must not guess.
 
+**A IIgs has a game port like every other Apple II, and the host drives it
+through the same three calls.** The paddle timers are the Mega II's, so
+`IIgsMachine::setPaddleValue` hands the value to the MMU inside it, and
+`setButton` holds one of the three pushbutton lines down — ORed with the Apple
+keys in the button callback, because `$C061`/`$C062` are one line each rather
+than two. The bindings for all three used to answer only `g_emulator`, which
+returns early while a IIgs is running, so a joystick, a gamepad and the
+Joystick window's cursor keys moved nothing at all on that machine. The Sirius
+Joyport is still the 8-bit machines' alone: it is selectable on a IIgs and the
+core has nowhere to put it.
+
 **A mouse report's two top bits are two buttons.** `$C024` gives X then Y,
 seven bits of movement each; the X byte's bit 7 is button 1, which the mouse
 here does not have, and the Y byte's is button 0. The same button in both

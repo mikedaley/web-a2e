@@ -575,20 +575,33 @@ int charToAppleKey(int charCode) {
   return a2e::charToAppleKey(charCode);
 }
 
+// The game port is on the back of every machine here, a IIgs included: its
+// paddle timers are the Mega II's and its buttons share $C061/$C062 with the
+// Apple keys. Routing these to g_emulator alone left a IIgs with a joystick
+// and cursor keys that moved nothing.
 EMSCRIPTEN_KEEPALIVE
 void setButton(int button, bool pressed) {
+  if (g_iigs) {
+    g_iigs->setButton(button, pressed);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->setButton(button, pressed);
 }
 
 EMSCRIPTEN_KEEPALIVE
 void setPaddleValue(int paddle, int value) {
+  if (g_iigs) {
+    g_iigs->setPaddleValue(paddle, value);
+    return;
+  }
   REQUIRE_EMULATOR();
   g_emulator->setPaddleValue(paddle, value);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int getPaddleValue(int paddle) {
+  if (g_iigs) return g_iigs->getPaddleValue(paddle);
   REQUIRE_EMULATOR_OR(128);
   return g_emulator->getPaddleValue(paddle);
 }

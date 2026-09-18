@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include <array>
 #include <functional>
 #include <cstdint>
 #include <memory>
@@ -289,6 +290,17 @@ public:
   /** An already-translated Apple II key code. */
   void keyDown(int keycode);
 
+  /**
+   * The game port, which a IIgs has on the back like every Apple II.
+   *
+   * The paddle timers are the Mega II's, so the values go there; the buttons
+   * are shared with the Apple keys on $C061/$C062, exactly as they are on a
+   * //e, so either one pressed reads as pressed.
+   */
+  void setPaddleValue(int paddle, int value);
+  int getPaddleValue(int paddle) const;
+  void setButton(int button, bool pressed);
+
   /** Mouse movement and its button, which reach the machine through the ADB. */
   void mouseMove(int dx, int dy);
   void mouseButton(bool pressed);
@@ -360,6 +372,8 @@ private:
   std::unique_ptr<Video> video_;
   std::unique_ptr<IIgsVideo> screen_;
   std::unique_ptr<Keyboard> keyboard_;
+  // The game port's three pushbuttons, ORed with the Apple keys on read.
+  std::array<bool, 3> buttonState_ = {false, false, false};
   DiskController *disk_ = nullptr;   // Owned by the Mega II's slot
   SmartPortCard *smartPort_ = nullptr; // ...and so is this
 
