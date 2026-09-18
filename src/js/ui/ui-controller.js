@@ -1231,20 +1231,25 @@ export class UIController {
     // Character set toggle (UK/US) - screen window header
     const screenWindowCharsetToggle = document.getElementById("screen-window-charset-toggle");
 
+    // Checked is UK. The switch reads "US [toggle] UK" and the stylesheet
+    // lights the label on the side the knob is on, so the checkbox has to
+    // agree with that: it was inverted, which left a machine set to US
+    // showing UK lit, and a IIgs, which has no second set and is always US,
+    // showing UK permanently.
     const syncCharsetToggle = (isUK) => {
       this.wasmModule._setUKCharacterSet(isUK);
       localStorage.setItem("a2e-charset", isUK ? "uk" : "us");
-      if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = !isUK;
+      if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = isUK;
     };
 
     // Initialize from saved setting
     const isUKInitial = this.applyCharacterSet();
-    if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = !isUKInitial;
+    if (screenWindowCharsetToggle) screenWindowCharsetToggle.checked = isUKInitial;
 
     // Screen window header toggle listener
     if (screenWindowCharsetToggle) {
       screenWindowCharsetToggle.addEventListener("change", (e) => {
-        syncCharsetToggle(!e.target.checked);
+        syncCharsetToggle(e.target.checked);
       });
     }
   }
@@ -1300,9 +1305,18 @@ export class UIController {
     const supported = machine.caps?.hasUkCharSet !== false;
 
     const toggle = document.getElementById("screen-window-charset-toggle");
-    const row = toggle?.closest("label, .header-toggle, .screen-window-toggle");
+    // The whole switch, not the label immediately around the checkbox. That
+    // label *is* the knob, so hiding it left the words "US" and "UK" sitting
+    // in the title bar of a machine that has only one character set, with
+    // nothing between them to click.
+    const row = toggle?.closest(".screen-window-charset-switch");
     if (row) row.hidden = !supported;
-    if (toggle) toggle.disabled = !supported;
+    if (toggle) {
+      toggle.disabled = !supported;
+      // A machine with one set is always US, so the switch must not be left
+      // showing whatever the last machine was set to.
+      if (!supported) toggle.checked = false;
+    }
 
     const isUK = supported && localStorage.getItem("a2e-charset") === "uk";
     this.wasmModule._setUKCharacterSet(isUK);
