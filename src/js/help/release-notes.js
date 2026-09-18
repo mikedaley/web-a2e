@@ -16,59 +16,59 @@ export const RELEASE_NOTES = [
       {
         title: "Two more machines: the Apple IIc and the Apple IIgs",
         description:
-          "The badge in the header now offers four computers. The Apple IIc is a //e folded into a slab — the same 65C02, the same 128K, the same timing — and what differs is the back of it. It has no expansion sockets at all, but it decodes every one of the seven slot addresses to a part soldered to its board: two 6551 serial ports in slots 1 and 2, so PR#1 prints and IN#2 listens; the 80-column firmware in slot 3; a mouse in slot 4 that is not a card but two quadrature lines into the IOU, counted one interrupt at a time the way the real one was; and in slot 6 an Integrated Woz Machine driving the drive in its case. The Apple IIgs is not a //e with different numbers — it is a different computer, and it is built from its own parts: a 65C816 on a 24-bit bus running at 2.8 MHz, 256K to 8M of fast RAM that you choose from the Machine menu, a memory controller that shadows the display banks, Super Hi-Res in 320 and 640 with a palette per scanline, an Ensoniq with thirty-two oscillators, an ADB keyboard and mouse, a Z8530 behind two serial ports, and a battery-backed clock whose settings survive a reload because the 256 bytes beside it are kept for you. It boots GS/OS System 6.0.4 to the Finder from the SmartPort built into its slot 5, with a working mouse and sound.",
+          "The IIc is a //e in a slab, with no expansion sockets but every slot address answered by a part soldered to the board: two serial ports, the 80-column firmware, an IOU mouse and an IWM driving the drive in its case. The IIgs is a different computer, built from its own parts: a 65C816 at 2.8 MHz on a 24-bit bus, 256K to 8M of fast RAM, Super Hi-Res, an Ensoniq, ADB, and a battery-backed clock. It boots GS/OS System 6.0.4 to the Finder with a working mouse and sound.",
       },
       {
         title: "Save states know which machine wrote them",
         description:
-          "Every machine's save state now begins with the same twelve bytes — a magic number, a format version, and the identity of the machine that saved it — so the emulator can tell a //e's state from a IIgs's before it hands either to the core. Load a state that was saved on another machine and it offers to switch to that machine first rather than refusing, because a save is a save of a whole computer and asking for it back is asking for that computer back. The autosave is kept per machine for the same reason: one shared slot would have come back empty for every machine but the last one you used. The Save States window labels any slot that belongs to another machine, and says so before it switches.",
+          "Every state now starts with the id of the machine that saved it. Load one from another machine and the emulator offers to switch to that machine first, rather than refusing. Save slots and the autosave are kept per machine.",
       },
       {
         title: "The menus, the picture and the keyboard follow the machine",
         description:
-          "Menu items for hardware the running machine does not have are now hidden rather than greyed out, because a disabled \"Expansion Slots\" on a IIc only raises the question of how to enable it and the answer is a different computer. So the slot window goes on a IIc, which has no sockets; the CPU speed multiplier goes on a IIgs, whose clock is its own; and the printer, serial and SmartPort windows appear only when something in the machine actually provides them. Display settings are now remembered per machine — a //e's soft composite look has no business on a IIgs's RGB desktop — and each machine has its own screen border default, since a IIgs draws a border of its own and the 8-bit machines do not. On the IIgs the Command key is Open Apple and Option is Closed Apple, as on its own keyboard, so GS/OS menu shortcuts work; on the other machines the two Option keys are the Apple keys and Command is left to the browser. View > ⌘ as Open Apple is the switch, and it is remembered per machine.",
+          "Menu items for hardware a machine does not have are hidden rather than greyed out. Display settings are remembered per machine, each with its own screen border default. On the IIgs the Command key is Open Apple, so GS/OS menu shortcuts work; View > \u2318 as Open Apple is the switch.",
       },
       {
-        title: "The debugger asks every machine the same questions",
+        title: "The debugger works on every machine",
         description:
-          "The debug windows now ask once, at the widest shape, and each machine answers as much of it as it has: addresses are twenty-four bits throughout and the registers sixteen, so a 6502's answer is a 65816's with the high halves zero. What a machine does not have — a program bank, a data bank, a direct page, a second processor mode — reads as nothing rather than as an error. Disassembly is chosen by the core rather than the host, because only something holding the live processor can walk a 65816's code stream, whose instruction lengths depend on the register-width flags; that disassembler was checked by running every opcode on the CPU in both widths and both modes and comparing how far the program counter actually moved. Breakpoint conditions, watchpoints, the trace and the beam breakpoints are shared between the machines, and the memory browser gained banks.",
+          "Addresses are 24 bits throughout and registers 16, so a 6502 and a 65816 answer the same windows. Disassembly is chosen by the core, because a 65816's instruction lengths depend on its register-width flags. Breakpoints, watchpoints, the trace and beam breakpoints are shared.",
       },
       {
         title: "The IIgs takes expansion cards",
         description:
-          "A IIgs has seven real expansion sockets, and every one of them also has a device built into the machine — the printer and modem ports, the 80-column firmware, the mouse, the two disk ports, AppleTalk. Only one of the two answers at a time, and on a real machine you choose which in the Control Panel. So the Expansion Slots window now shows both for a IIgs: what is in the socket, and which of the two the machine is listening to. You can fit a Mockingboard, a Mouse Card, a Thunderclock, a Super Serial Card, a Parallel Card or a second SmartPort. Your choice of device sticks, which took some doing: the firmware copies that setting out of battery RAM every time the machine starts, so the emulator holds the slots you have actually set against it while leaving the ones you have not touched entirely alone. Two details are the hardware's rather than ours — switching slots 1, 2, 5, 6 or 7 to a card moves the I/O as well as the firmware, so switching the disk port to an empty socket really does take the drives away; and slot 3 has no setting at all, because there is no bit for it and its firmware follows the same switch a //e uses.",
+          "All seven sockets accept a Mockingboard, Mouse Card, Thunderclock, Super Serial Card, Parallel Card or SmartPort. Each slot also has a device built into the machine, and only one of the two answers at a time, so the Expansion Slots window carries the Control Panel's per-slot setting beside each socket. Your choice survives a reboot, which the firmware would otherwise overwrite.",
       },
       {
         title: "A long print no longer runs off the end of the paper",
         description:
-          "The printer's paper is a canvas, and a browser will only make one so large; a four-page print used to keep the first page and silently lose the rest. The paper now scrolls through a window of live pages, writing the ones that leave it into the job's page store, so a print of any length comes out whole — and an export, whether a PDF or a page-per-file ZIP, is the whole job rather than whatever was still on screen.",
+          "The paper now scrolls through a window of live pages, so a print of any length comes out whole. Exports cover the whole job rather than whatever was still on screen.",
       },
     ],
     fixes: [
       {
-        title: "A GS/OS install disk would stop at the splash screen for ever",
+        title: "A GS/OS install disk would stop at the splash screen",
         description:
-          "Some System 6.0.4 disks reached the \"Welcome to the IIgs\" screen, filled the progress bar most of the way, and then stopped. The machine was not hung — it was waiting for the ADB controller to answer a question it had asked, giving up, and unwinding through an error path that landed the processor in the middle of an instruction, which dropped it into the monitor behind the splash screen you could still see. Three things in the controller were wrong: reading its memory takes a sixteen-bit address and only one byte of it was being taken, so the other was read as a command of its own; commands addressed to the ADB bus rather than to the controller were not decoded at all, so a Listen's two bytes of data were read as commands too; and a Talk was never answered, when even a device that has nothing to say has to say so. All three are fixed, and those disks now boot to the Finder.",
+          "Three faults in the ADB controller: read-memory took one argument byte instead of two, ADB bus commands were not decoded, and a Talk was never answered. The firmware timed out and unwound into the monitor, hidden behind the splash screen. Those disks now boot to the Finder.",
       },
       {
         title: "Saving on a IIgs with two hard drives did nothing at all",
         description:
-          "No message, no slot, nothing — as though the button had not been pressed. A SmartPort card's saved state is its hard drive images, and with two 32MB volumes attached the core needed about 190MB of working memory to write a 72MB state, because each card was serialized into a scratch buffer and then copied again into the state. That went past the limit and stopped the emulator outright, and a stopped emulator answers nothing afterwards — which is why the button appeared dead rather than the save appearing to fail. A card's state is now written straight into the save with no copy, the buffer is reserved for it in one go, and the ceiling has room to spare. A save that does fail now says so.",
+          "A SmartPort card's saved state is its disk images, and writing a 72MB state needed about 190MB because each card was copied twice. That stopped the emulator outright, which is why the button looked dead. Card state is now written straight into the save, and a save that fails says so.",
       },
       {
         title: "A GS/OS print came out sliced in half",
         description:
-          "Printing from the Finder through the ImageWriter driver produced pages cut through by white stripes. The driver rasterises a page into eight-dot bands and sets the exact paper feed for each one, and the escape sequence that sets it was breaking the pairing of carriage return and line feed that plain text needs — so every band fed twice. The two are paired again across a sequence that prints nothing, and a real GS/OS page now comes out solid.",
+          "The ImageWriter driver sets the paper feed for each 8-dot band, and that escape sequence was breaking the carriage return and line feed pairing, so every band fed twice.",
       },
       {
         title: "The screen could refuse to draw at all",
         description:
-          "With the monitor's edge highlight turned up, the renderer threw an error on every frame and drew nothing — a value it needed was being worked out only on the frames that refreshed the rest of the picture's settings.",
+          "With the monitor's edge highlight turned up, the renderer threw an error on every frame and drew nothing.",
       },
       {
-        title: "The IIgs's sound was wrong in three separate ways",
+        title: "The IIgs's sound was wrong in three ways",
         description:
-          "A game's bass came out of one speaker and its melody out of the other, because the Ensoniq's oscillators were being split by the channel they were assigned to; a stock machine has one output pin and hears the sum, and only a stereo card in a slot pulls them apart. The machine was also about 9.5dB quieter than the others at the volume its own firmware sets, because the volume nibble was being applied as a plain ratio rather than as a taper; and that nibble read back as full volume however it had been set, so the Control Panel's slider and the toolbox's own volume call were both working from a machine that was lying to them.",
+          "The Ensoniq's oscillators were split by channel, so a game's bass came out of one speaker and its melody the other; a stock machine hears the sum. The volume nibble was applied as a ratio rather than a taper, leaving the machine 9.5dB quiet, and it read back as full volume however it had been set.",
       },
     ],
   },
