@@ -651,6 +651,7 @@ void IIgsMachine::reportModifiers(bool shift, bool ctrl, bool capsLock,
   //
   // The Apple keys come from the Keyboard, which already tracks them for the
   // pushbuttons a //e reads at $C061-$C062; the rest come with the event.
+  capsLockOn_ = capsLock;
   uint8_t modifiers = 0;
   if (shift) modifiers |= IIgsADB::MOD_SHIFT;
   if (ctrl) modifiers |= IIgsADB::MOD_CONTROL;
@@ -672,7 +673,9 @@ void IIgsMachine::handleRawKeyUp(int browserKeycode, bool shift, bool ctrl,
   memory_->adb().setAnyKeyDown(keyboard_->isAnyKeyDown());
   // A key-up changes the set as much as a key-down does; the browser reports
   // the state after the event, so releasing Control arrives with ctrl false.
-  reportModifiers(shift, ctrl, false, browserKeycode);
+  // Caps Lock is a lock rather than a held key, and the key-up does not carry
+  // it, so the state the last key-down reported stands.
+  reportModifiers(shift, ctrl, capsLockOn_, browserKeycode);
 }
 
 void IIgsMachine::keyDown(int keycode) {

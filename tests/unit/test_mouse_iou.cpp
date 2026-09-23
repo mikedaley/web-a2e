@@ -317,3 +317,23 @@ TEST_CASE("A reset leaves the mouse masked and still", "[mouse]") {
     REQUIRE(mouse.pendingX() == 0);
     REQUIRE_FALSE(mouse.isIRQActive());
 }
+
+TEST_CASE("Shift is on the button's line, and both read low", "[mouse][shift]") {
+    // A //c has the //e's shift-key modification built in: the Shift key is
+    // wired to PB2, the same line as the mouse button, and the Technical
+    // Reference gives both as "0 if it is pressed". With nothing pressed the
+    // line idles high — there is no pull-down on it.
+    MouseIOU mouse;
+    REQUIRE((mouse.read(RD_BUTTON) & 0x80) != 0);
+
+    mouse.setShiftKey(true);
+    REQUIRE((mouse.read(RD_BUTTON) & 0x80) == 0);
+    mouse.setShiftKey(false);
+    REQUIRE((mouse.read(RD_BUTTON) & 0x80) != 0);
+
+    mouse.setButton(true);
+    REQUIRE((mouse.read(RD_BUTTON) & 0x80) == 0);
+    mouse.setShiftKey(true);
+    mouse.setButton(false);
+    REQUIRE((mouse.read(RD_BUTTON) & 0x80) == 0);
+}

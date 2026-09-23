@@ -684,3 +684,53 @@ TEST_CASE("The Joyport lets go of PB0/PB1 across a reset",
     emu.setJoyportStick(0, Joyport::FIRE);
     REQUIRE((emu.readMemory(0xC061) & 0x80) == 0x00);
 }
+
+// ============================================================================
+// The keyboard each machine has
+// ============================================================================
+
+TEST_CASE("A II+ types upper case only, a //e types both", "[emulator][keyboard][machine]") {
+    // An unmodified II+ keyboard has no lower case, and its Applesoft rejects
+    // a lower-case keyword; the profile says so and the keyboard obeys it.
+    Emulator plus(MachineId::AppleIIPlus);
+    REQUIRE(plus.handleRawKeyDown(65, false, false, false, false, false, 0) == 0x41);
+    REQUIRE(plus.handleRawKeyDown(65, true, false, false, false, false, 0) == 0x41);
+
+    Emulator iie(MachineId::AppleIIe);
+    REQUIRE(iie.handleRawKeyDown(65, false, false, false, false, false, 0) == 0x61);
+    REQUIRE(iie.handleRawKeyDown(65, true, false, false, false, false, 0) == 0x41);
+}
+
+TEST_CASE("Shift reaches PB2 on a //c and not on an Enhanced //e", "[emulator][keyboard][machine]") {
+    // The //c wires Shift to $C063 (the mouse button's line), low when held.
+    // The Enhanced //e modelled here has no shift-key mod, so on it $C063 is
+    // the game port's third button and idles low.
+    Emulator iic(MachineId::AppleIIc);
+    iic.init();
+    REQUIRE((iic.peekMemory(0xC063) & 0x80) != 0);
+    iic.handleRawKeyDown(65, true, false, false, false, false, 0);
+    REQUIRE((iic.peekMemory(0xC063) & 0x80) == 0);
+    iic.handleRawKeyUp(65, true, false, false, false, 0);
+    REQUIRE((iic.peekMemory(0xC063) & 0x80) == 0);   // Shift itself still held
+    iic.handleRawKeyUp(16, false, false, false, false, 0);
+    REQUIRE((iic.peekMemory(0xC063) & 0x80) != 0);
+
+    Emulator iie(MachineId::AppleIIe);
+    iie.init();
+    REQUIRE((iie.peekMemory(0xC063) & 0x80) == 0);
+    iie.handleRawKeyDown(65, true, false, false, false, false, 0);
+    REQUIRE((iie.peekMemory(0xC063) & 0x80) == 0);
+}
+
+TEST_CASE("Ctrl+2 alone is Ctrl+@, and $C000 reads 128", "[emulator][keyboard]") {
+    // On a //e the 2 key reads as @ under Control without Shift, so Ctrl+2
+    // is NUL and PEEK(49152) gives 128: the strobe bit over a zero code.
+    Emulator emu;
+    emu.init();
+    REQUIRE(emu.handleRawKeyDown(50, false, true, false, false, false, 0) == 0x00); // Ctrl+2, no Shift
+    REQUIRE(emu.readMemory(0xC000) == 0x80);
+    emu.handleRawKeyUp(50, false, true, false, false, 0);
+    emu.readMemory(0xC010);
+    emu.handleRawKeyDown(50, false, false, false, false, false, 0); // plain 2
+    REQUIRE(emu.readMemory(0xC000) == 0xB2);
+}

@@ -121,10 +121,11 @@ uint8_t MouseIOU::peek(uint8_t reg) const {
     case RD_Y_EDGE:
         return yEdgeFalling_ ? BIT7 : 0x00;
     case RD_BUTTON:
-        // Pressed reads as zero. A //e's shift-key modifier is on the same
-        // address and idles the other way round, which is why a //c with no
-        // mouse attached must still read high here.
-        return button_ ? 0x00 : BIT7;
+        // Pressed reads as zero, and so does a held Shift key: a //c has the
+        // //e's shift-key modification built in, on this same line, and the
+        // Technical Reference gives both as "0 if it is pressed". Neither is
+        // a pull-down, which is why a //c with nothing pressed reads high.
+        return (button_ || shiftKey_) ? 0x00 : BIT7;
     case RD_X1:
         return x1_ ? BIT7 : 0x00;
     case RD_Y1:

@@ -31,6 +31,8 @@ Emulator::Emulator(MachineId machine) : machine_(&machineProfile(machine)) {
   video_ = std::make_unique<Video>(*mmu_);
   audio_ = std::make_unique<Audio>(*machine_);
   keyboard_ = std::make_unique<Keyboard>();
+  // An unmodified II+ cannot type lower case; the profile says so.
+  keyboard_->setUppercaseOnly(!machine_->caps.hasLowercase);
 
   // Create cards, keep raw pointers, then insert into slots. Which drive
   // controller gets built is the machine's: a //e and a II+ take a Disk II
@@ -699,6 +701,10 @@ int Emulator::handleRawKeyDown(int browserKeycode, bool shift, bool ctrl,
   // Update button state from modifier keys
   setButton(0, keyboard_->isOpenApplePressed());   // Open Apple
   setButton(1, keyboard_->isClosedApplePressed()); // Closed Apple
+  // A //c wires Shift to PB2 as well (the //e's shift-key mod, built in), so
+  // the IOU that answers $C063 there is told. The Enhanced //e modelled here
+  // does not have the mod, so on it PB2 stays the game port's third button.
+  if (mouseIOU_) mouseIOU_->setShiftKey(shift);
 
   return result;
 }
@@ -714,10 +720,14 @@ void Emulator::handleRawKeyUp(int browserKeycode, bool shift, bool ctrl,
   // Update button state from modifier keys
   setButton(0, keyboard_->isOpenApplePressed());   // Open Apple
   setButton(1, keyboard_->isClosedApplePressed()); // Closed Apple
+  // The browser reports the state after the event, so releasing Shift itself
+  // arrives with shift false.
+  if (mouseIOU_) mouseIOU_->setShiftKey(shift);
 }
 
 void Emulator::releaseModifiers() {
   keyboard_->releaseModifiers();
+  if (mouseIOU_) mouseIOU_->setShiftKey(false);
   updateAnyKeyDown();
   setButton(0, keyboard_->isOpenApplePressed());
   setButton(1, keyboard_->isClosedApplePressed());

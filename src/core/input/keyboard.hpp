@@ -14,10 +14,16 @@
 namespace a2e {
 
 /**
- * Keyboard - Handles keyboard input translation for Apple IIe
+ * Keyboard - Handles keyboard input translation for the Apple II family
  *
- * Translates raw browser keycodes to Apple II ASCII codes,
- * handling shift, control, and caps lock modifiers.
+ * Translates raw browser keycodes to Apple II ASCII codes, handling shift,
+ * control, and caps lock modifiers, and tracks the two Apple keys.
+ *
+ * The core only ever hears about the Apple keys as the two Alt keys: left is
+ * Open Apple and right is Closed Apple. Which *host* key is which is the
+ * host's decision (on a IIgs the host sends ⌘ as the left Alt); the Meta keys
+ * themselves are ignored here, so a Windows key or a ⌘ that the host chose to
+ * leave to the browser can never press an Apple key by accident.
  */
 class Keyboard {
 public:
@@ -44,8 +50,8 @@ public:
    * @param browserKeycode The browser's keycode (e.g., 65 for 'A')
    * @param shift Shift key is pressed
    * @param ctrl Control key is pressed
-   * @param alt Alt/Option key is pressed (Open Apple)
-   * @param meta Meta/Command key is pressed (Closed Apple)
+   * @param alt Any Alt/Option key is still held (the Apple keys)
+   * @param meta Any Meta/Command key is held; ignored, see the class comment
    * @param capsLock Caps Lock is active
    * @param keyLocation Which side of the keyboard the key is on
    * @return The translated Apple II keycode, or -1 if not mapped
@@ -58,8 +64,8 @@ public:
    * @param browserKeycode The browser's keycode
    * @param shift Shift key is pressed
    * @param ctrl Control key is pressed
-   * @param alt Alt/Option key is pressed
-   * @param meta Meta/Command key is pressed
+   * @param alt Any Alt/Option key is still held
+   * @param meta Any Meta/Command key is held; ignored
    * @param keyLocation Which side of the keyboard the key is on
    */
   void handleKeyUp(int browserKeycode, bool shift, bool ctrl, bool alt,
@@ -76,14 +82,25 @@ public:
   bool isAnyKeyDown() const { return keysHeldCount_ > 0; }
 
   /**
-   * Get the current Open Apple (Alt) button state
+   * Get the current Open Apple (left Alt) button state
    */
   bool isOpenApplePressed() const { return openApplePressed_; }
 
   /**
-   * Get the current Closed Apple (Meta) button state
+   * Get the current Closed Apple (right Alt) button state
    */
   bool isClosedApplePressed() const { return closedApplePressed_; }
+
+  /**
+   * Whether the machine's keyboard can type lower case at all.
+   *
+   * An unmodified II+ keyboard has no lower case: its encoder produces
+   * upper case whatever Shift and the (absent) Caps Lock say, and Applesoft on
+   * it rejects a lower-case keyword. With this set, letters are always sent
+   * as upper case; nothing else about the translation changes.
+   */
+  void setUppercaseOnly(bool uppercaseOnly) { uppercaseOnly_ = uppercaseOnly; }
+  bool isUppercaseOnly() const { return uppercaseOnly_; }
 
   /**
    * Release every modifier the host may be holding.
@@ -94,7 +111,6 @@ public:
   void releaseModifiers() {
     altLeftDown_ = false;
     altRightDown_ = false;
-    metaDown_ = false;
     syncAppleButtons();
     // Ordinary keys go the same way, and for the same reason: a key held while
     // the host loses focus never delivers its key-up, which would otherwise
@@ -126,15 +142,15 @@ private:
 
   /**
    * Apply control modifier to a keycode
-   * @param key ASCII code (should be a-z or A-Z)
-   * @return Control character (0x01-0x1A)
+   * @param key ASCII code: a letter, or one of @ [ \ ] ^ _
+   * @return Control character (0x00-0x1F); anything else is unchanged
    */
   int applyControl(int key) const;
 
   /** Recompute the Apple buttons from the modifier keys currently held. */
   void syncAppleButtons() {
     openApplePressed_ = altLeftDown_;
-    closedApplePressed_ = altRightDown_ || metaDown_;
+    closedApplePressed_ = altRightDown_;
   }
 
   /** Record a key as held / released, keeping the count in step. */
@@ -159,10 +175,11 @@ private:
   // wrong side cannot leave a button stuck on.
   bool altLeftDown_ = false;
   bool altRightDown_ = false;
-  bool metaDown_ = false;
 
   bool openApplePressed_ = false;
   bool closedApplePressed_ = false;
+
+  bool uppercaseOnly_ = false;
 };
 
 /**

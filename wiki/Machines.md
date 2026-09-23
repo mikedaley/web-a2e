@@ -73,6 +73,10 @@ A //e's 8KB character ROM puts bit 0 at the left of a glyph row; a II Plus's 2KB
 
 The UK character set is a second bank inside the //e's larger ROM. A II Plus has nothing there, so the alternate set is simply not offered.
 
+### The keyboard has no lower case, and no Apple keys
+
+An unmodified II+ keyboard cannot type lower case, and Applesoft on it rejects a lower-case keyword, so letters arrive as capitals whatever Shift or Caps Lock say. It has no Open and Closed Apple keys either: `$C061` and `$C062` are the game port's pushbuttons, which is what the two Alt keys work on this machine. See [[Keyboard-Shortcuts]].
+
 ### Slot 0 and the language card
 
 A II Plus motherboard has eight slots, numbered from 0. Slot 0 holds the 16K language card, which is how a 48K machine becomes the 64K one nearly all II Plus software expects. It is fitted as a **fixed** card: the bank switching at `$C080-$C08F` is the same hardware a //e carries on its motherboard, and is not something you could pull out.
@@ -134,6 +138,10 @@ A //e's mouse is a card in a slot: a PIA, a ROM, and a command protocol the firm
 There is no counter in the hardware. Every unit of travel is an interrupt, and the firmware in the system ROM reads the direction and adds one to a position it keeps in slot 4's screen holes; the button is sampled in the same handler's vertical-blanking path. Slot 4 names "mouse" in the slot window for that firmware's sake, but there is nothing in a socket and nothing to remove.
 
 Mouse-driven software — MousePaint, AppleWorks' mouse support — therefore works on a //c with no card installed, and the mouse is captured in the browser exactly as it is on a //e (see [[Input-Devices]]).
+
+### Shift is on the game port
+
+A //c has the //e's shift-key modification built in: the Shift key is wired to PB2, the same line as the mouse button, and `$C063` reads low while either is pressed and high otherwise. The Enhanced //e does not have the modification, so on it `$C063` is only the game port's third button.
 
 ## Apple IIgs
 

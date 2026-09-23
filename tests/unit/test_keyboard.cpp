@@ -94,20 +94,16 @@ TEST_CASE("Alt key sets Open Apple pressed state", "[keyboard][apple]") {
     CHECK(kb.isOpenApplePressed() == true);
 }
 
-TEST_CASE("Meta key sets Closed Apple pressed state", "[keyboard][apple]") {
+TEST_CASE("The Meta keys press no Apple key", "[keyboard][apple]") {
+    // Which host key is an Apple key is the host's decision, and it sends the
+    // answer as an Alt key. A Meta key reaching the core is one the host left
+    // to the browser, so it must not press Closed Apple on the way past.
     Keyboard kb;
+    CHECK(kb.handleKeyDown(91, false, false, false, true, false) == -1);
+    CHECK(kb.handleKeyDown(93, false, false, false, true, false) == -1);
     CHECK(kb.isClosedApplePressed() == false);
-
-    // Left Meta key down (browser keycode 91)
-    kb.handleKeyDown(91, false, false, false, true, false);
-    CHECK(kb.isClosedApplePressed() == true);
-}
-
-TEST_CASE("Right Meta key also sets Closed Apple", "[keyboard][apple]") {
-    Keyboard kb;
-    // Right Meta key down (browser keycode 93)
-    kb.handleKeyDown(93, false, false, false, true, false);
-    CHECK(kb.isClosedApplePressed() == true);
+    CHECK(kb.isOpenApplePressed() == false);
+    CHECK_FALSE(kb.isAnyKeyDown());
 }
 
 // ============================================================================
@@ -127,10 +123,10 @@ TEST_CASE("handleKeyUp clears Open Apple", "[keyboard][keyup]") {
 TEST_CASE("handleKeyUp clears Closed Apple", "[keyboard][keyup]") {
     Keyboard kb;
 
-    kb.handleKeyDown(91, false, false, false, true, false);
+    kb.handleKeyDown(18, false, false, true, false, false, Keyboard::LOCATION_RIGHT);
     CHECK(kb.isClosedApplePressed() == true);
 
-    kb.handleKeyUp(91, false, false, false, true);
+    kb.handleKeyUp(18, false, false, false, false, Keyboard::LOCATION_RIGHT);
     CHECK(kb.isClosedApplePressed() == false);
 }
 
@@ -142,8 +138,8 @@ TEST_CASE("reset clears modifier states", "[keyboard][reset]") {
     Keyboard kb;
 
     // Set both apple buttons
-    kb.handleKeyDown(18, false, false, true, false, false);
-    kb.handleKeyDown(91, false, false, false, true, false);
+    kb.handleKeyDown(18, false, false, true, false, false, Keyboard::LOCATION_LEFT);
+    kb.handleKeyDown(18, false, false, true, false, false, Keyboard::LOCATION_RIGHT);
     CHECK(kb.isOpenApplePressed() == true);
     CHECK(kb.isClosedApplePressed() == true);
 
@@ -347,14 +343,11 @@ TEST_CASE("a key-up naming the wrong side still clears once Alt is released",
     CHECK_FALSE(kb.isClosedApplePressed());
 }
 
-TEST_CASE("Meta keys drive Closed Apple independently of Alt", "[keyboard][buttons]") {
+TEST_CASE("A Meta key-up leaves a held Alt alone", "[keyboard][buttons]") {
     Keyboard kb;
 
-    kb.handleKeyDown(91, false, false, false, true, false);
-    CHECK(kb.isClosedApplePressed());
-
-    // Right Alt also held: releasing Meta must not clear the button.
     altDown(kb, RIGHT);
+    kb.handleKeyDown(91, false, false, true, true, false);
     kb.handleKeyUp(91, false, false, true, false);
 
     CHECK(kb.isClosedApplePressed());
@@ -469,4 +462,76 @@ TEST_CASE("Shift released before the key still clears AKD", "[keyboard][akd]") {
     kb.handleKeyDown(65, true, false, false, false, false);
     kb.handleKeyUp(65, false, false, false, false);
     REQUIRE_FALSE(kb.isAnyKeyDown());
+}
+
+// ============================================================================
+// The rest of the keyboard: Delete, the keypad, Control with punctuation
+// ============================================================================
+
+TEST_CASE("Forward Delete is the Apple's DELETE key", "[keyboard][special]") {
+    // Backspace is left arrow ($08), which is what Applesoft's line editor
+    // wants; the key marked DELETE on a //e, //c and IIgs sends $7F, and
+    // ProDOS editors and GS/OS ask for it.
+    Keyboard kb;
+    CHECK(kb.handleKeyDown(46, false, false, false, false, false) == 0x7F);
+    CHECK(kb.handleKeyDown(8, false, false, false, false, false) == 0x08);
+}
+
+TEST_CASE("The numeric keypad types what the number row types", "[keyboard][keypad]") {
+    Keyboard kb;
+    for (int i = 0; i <= 9; i++) {
+        CHECK(kb.handleKeyDown(96 + i, false, false, false, false, false) == 0x30 + i);
+    }
+    CHECK(kb.handleKeyDown(106, false, false, false, false, false) == 0x2A); // *
+    CHECK(kb.handleKeyDown(107, false, false, false, false, false) == 0x2B); // +
+    CHECK(kb.handleKeyDown(109, false, false, false, false, false) == 0x2D); // -
+    CHECK(kb.handleKeyDown(110, false, false, false, false, false) == 0x2E); // .
+    CHECK(kb.handleKeyDown(111, false, false, false, false, false) == 0x2F); // /
+    // Shift does nothing to a keypad key.
+    CHECK(kb.handleKeyDown(97, true, false, false, false, false) == 0x31);
+    // A keypad key is a key: it asserts AKD like any other.
+    CHECK(kb.isAnyKeyDown());
+}
+
+TEST_CASE("Control with punctuation gives the codes below $20", "[keyboard][ctrl]") {
+    // The keyboard encoder clears bit 6 of @ [ \ ] ^ _ as it does of a
+    // letter: Ctrl-@ is NUL, Ctrl-[ is Escape, Ctrl-^ is $1E, Ctrl-_ is $1F.
+    Keyboard kb;
+    CHECK(kb.handleKeyDown(219, false, true, false, false, false) == 0x1B); // Ctrl-[
+    CHECK(kb.handleKeyDown(220, false, true, false, false, false) == 0x1C); // Ctrl-backslash
+    CHECK(kb.handleKeyDown(221, false, true, false, false, false) == 0x1D); // Ctrl-]
+    // The 2, 6 and - keys read as @, ^ and _ under Control with or without
+    // Shift: Ctrl-2 is NUL on a //e, and $C000 then reads $80.
+    CHECK(kb.handleKeyDown(50, false, true, false, false, false) == 0x00);  // Ctrl-2 = Ctrl-@
+    CHECK(kb.handleKeyDown(50, true, true, false, false, false) == 0x00);   // Ctrl-Shift-2 too
+    CHECK(kb.handleKeyDown(54, false, true, false, false, false) == 0x1E);  // Ctrl-6 = Ctrl-^
+    CHECK(kb.handleKeyDown(189, false, true, false, false, false) == 0x1F); // Ctrl-- = Ctrl-_
+    // Anything else is left alone: Ctrl-1 is still '1'.
+    CHECK(kb.handleKeyDown(49, false, true, false, false, false) == 0x31);
+    CHECK(kb.handleKeyDown(188, false, true, false, false, false) == 0x2C);
+}
+
+TEST_CASE("Control-Shift-letter is the same control character", "[keyboard][ctrl]") {
+    Keyboard kb;
+    CHECK(kb.handleKeyDown(65, true, true, false, false, false) == 0x01);
+    CHECK(kb.handleKeyDown(65, false, true, false, false, true) == 0x01);
+}
+
+// ============================================================================
+// A keyboard with no lower case (the II+)
+// ============================================================================
+
+TEST_CASE("An upper-case-only keyboard types capitals whatever is held", "[keyboard][iiplus]") {
+    Keyboard kb;
+    kb.setUppercaseOnly(true);
+    CHECK(kb.handleKeyDown(65, false, false, false, false, false) == 0x41);
+    CHECK(kb.handleKeyDown(65, true, false, false, false, false) == 0x41);
+    CHECK(kb.handleKeyDown(65, false, false, false, false, true) == 0x41);
+    CHECK(kb.handleKeyDown(65, true, false, false, false, true) == 0x41);
+    // Shifted symbols and control characters are unaffected.
+    CHECK(kb.handleKeyDown(49, true, false, false, false, false) == 0x21);
+    CHECK(kb.handleKeyDown(65, false, true, false, false, false) == 0x01);
+    // The default keyboard still has its lower case.
+    kb.setUppercaseOnly(false);
+    CHECK(kb.handleKeyDown(65, false, false, false, false, false) == 0x61);
 }

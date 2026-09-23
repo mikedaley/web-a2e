@@ -91,7 +91,8 @@ Click the emulator screen to give it keyboard focus. Once focused, key presses a
 Key points:
 
 - **Arrow keys** work as expected in software that supports them (the Apple //e has native arrow key support).
-- **Backspace** sends the Apple II left-arrow (delete) key.
+- **Backspace** sends the Apple II left-arrow key, which is how Applesoft deletes; **Delete** (forward delete) sends the DELETE key ($7F).
+- **On a II Plus** letters are always upper case, because its keyboard has no lower case.
 - **Tab** is captured by the emulator and not passed to the browser.
 - **Escape** sends the Apple II ESC key.
 - **Ctrl+key** combinations pass through to the emulator (e.g., Ctrl+C, Ctrl+D for DOS commands).

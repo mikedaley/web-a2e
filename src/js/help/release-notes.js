@@ -11,6 +11,33 @@
 
 export const RELEASE_NOTES = [
   {
+    week: "September 20, 2026",
+    features: [
+      {
+        title: "A Solid Colour monitor preset",
+        description:
+          "Every decoder the emulator has works the way a display does, four dots at a time, and a lo-res cell is seven dots wide, so a single cell on its own comes out as its colour in the middle and a fringe at each edge. That is what the machine sends. Solid Colour is for when you want the picture instead: each lo-res cell, double lo-res cell, hi-res colour group and double hi-res pixel is painted in the colour its value names, over exactly its own dots, and text is white. Hi-res has the same trouble for a different reason: a solid violet field is $55 and $2A alternating, which lights only half its dots, so every display shows it as violet on black — Solid Colour shows the field. Artifact colour is something a monitor manufactures, and this mode is not one, so a lone hi-res pixel is drawn white rather than violet — white text comes out white, and only colour that was actually encoded as a flat area stays colour. It is the look most emulators give lo-res, now available on every machine here.",
+      },
+      {
+        title: "The keyboard follows the machine",
+        description:
+          "The Delete key sends the DELETE code ($7F) that ProDOS editors and GS/OS ask for, while Backspace stays the left arrow Applesoft wants. The numeric keypad types what the number row types. Control with punctuation gives the codes below $20, and as on a //e, Ctrl+2 is Ctrl+@, Ctrl+6 is Ctrl+^ and Ctrl+- is Ctrl+_ without Shift. Ctrl+Pause/Break is Ctrl+Reset on keyboards that have the key. A II Plus types upper case only, because its keyboard has no lower case. A //c pulls $C063 low for Shift, as its keyboard is wired. The Command and Windows keys press nothing on the 8-bit machines.",
+      },
+    ],
+    fixes: [
+      {
+        title: "The keyboard documentation matched neither the code nor the hardware",
+        description:
+          "The help claimed the Windows key was Closed Apple and Ctrl+Break was a reset, and the Memory System page said $C063 read the Shift key on a //e. None of it was true; the Enhanced //e has no shift-key modification. Every keyboard table in the help, the README and the wiki now says what each machine does.",
+      },
+      {
+        title: "A IIgs reported Caps Lock off after every key-up",
+        description:
+          "$C025 now keeps the Caps Lock state the last key-down reported, since a key-up cannot say.",
+      },
+    ],
+  },
+  {
     week: "September 16, 2026",
     features: [
       {

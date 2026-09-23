@@ -351,10 +351,12 @@ export class DocumentationWindow extends BaseWindow {
           </thead>
           <tbody>
             <tr><td><kbd>Enter</kbd></td><td>Return</td><td>Confirm input, run commands</td></tr>
-            <tr><td><kbd>Backspace</kbd></td><td>Delete</td><td>Delete character left</td></tr>
+            <tr><td><kbd>Backspace</kbd></td><td>Left arrow ($08)</td><td>Deletes to the left in Applesoft</td></tr>
+            <tr><td><kbd>Delete</kbd> (forward delete)</td><td>Delete ($7F)</td><td>The key marked DELETE on a //e, //c and IIgs</td></tr>
             <tr><td><kbd>Esc</kbd></td><td>Escape</td><td>Cancel, exit menus</td></tr>
             <tr><td><kbd>Tab</kbd></td><td>Tab</td><td>Tab character</td></tr>
             <tr><td><kbd>&#8592;</kbd> <kbd>&#8594;</kbd> <kbd>&#8593;</kbd> <kbd>&#8595;</kbd></td><td>Arrow Keys</td><td>Cursor movement, game controls</td></tr>
+            <tr><td>Numeric keypad</td><td>Digits, * + - . / and Return</td><td>As the main keys; a IIgs flags them as keypad keys</td></tr>
           </tbody>
         </table>
 
@@ -364,17 +366,20 @@ export class DocumentationWindow extends BaseWindow {
             <tr><th>Your Keyboard</th><th>Apple //e Key</th><th>Notes</th></tr>
           </thead>
           <tbody>
-            <tr><td><kbd>Alt</kbd> / <kbd>Option</kbd> (Left)</td><td>Open Apple (&#63743;)</td><td>Modifier key, joystick button 0</td></tr>
-            <tr><td><kbd>Alt</kbd> / <kbd>Option</kbd> (Right)</td><td>Closed Apple</td><td>Modifier key, joystick button 1</td></tr>
-            <tr><td><kbd>&#8984;</kbd></td><td>Open Apple, on a IIgs</td><td>See below</td></tr>
-            <tr><td><kbd>Ctrl</kbd></td><td>Control</td><td>Control key modifier</td></tr>
-            <tr><td><kbd>Ctrl</kbd>+<kbd>Pause/Break</kbd></td><td>Reset</td><td>Warm reset (Ctrl+Reset)</td></tr>
+            <tr><td><kbd>Alt</kbd> / <kbd>Option</kbd> (Left)</td><td>Open Apple (&#63743;)</td><td>Modifier key, joystick button 0. A II+ has no Apple keys, so there it is just button 0</td></tr>
+            <tr><td><kbd>Alt</kbd> / <kbd>Option</kbd> (Right)</td><td>Closed Apple</td><td>Modifier key, joystick button 1 (just button 1 on a II+)</td></tr>
+            <tr><td><kbd>&#8984;</kbd></td><td>Open Apple, on a IIgs</td><td>See below. On the other machines &#8984; and the Windows key press nothing</td></tr>
+            <tr><td><kbd>Ctrl</kbd></td><td>Control</td><td>Control characters: Ctrl+A to Ctrl+Z, and Ctrl with @ [ \\ ] ^ _ for $00 and $1B-$1F; Ctrl+2, Ctrl+6 and Ctrl+- are Ctrl+@, Ctrl+^ and Ctrl+_ without Shift, as on a //e</td></tr>
+            <tr><td><kbd>Shift</kbd></td><td>Shift</td><td>On a //c it also pulls PB2 ($C063) low, as the real keyboard does</td></tr>
+            <tr><td><kbd>Caps Lock</kbd></td><td>Caps Lock</td><td>Upper case letters; a IIgs reports it in $C025</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Pause/Break</kbd></td><td>Ctrl+Reset</td><td>Warm reset, on keyboards that have the key; the toolbar button does the same</td></tr>
           </tbody>
         </table>
 
         <h4>Which key is Open Apple depends on the machine</h4>
         <p>On the 8-bit machines the two Option keys are the Apple keys &mdash; left Open, right Closed &mdash; and &#8984; is left to the browser. A IIgs's keyboard is a Mac's: &#8984; <em>is</em> its Open Apple and Option its Closed Apple, and GS/OS drives its menus with &#8984;-letter, so on that machine the emulator takes &#8984; while it has the keyboard.</p>
         <p><strong>View &gt; &#8984; as Open Apple</strong> is the switch. It is remembered per machine and is on by default for the IIgs only. Your browser still keeps &#8984;W, &#8984;Q and a few others for itself, which is why this is a choice rather than a rule.</p>
+        <p><strong>An Apple II Plus types upper case only.</strong> Its keyboard has no lower case and Applesoft on it rejects a lower-case keyword, so letters arrive as capitals whatever Shift or Caps Lock say.</p>
 
         <h4>Control Key Combinations</h4>
         <table class="key-table">

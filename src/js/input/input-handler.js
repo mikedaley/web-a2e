@@ -21,6 +21,9 @@ const KEY_META_LEFT = 91;
 const KEY_META_RIGHT = 93;
 const LOCATION_LEFT = 1;
 const LOCATION_RIGHT = 2;
+// The Pause/Break key, and what Chrome reports for Ctrl+Pause.
+const KEY_PAUSE = 19;
+const KEY_CANCEL = 3;
 
 export class InputHandler {
   constructor(wasmModule) {
@@ -173,6 +176,15 @@ export class InputHandler {
     // Don't interfere with browser shortcuts
     if (ctrl && rawKeyCode === 82) {
       // Ctrl+R for refresh
+      return;
+    }
+
+    // Ctrl+Pause/Break is Ctrl+Reset, for keyboards that have the key. A
+    // Pause key reports 19, and Chrome reports Ctrl+Pause as 3 (Cancel).
+    if (ctrl && (rawKeyCode === KEY_PAUSE || rawKeyCode === KEY_CANCEL)) {
+      event.preventDefault();
+      this.cancelPaste();
+      this.wasmModule._warmReset();
       return;
     }
 

@@ -452,6 +452,8 @@ private:
 
   /** Tell the ADB which modifier keys are down. See $C025. */
   void reportModifiers(bool shift, bool ctrl, bool capsLock, int browserKeycode);
+  // Caps Lock as the last key-down reported it; a key-up cannot say.
+  bool capsLockOn_ = false;
 
   int samplesGenerated_ = 0;
   uint64_t lastFrameCycle_ = 0;

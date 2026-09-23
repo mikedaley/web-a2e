@@ -167,15 +167,21 @@ npm run check         # Consistency checks + JavaScript tests
 
 | PC Key | Apple II |
 |--------|----------|
-| Backspace | Delete (left arrow) |
+| Backspace | Left arrow ($08), deletes to the left in Applesoft |
+| Delete (forward delete) | Delete ($7F), the key marked DELETE on a //e, //c and IIgs |
 | Arrow Keys | Arrow Keys |
-| Left Alt / Option | Open Apple (joystick button 0) |
-| Right Alt / Option | Closed Apple (joystick button 1) |
-| ⌘ (IIgs only, by default) | Open Apple — see below |
-| Ctrl+Letter | Control characters |
+| Numeric keypad | Digits, `* + - . /` and Return, as the main keys |
+| Left Alt / Option | Open Apple (joystick button 0); on a II+, which has no Apple keys, just button 0 |
+| Right Alt / Option | Closed Apple (joystick button 1); on a II+, just button 1 |
+| ⌘ (IIgs only, by default) | Open Apple — see below. On the other machines ⌘ and the Windows key press nothing |
+| Ctrl+Letter | Control characters; Ctrl with `@ [ \ ] ^ _` gives $00 and $1B-$1F; Ctrl+2, Ctrl+6 and Ctrl+- are Ctrl+@, Ctrl+^ and Ctrl+_ without Shift, as on a //e |
+| Shift | Shift; on a //c also PB2 (`$C063`), low when held |
 | Escape | ESC |
 | Enter | Return |
-| Ctrl+Break | Reset (Ctrl+Reset) |
+| Ctrl+Pause/Break | Ctrl+Reset (warm reset), on keyboards that have the key |
+
+On an Apple II Plus letters are always upper case, because its keyboard has
+no lower case and Applesoft on it rejects a lower-case keyword.
 
 ### Keyboard Shortcuts
 
@@ -286,6 +292,7 @@ The display settings window opens with a **Monitor** preset that sets the whole 
 | Preset | What it imitates |
 |--------|------------------|
 | Pixel Exact | No CRT simulation and no composite effects — sharp square pixels |
+| Solid Colour | Every lo-res cell, hi-res colour group and double hi-res pixel painted in the colour its value names, over exactly its own dots — no fringing at all, because there is no signal in between |
 | Composite Color | Colour TV or composite monitor — true NTSC decoding, dot triad mask, chroma bleed |
 | RGB Monitor | Separate colour signals — sharp, with the mild chroma softening of an analogue RGB stage |
 | Monochrome Green | P1 phosphor — long persistence, no mask |
@@ -322,6 +329,7 @@ An Apple //e does not output pixels. It outputs one bit per 14.31818 MHz dot, fo
 | Composite | Full NTSC demodulation — what a composite monitor really shows |
 | RGB Monitor | The digital decode an Apple RGB card does, plus mild chroma softening |
 | Pixel Exact | The same digital decode with no filtering at all |
+| Solid | No decoder: a cell is painted the colour it was written as, edge to edge, hi-res included |
 | Monochrome | The dot stream straight to a single phosphor |
 
 Several behaviours follow from the signal rather than being special-cased:
@@ -330,6 +338,7 @@ Several behaviours follow from the signal rather than being special-cased:
 - **Artifact colours and lo-res colours are the same sixteen colours**, because they are the same mechanism.
 - **Colour burst is modelled per scanline**, and the monitor's colour killer per field. A //e inhibits burst in text mode, so a full text screen is crisp and white; a mixed graphics screen still carries burst on most of its lines, so the text at the bottom fringes green and violet exactly as it does on real hardware.
 - **80-column text on the Composite preset is genuinely soft**, which is why Apple sold a monochrome monitor. Use Pixel Exact, RGB Monitor or a monochrome preset to read it.
+- **A lone lo-res cell is never one colour on any decoder**, digital ones included: every decoder works on four dots at a time and a cell is seven dots wide, so the middle of a single cell is its colour and its edges are something else. That is what the hardware sends, and Solid Colour is the preset for when you want the picture instead — it reads the cell's value and paints it, which is what the emulators that show lo-res as clean blocks have always done. **A hi-res colour field has the same problem for a different reason**: solid violet is `$55` and `$2A` alternating, which lights only half the dots, so a display shows violet on black rather than violet. Solid Colour fills the group when the colour repeats, and draws a lone pixel white -- artifact colour is manufactured by the receiver, and this mode has none.
 
 The demodulator's phase and gain were fitted by least squares against the physically self-consistent Apple II colours, and the composite lookup table is verified in the test suite to be an exact memoisation of the filter rather than an approximation of it.
 

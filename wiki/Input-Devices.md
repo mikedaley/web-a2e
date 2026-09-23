@@ -23,27 +23,28 @@ The emulator translates browser keycodes to Apple II ASCII codes in real time. A
 
 | Host Key | Apple II Function |
 |----------|-------------------|
-| Left Alt (Option) | Open Apple button |
-| Right Alt (Option) | Closed Apple button |
-| ⌘ | Open Apple **on a IIgs** — see below |
-| Shift | Shift (uppercase, shifted symbols) |
-| Ctrl | Control (generates control characters Ctrl+A through Ctrl+Z) |
+| Left Alt (Option) | Open Apple button (pushbutton 0 on a II+, which has no Apple keys) |
+| Right Alt (Option) | Closed Apple button (pushbutton 1 on a II+) |
+| ⌘ | Open Apple **on a IIgs** — see below. On the other machines ⌘ and the Windows key press nothing |
+| Shift | Shift (uppercase, shifted symbols). On a //c it also pulls PB2 (`$C063`) low |
+| Ctrl | Control (generates control characters: Ctrl+A through Ctrl+Z, and Ctrl+@ [ \ ] ^ _ for $00 and $1B-$1F; as on a //e, Ctrl+2, Ctrl+6 and Ctrl+- give @, ^ and _ without Shift) |
 | Caps Lock | Uppercase letters (matches Apple II behavior) |
 
 **Which host key is Open Apple is the machine's choice.** On the 8-bit machines the two Option keys are the Apple keys and ⌘ is left to the browser. A IIgs's keyboard is a Mac's: ⌘ *is* its Open Apple and Option its Closed Apple, and GS/OS drives its menus with ⌘-letter, so on that machine the emulator takes ⌘ while it has the keyboard. **View > ⌘ as Open Apple** is the switch, remembered per machine and on by default for the IIgs only.
 
-With it on, ⌘ is sent to the core as the left Alt and either Option as the right, so the core's Apple-key tracking needs no second mapping. A browser still keeps ⌘W, ⌘Q and the like for itself, which is why this is a choice. And because macOS delivers no key-up for a key released while ⌘ is held, the keys pressed under ⌘ are released when ⌘ is — otherwise "any key down" would stay high.
+With it on, ⌘ is sent to the core as the left Alt and either Option as the right, so the core's Apple-key tracking needs no second mapping — the core never treats a ⌘ or Windows key as an Apple key itself. A browser still keeps ⌘W, ⌘Q and the like for itself, which is why this is a choice. And because macOS delivers no key-up for a key released while ⌘ is held, the keys pressed under ⌘ are released when ⌘ is — otherwise "any key down" would stay high.
 
 Shift, Control, Caps Lock and the Apple buttons deliberately do **not** assert "any key down": they are separate lines on real hardware, not keys in the matrix.
 
-On a IIgs the modifier keys are also reported through `$C025`, which the Event Manager reads on every event — a machine answering zero there has no shift-click and no ⌘-menu shortcut.
+On a IIgs the modifier keys are also reported through `$C025`, which the Event Manager reads on every event — a machine answering zero there has no shift-click and no ⌘-menu shortcut. Caps Lock is a lock rather than a held key, so the state the last key-down reported stands across a key-up.
 
 **Special keys:**
 
 | Host Key | Apple II Key |
 |----------|-------------|
 | Enter | Return ($0D) |
-| Backspace | Delete / Left arrow ($08) |
+| Backspace | Left arrow ($08), which deletes to the left in Applesoft |
+| Delete (forward delete) | Delete ($7F), the key marked DELETE on a //e, //c and IIgs |
 | Escape | Escape ($1B) |
 | Tab | Tab ($09) |
 | Space | Space ($20) |
@@ -51,12 +52,17 @@ On a IIgs the modifier keys are also reported through `$C025`, which the Event M
 | Right Arrow | Right arrow ($15) |
 | Up Arrow | Up arrow ($0B) |
 | Down Arrow | Down arrow ($0A) |
+| Numeric keypad | The digits, `*`, `+`, `-`, `.`, `/` and Return, exactly as the main keys; a IIgs flags them as keypad keys in `$C025` |
+| Ctrl+Pause/Break | Ctrl+Reset (a warm reset), for keyboards that have the key |
 
 **Letters and numbers:**
 
 - Letters A-Z are translated to lowercase by default and converted to uppercase when Shift or Caps Lock is active
+- On an **Apple II Plus** letters are always uppercase: its keyboard cannot type lower case, and Applesoft on it rejects a lower-case keyword
 - Number keys 0-9 map directly to their ASCII equivalents
 - All standard US punctuation keys are supported, including their shifted variants
+
+**Per machine:** the Enhanced //e modelled here has no shift-key modification, so `$C063` is the game port's third button on it; a //c has the modification built in, so Shift reads low at `$C063` alongside the mouse button; a II+ has no Apple keys, so the Alt keys are its two pushbuttons; a IIgs takes ⌘ as Open Apple by default.
 
 ### Focus
 

@@ -249,7 +249,7 @@ These switches are activated by both reads and writes.
 | `$C060` | Cassette In | Cassette input (always low, no cassette) |
 | `$C061` | Button 0 | Open Apple key (bit 7 = pressed) |
 | `$C062` | Button 1 | Closed Apple key (bit 7 = pressed) |
-| `$C063` | Button 2 | Shift key / button 2 |
+| `$C063` | Button 2 | Game port button 2 on a //e; on a //c the mouse button and the Shift key, both low when pressed |
 | `$C064`-`$C067` | Paddles 0-3 | Timer countdown (bit 7 = counting) |
 | `$C070` | PTRIG | Reset all paddle timers |
 | `$C07F` | IOUDIS/DHIRES | Bit 7 = DHIRES status (AN3 inverted) |
@@ -322,9 +322,9 @@ Button state is returned in bit 7 (pressed = `$80`, released = `$00`). Bits 0-6 
 
 | Address | Button | Physical Key |
 |---------|--------|-------------|
-| `$C061` | Button 0 | Open Apple (left Alt/Option) |
-| `$C062` | Button 1 | Closed Apple (right Alt/Option) |
-| `$C063` | Button 2 | Shift key state |
+| `$C061` | Button 0 | Open Apple (left Alt/Option; ⌘ on a IIgs by default), or a game port button |
+| `$C062` | Button 1 | Closed Apple (right Alt/Option), or a game port button |
+| `$C063` | Button 2 | Game port button 2. The Enhanced //e has no shift-key modification, so Shift is not on this line; a //c has it built in, and there the line idles high and reads low for Shift or the mouse button |
 
 ---
 

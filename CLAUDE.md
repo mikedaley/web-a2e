@@ -1318,8 +1318,12 @@ in every mode. It also means 80-column text on the Composite preset is genuinely
 mushy, exactly as it was on real hardware.
 
 `VideoColorMode` (types.hpp) selects the decoder: MONOCHROME (dots straight to
-one phosphor), PIXEL_EXACT and RGB_MONITOR (idealised, see below) and COMPOSITE
-(full demodulation). The composite decoder is a 512 KB lookup table indexed by a
+one phosphor), PIXEL_EXACT and RGB_MONITOR (idealised, see below), COMPOSITE
+(full demodulation) and SOLID, which is not a receiver at all — it paints each
+cell the colour its value names, over its own dots and no further, so nothing
+fringes. Every mode carries that colour out of band in `cellColour_`, set by
+the emitter: LORES, DLORES and DHGR from the value a cell holds, HIRES from a
+rule applied to the bits (below). The composite decoder is a 512 KB lookup table indexed by a
 15-dot window and the subcarrier phase — an exact memoisation of the FIR, not an
 approximation, which `test_ntsc.cpp` verifies over all 131072 entries.
 
@@ -1338,8 +1342,49 @@ split does not fall along mode lines:
 - `CELL` — one flat colour across the aligned four-dot group. LORES, DLORES and
   DHGR, whose dots encode an actual colour value.
 - `DOT_GATED` — unlit dots are black, lit ones take the artifact colour their run
-  implies. HIRES *and text*, whose dots are drawn shapes rather than an encoded
-  colour, and which on real hardware pick up artifact colour the same way.
+  implies. Text, whose dots are drawn shapes rather than an encoded colour, and
+  which on real hardware picks up artifact colour the same way.
+- `DOT_GATED_CELL` — HIRES, which is both at once and which one depends on who is
+  looking. Every receiver treats it exactly as `DOT_GATED`; only `SOLID` reads it
+  differently. A HIRES picture is a drawn shape to a monitor, but the artist chose
+  those dots *for* their colour — a solid violet field is `$55`/`$2A` alternating
+  and lights only half the dots, so gating on lit dots paints it as violet
+  stripes on black rather than as the violet field that was drawn.
+
+**The HIRES rule for SOLID lives in `Video::emitHiResScanline`, in pixels, not
+dots.** A lit pixel beside a lit pixel is white over its own two dots. A lit
+pixel on its own is its column's colour — violet or green, blue or orange if its
+byte's high bit is set — painted over its whole *pair*, unlit partner included,
+which is what makes a `$55`/`$2A` field one colour with no stripes. Everything
+else is black. White decided per pixel and colour per pair is what keeps both
+true: a pair rule alone leaves a coloured end on every odd-width white stroke,
+and a pixel rule alone paints stripes through every field. It has to be the
+emitter and not the decoder because only the emitter knows which byte a pixel
+came from, and by the time the dots reach `ntsc.cpp` the high bit has become a
+half-dot shift and the byte boundaries are gone.
+
+**It took four goes, and each failure looked plausible.** Worth knowing before
+touching it:
+
+- *Reading each four-dot group as a palette index* is the CELL rule, and it is
+  wrong for a shape: white is a RUN of three or more, but a group reads as white
+  only when all four of its own dots are lit, so a three-dot stroke across a
+  group boundary came out aqua on one side and brown on the other. A hi-res
+  title screen rendered as green and magenta confetti.
+- *Filling every coloured group* then doubled every isolated pixel, because a
+  lone two-dot pixel at the edge of a letter is also half a group. Hence the
+  field test.
+- *Counting a run in both the groups it straddles* let one pixel paint eight
+  dots, which closed the gaps between letters drawn in colour and ran a word
+  into a solid slab. Hence one run, one group.
+- *Leaving lone pixels the colour the sharp decoders give them* kept the flecks,
+  only thinner: one title screen carries 185 two-dot runs and every one is a
+  single-pixel feature of a letter meant to be white.
+
+The cost is deliberate and worth stating: a genuinely intended one-pixel colour
+detail, with no colour beside it, comes out white. A mode that cannot tell that
+apart from a letter's serif has to choose, and this one is called Solid
+**Colour**, not Solid Artifact.
 
 `DOT_GATED` decides between an artifact colour and white by **run length**, not
 byte alignment: a run of two lit dots is one isolated pixel (or one text stroke)
@@ -1838,6 +1883,24 @@ second mapping; every ⌘ combination is `preventDefault`ed (a browser still
 keeps ⌘W, ⌘Q and the like for itself, which is why this is a choice); and
 because macOS delivers no key-up for a key let go while ⌘ is held, the keys
 pressed under ⌘ are released when ⌘ is, or AKD would stay high.
+
+**The rest of the mapping is the same on every machine, and the differences
+are the machine's.** `keyboard.cpp` maps Backspace to left arrow (`$08`,
+which is how Applesoft deletes), forward Delete to `$7F` (the key marked
+DELETE), the numeric keypad to what the number row types, and Control with
+`@ [ \ ] ^ _` to `$00` and `$1B-$1F` as the encoder does, with the 2, 6 and
+- keys reading as `@`, `^` and `_` under Control whether or not Shift is held. The core only ever
+hears the Apple keys as the two Alt keys and ignores the Meta keys: on the
+8-bit machines the host blocks ⌘ and the Windows key, and on a IIgs it sends
+⌘ as the left Alt, so nothing left to the browser can press an Apple key. A
+II+ has no lower case (`caps.hasLowercase`, applied through
+`Keyboard::setUppercaseOnly`) and no Apple keys, so the Alt keys are its two
+pushbuttons. A //c has the shift-key modification built in, so
+`MouseIOU::setShiftKey` pulls `$C063` low for Shift as well as the mouse
+button; the Enhanced //e does not have it, so there `$C063` stays the game
+port's third button. Ctrl+Pause/Break is Ctrl+Reset on keyboards that have
+the key. `test_keyboard.cpp`, `test_mouse_iou.cpp` and `test_emulator.cpp`
+pin all of it.
 
 The Joystick window has a **Cursor Keys** toggle that also drives the joystick from the arrow keys (full deflection 0/255 per axis). The arrows keep reaching the emulator's keyboard as normal, so ProDOS selectors, catalog menus and BASIC line editing still work while the toggle is on. When enabled, a "CURSOR KEYS" chip appears in the Monitor title bar. The same toggle is in the View menu (`btn-cursor-keys-joystick`), which is how it is reached in the layouts that have no Monitor title bar; menu item, header switch and state restores are kept in sync through `JoystickWindow.onCursorKeysChanged`. The setting persists via localStorage.
 

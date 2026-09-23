@@ -14,6 +14,8 @@ Keyboard::Keyboard() {}
 int Keyboard::handleKeyDown(int browserKeycode, bool shift, bool ctrl,
                             bool alt, bool meta, bool capsLock,
                             int keyLocation) {
+  (void)alt;  // Only the key-up needs to know whether any Alt is still held.
+  (void)meta; // The host decides what ⌘ is, and never sends it as ⌘.
   // Track modifier keys (Apple buttons). Both Alt keys report keycode 18, so
   // the location is what separates Open Apple from Closed Apple. An
   // unspecified location is treated as the left key, which keeps Open Apple
@@ -27,14 +29,11 @@ int Keyboard::handleKeyDown(int browserKeycode, bool shift, bool ctrl,
     syncAppleButtons();
     return -1; // Don't generate a key
   }
-  if (browserKeycode == 91 || browserKeycode == 93) { // Meta (left/right)
-    metaDown_ = true;
-    syncAppleButtons();
-    return -1;
-  }
-
-  // Skip pure modifier keys
-  if (browserKeycode == 16 || browserKeycode == 17) { // Shift, Ctrl
+  // Skip pure modifier keys. The Meta keys (91/93) are among them: which host
+  // key is an Apple key is the host's decision, and it sends the answer as an
+  // Alt key, so a Meta key that reaches here is one the host left alone.
+  if (browserKeycode == 16 || browserKeycode == 17 ||
+      browserKeycode == 91 || browserKeycode == 93) {
     return -1;
   }
 
@@ -51,7 +50,10 @@ int Keyboard::handleKeyDown(int browserKeycode, bool shift, bool ctrl,
   // Handle letters (a-z)
   if (appleKey >= 0x61 && appleKey <= 0x7A) {
     // Apply caps lock and shift
-    if (capsLock && !shift) {
+    if (uppercaseOnly_) {
+      // The keyboard cannot type lower case, whatever is held.
+      appleKey -= 32;
+    } else if (capsLock && !shift) {
       // Caps lock on, no shift -> uppercase
       appleKey -= 32;
     } else if (!capsLock && shift) {
@@ -59,8 +61,11 @@ int Keyboard::handleKeyDown(int browserKeycode, bool shift, bool ctrl,
       appleKey -= 32;
     }
     // Otherwise stays lowercase
-  } else if (shift) {
-    // Apply shift to non-letter keys
+  } else if (shift || (ctrl && (browserKeycode == 50 || browserKeycode == 54 ||
+                                browserKeycode == 189))) {
+    // Apply shift to non-letter keys. With Control held the encoder reads
+    // the 2, 6 and - keys as @, ^ and _ whether or not Shift is down, which
+    // is how Ctrl-@ (NUL), Ctrl-^ ($1E) and Ctrl-_ ($1F) are typed on a //e.
     appleKey = applyShift(browserKeycode, appleKey);
   }
 
@@ -81,6 +86,7 @@ void Keyboard::handleKeyUp(int browserKeycode, bool shift, bool ctrl,
                            bool alt, bool meta, int keyLocation) {
   (void)shift;
   (void)ctrl;
+  (void)meta;
 
   // Track modifier keys
   if (browserKeycode == 18) { // Alt
@@ -111,12 +117,6 @@ void Keyboard::handleKeyUp(int browserKeycode, bool shift, bool ctrl,
     syncAppleButtons();
     return;
   }
-  if (browserKeycode == 91 || browserKeycode == 93) { // Meta
-    metaDown_ = false;
-    syncAppleButtons();
-    return;
-  }
-
   setKeyHeld(browserKeycode, false);
 }
 
@@ -131,6 +131,12 @@ int Keyboard::translateKeycode(int browserKeycode) const {
     return browserKeycode;
   }
 
+  // Numeric keypad digits (browser codes 96-105). A Platinum //e, a //c and a
+  // IIgs have a keypad, and it types the same characters as the number row.
+  if (browserKeycode >= 96 && browserKeycode <= 105) {
+    return browserKeycode - 96 + 0x30;
+  }
+
   // Special keys
   switch (browserKeycode) {
   case 13:
@@ -143,6 +149,20 @@ int Keyboard::translateKeycode(int browserKeycode) const {
     return 0x20; // Space
   case 9:
     return 0x09; // Tab
+  case 46:
+    return 0x7F; // Delete (forward delete) -> the Apple's DELETE key
+
+  // Numeric keypad operators
+  case 106:
+    return 0x2A; // *
+  case 107:
+    return 0x2B; // +
+  case 109:
+    return 0x2D; // -
+  case 110:
+    return 0x2E; // .
+  case 111:
+    return 0x2F; // /
 
   // Arrow keys
   case 37:
@@ -241,8 +261,10 @@ int Keyboard::applyControl(int key) const {
   if (key >= 0x61 && key <= 0x7A) {
     return key - 0x60;
   }
-  // Convert A-Z to Ctrl+A-Z
-  if (key >= 0x41 && key <= 0x5A) {
+  // Convert @ A-Z [ \ ] ^ _ to 0x00-0x1F, as the keyboard encoder does:
+  // Ctrl-@ is NUL, Ctrl-[ is Escape, Ctrl-^ is 0x1E and Ctrl-_ is 0x1F.
+  // Shift is applied first, so Ctrl-Shift-2 arrives here as '@'.
+  if (key >= 0x40 && key <= 0x5F) {
     return key - 0x40;
   }
   return key;

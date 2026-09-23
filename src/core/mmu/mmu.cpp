@@ -1250,7 +1250,7 @@ uint8_t MMU::readSoftSwitch(uint16_t address) {
       return (buttonCallback_(1) & 0x80) | (getFloatingBusValue() & 0x7F);
     }
     return getFloatingBusValue() & 0x7F;
-  case 0x63: // PB2 / Shift key modifier
+  case 0x63: // PB2 (the game port's third button; a //c's IOU answers first)
     if (buttonCallback_) {
       return (buttonCallback_(2) & 0x80) | (getFloatingBusValue() & 0x7F);
     }
