@@ -31,14 +31,17 @@ import {
  * Which decoder the core runs over the machine's 14.31818 MHz dot stream.
  *
  * The Apple //e emits one bit per dot and nothing else — every colour is
- * manufactured by the receiver. These four are four receivers, and they must
- * stay in step with VideoColorMode in src/core/types.hpp.
+ * manufactured by the receiver. The first four are four receivers; SOLID is
+ * no receiver at all, and paints each lo-res cell, hi-res colour group and
+ * double hi-res pixel in the colour its value names. They must stay in step with VideoColorMode in
+ * src/core/types.hpp.
  */
 export const COLOR_MODE = {
   MONOCHROME: 0,
   PIXEL_EXACT: 1,
   RGB_MONITOR: 2,
   COMPOSITE: 3,
+  SOLID: 4,
 };
 
 /**
@@ -91,6 +94,22 @@ export class DisplaySettingsWindow extends BaseWindow {
           horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 0,
           colorBleed: 0, monochromeMode: 0, sharpPixels: true,
           colorMode: COLOR_MODE.PIXEL_EXACT,
+        },
+      },
+      {
+        id: "solid",
+        label: "Solid Colour",
+        description:
+          "Every cell its own colour, no fringing — the picture as drawn, not as a monitor would show it.",
+        values: {
+          // The same flat picture as Pixel Exact: this preset is about what
+          // the colours are, not about glass.
+          curvature: 0, scanlines: 0, beamBloom: 60,
+          shadowMask: 0, maskType: 0, phosphorGlow: 0, vignette: 0,
+          rgbOffset: 0, flicker: 0, staticNoise: 0, jitter: 0,
+          horizontalSync: 0, glowingLine: 0, ambientLight: 0, burnIn: 0,
+          colorBleed: 0, monochromeMode: 0, sharpPixels: true,
+          colorMode: COLOR_MODE.SOLID,
         },
       },
       {

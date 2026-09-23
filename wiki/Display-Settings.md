@@ -34,6 +34,7 @@ Each preset names something a real //e was plugged into, and its values follow f
 | Preset | What it imitates |
 |--------|------------------|
 | **Pixel Exact** | No CRT simulation at all -- sharp square pixels, nearest-neighbour filtering. The default. |
+| **Solid Colour** | The same flat picture, but the colours are not decoded from the machine's signal at all: every lo-res cell, hi-res colour group and double hi-res pixel is painted the colour its value names, edge to edge. No fringing, because there is nothing to fringe -- a hi-res colour field comes out as the flat colour it was drawn as rather than as colour on black, and a lone hi-res pixel comes out white, because artifact colour is something a monitor makes and this is not a monitor. Not what any monitor shows -- what the program drew. |
 | **Composite Color** | A colour television or composite monitor: dot triad mask, NTSC fringing, heavy chroma bleed, softened image. |
 | **RGB Monitor** | Separate colour signals: sharp, aperture grille, no fringing and almost no bleed, because there is no encoded signal to decode. |
 | **Monochrome Green** | A P1 phosphor tube: long persistence, generous glow, and **no mask** -- a shadow mask exists only to keep three beams apart, and a monochrome tube has one. |

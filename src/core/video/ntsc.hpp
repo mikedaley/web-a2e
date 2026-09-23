@@ -100,6 +100,21 @@ enum class IdealKind : uint8_t {
   // Flat colour across the aligned four-dot group, which is how LORES, DLORES
   // and DHGR carry an actual colour value rather than a drawn shape.
   CELL,
+  // Drawn dots to a receiver, a colour to SOLID. HIRES only.
+  //
+  // A HIRES picture is both of those things at once, and which one it is
+  // depends on who is looking. To a monitor it is a drawn shape: two lit dots
+  // are one pixel and its colour is an artifact of where they fell, which is
+  // what DOT_GATED models and what PIXEL_EXACT, RGB_MONITOR and COMPOSITE all
+  // want. But the artist chose those dots FOR their colour — a solid violet
+  // field is $55 and $2A alternating, which lights only half the dots — so
+  // gating on lit dots renders that field as violet and black stripes when
+  // what was drawn was a violet field.
+  //
+  // So every receiver sees this exactly as DOT_GATED, and SOLID paints the
+  // colour the emitter worked out for each pixel from the BITS - see
+  // Video::emitHiResScanline for the rule.
+  DOT_GATED_CELL,
 };
 
 // Idealised decode — no composite effects at all.
@@ -114,6 +129,23 @@ enum class IdealKind : uint8_t {
 // (RGB Monitor); without it the result is maximally sharp (Pixel Exact).
 void decodeIdeal(const uint8_t *dots, const IdealKind *kind, bool chroma,
                  bool smooth, uint32_t *out);
+
+// No decoder: the picture the program meant.
+//
+// Where the emitter tagged a dot CELL or DOT_GATED_CELL it also said which
+// palette entry that dot carries, and this paints that entry over the whole
+// cell — lit dots, unlit dots, edge dots, all of it — so a lone LORES cell on
+// black is one colour from its first dot to its last, which no four-dot
+// decode can manage on a cell seven dots wide, and a HIRES colour field is
+// one colour with no stripes in it.
+//
+// Text stays dot-gated and is treated as decodeIdeal treats it, with no
+// smoothing: black where unlit, white where lit.
+//
+// `cell` is the palette index per dot and is only read where kind is CELL or
+// DOT_GATED_CELL.
+void decodeSolid(const uint8_t *dots, const IdealKind *kind,
+                 const uint8_t *cell, uint32_t *out);
 
 // One phosphor, no decode at all: the dot stream straight to the screen.
 void decodeMonochrome(const uint8_t *dots, uint32_t on, uint32_t off,

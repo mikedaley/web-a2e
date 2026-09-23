@@ -720,3 +720,389 @@ TEST_CASE("Pixel exact colours mixed-mode text but keeps its background black",
         }
     }
 }
+
+// ============================================================================
+// Solid colour: the picture as drawn
+// ============================================================================
+//
+// The decoders above all fringe a lone cell, because a cell is seven dots and
+// they look at four. These tests are the whole point of the SOLID mode: one
+// cell, on black, in every column, is one colour from edge to edge — and it is
+// the colour a steady field of the same value decodes to on the composite
+// decoder, so the two modes agree about what a value means and differ only
+// about what its edges look like.
+
+namespace {
+
+// The colour a value shows as when it fills the screen, on the composite
+// decoder — the reference every other mode has to agree with.
+uint32_t compositeFillColour(VideoTestFixture &f, bool doubleLores, uint8_t byte) {
+    f.mmu.read(0xC050);
+    f.mmu.read(0xC052);
+    f.mmu.read(0xC056);
+    f.mmu.read(0xC054);
+    if (doubleLores) {
+        f.mmu.write(0xC00D, 0);
+        f.mmu.read(0xC05E);
+    } else {
+        f.mmu.write(0xC00C, 0);
+    }
+    for (int i = 0; i < 0x400; i++) {
+        f.mmu.writeRAM(0x0400 + i, byte, false);
+        if (doubleLores) f.mmu.writeRAM(0x0400 + i, byte, true);
+    }
+    f.video->setColorMode(VideoColorMode::COMPOSITE);
+    f.video->forceRenderFrame();
+    return pixelAt(*f.video, 280, 10);
+}
+
+int maxChannelDelta(uint32_t a, uint32_t b) {
+    int d = 0;
+    for (int shift = 0; shift < 24; shift += 8) {
+        const int x = static_cast<int>((a >> shift) & 0xFF);
+        const int y = static_cast<int>((b >> shift) & 0xFF);
+        d = std::max(d, std::abs(x - y));
+    }
+    return d;
+}
+
+} // namespace
+
+TEST_CASE("Solid: a lone double lo-res cell is one colour in every column",
+          "[video][solid]") {
+    for (int v = 1; v < 16; v++) {
+        // What this value means, from the decoder that models the hardware.
+        VideoTestFixture ref;
+        const uint32_t want = compositeFillColour(ref, true, static_cast<uint8_t>(v * 0x11));
+
+        VideoTestFixture f;
+        f.mmu.read(0xC050);
+        f.mmu.read(0xC052);
+        f.mmu.read(0xC056);
+        f.mmu.read(0xC054);
+        f.mmu.write(0xC00D, 0);
+        f.mmu.read(0xC05E);
+        // A cell of value v in every other screen column of row 0, so that
+        // each has black either side of it, and both banks get their turn:
+        // aux in the even byte columns, main in the odd ones.
+        for (int col = 0; col < 40; col += 2) {
+            f.mmu.writeRAM(0x0400 + col, static_cast<uint8_t>(v), true);   // aux: screen column 2*col
+        }
+        for (int col = 1; col < 40; col += 2) {
+            f.mmu.writeRAM(0x0400 + col, static_cast<uint8_t>(v), false);  // main: screen column 2*col+1
+        }
+        f.video->setColorMode(VideoColorMode::SOLID);
+        f.video->forceRenderFrame();
+
+        for (int col = 0; col < 40; col++) {
+            const bool aux = (col % 2) == 0;
+            const int first = col * 14 + (aux ? 0 : 7) + 1; // the delayed base
+            for (int x = first; x < first + 7 && x < 560; x++) {
+                // (the last main cell's seventh dot is dot 560, which the
+                // hardware's own delay pushes off the visible line)
+                INFO("value " << v << " column " << col << " dot " << x);
+                REQUIRE(maxChannelDelta(pixelAt(*f.video, x, 1), want) <= 3);
+            }
+            // and the other half of the byte cell, which holds nothing, is black
+            const int blackFirst = col * 14 + (aux ? 7 : 0) + 1;
+            for (int x = blackFirst; x < blackFirst + 7; x++) {
+                if (x >= 560) continue;
+                INFO("value " << v << " column " << col << " black dot " << x);
+                REQUIRE(pixelAt(*f.video, x, 1) == 0xFF000000u);
+            }
+        }
+    }
+}
+
+TEST_CASE("Solid: a lone lo-res cell is one colour in every column",
+          "[video][solid]") {
+    for (int v = 1; v < 16; v++) {
+        VideoTestFixture ref;
+        const uint32_t want = compositeFillColour(ref, false, static_cast<uint8_t>(v * 0x11));
+
+        VideoTestFixture f;
+        f.mmu.read(0xC050);
+        f.mmu.read(0xC052);
+        f.mmu.read(0xC056);
+        f.mmu.read(0xC054);
+        f.mmu.write(0xC00C, 0);
+        for (int col = 0; col < 40; col += 2) {
+            f.mmu.writeRAM(0x0400 + col, static_cast<uint8_t>(v), false);
+        }
+        f.video->setColorMode(VideoColorMode::SOLID);
+        f.video->forceRenderFrame();
+
+        for (int col = 0; col < 40; col += 2) {
+            for (int x = col * 14; x < col * 14 + 14; x++) {
+                INFO("value " << v << " column " << col << " dot " << x);
+                REQUIRE(maxChannelDelta(pixelAt(*f.video, x, 1), want) <= 3);
+            }
+            for (int x = col * 14 + 14; x < col * 14 + 28 && x < 560; x++) {
+                REQUIRE(pixelAt(*f.video, x, 1) == 0xFF000000u);
+            }
+        }
+    }
+}
+
+TEST_CASE("Solid: text is white on black on every machine", "[video][solid]") {
+    // A II+ fringes its text on a composite monitor because it never inhibits
+    // burst. Solid is not a monitor, so its text is white whatever the burst.
+    VideoTestFixture f;
+    f.mmu.read(0xC051);
+    f.mmu.write(0xC00C, 0);
+    f.mmu.write(0x0400, 0xC1); // 'A'
+    f.video->setColorMode(VideoColorMode::SOLID);
+    f.video->forceRenderFrame();
+    bool lit = false;
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 14; x++) {
+            const uint32_t c = pixelAt(*f.video, x, y);
+            REQUIRE((c == 0xFFFFFFFFu || c == 0xFF000000u));
+            if (c == 0xFFFFFFFFu) lit = true;
+        }
+    }
+    CHECK(lit);
+}
+
+// ---------------------------------------------------------------------------
+// Solid: HI-RES
+//
+// The mode originally covered only the kinds whose dots encode a colour
+// outright, which left HIRES decoded as drawn dots — and a HIRES colour field
+// lights only half of its dots. A solid violet field is $55 and $2A
+// alternating: dots 0 and 1 of every group of four are on and dots 2 and 3 are
+// off, so gating on lit dots painted that field as violet stripes on black.
+// What the artist drew was a violet field, and this is the mode that says so.
+
+namespace {
+
+// The colour a HIRES byte pair shows as when it fills the screen, on the
+// composite decoder — the same reference the cell modes are held to.
+uint32_t compositeHiResFillColour(VideoTestFixture &f, uint8_t evenByte,
+                                  uint8_t oddByte) {
+    f.mmu.read(0xC050);
+    f.mmu.read(0xC052);
+    f.mmu.read(0xC057);
+    f.mmu.read(0xC054);
+    f.mmu.read(0xC05F);
+    f.mmu.write(0xC00C, 0);
+    // Every HIRES row begins at an even address and is forty bytes long, so a
+    // byte's parity within its row is its address's parity and the pattern can
+    // be laid down over the whole page at once.
+    for (int a = 0x2000; a < 0x4000; a++) {
+        f.mmu.writeRAM(static_cast<uint16_t>(a), (a & 1) ? oddByte : evenByte,
+                       false);
+    }
+    f.video->setColorMode(VideoColorMode::COMPOSITE);
+    f.video->forceRenderFrame();
+    return pixelAt(*f.video, 280, 10);
+}
+
+void fillHiRes(VideoTestFixture &f, uint8_t evenByte, uint8_t oddByte) {
+    f.mmu.read(0xC050);
+    f.mmu.read(0xC052);
+    f.mmu.read(0xC057);
+    f.mmu.read(0xC054);
+    f.mmu.read(0xC05F);
+    f.mmu.write(0xC00C, 0);
+    for (int a = 0x2000; a < 0x4000; a++) {
+        f.mmu.writeRAM(static_cast<uint16_t>(a), (a & 1) ? oddByte : evenByte,
+                       false);
+    }
+}
+
+// The four HIRES hues as tools that draw for this machine write them: the even
+// byte of the pair, then the odd one. Bit 7 clear gives violet and green, set
+// gives blue and orange.
+struct HiResField {
+    const char *name;
+    uint8_t even;
+    uint8_t odd;
+};
+const HiResField HIRES_FIELDS[] = {
+    {"violet", 0x55, 0x2A}, {"green", 0x2A, 0x55},
+    {"blue", 0xD5, 0xAA},   {"orange", 0xAA, 0xD5},
+};
+
+// The ends of the line are not part of the claim. A byte whose high bit is set
+// delays its dots by one, so the first group of four straddles the start of
+// the picture and the last one runs off the end of it; both are edges, and
+// every decoder in this file treats an edge as an edge.
+constexpr int EDGE = 16;
+
+} // namespace
+
+TEST_CASE("Solid: a hi-res colour field is that colour, with no stripes in it",
+          "[video][solid][hires]") {
+    for (const auto &field : HIRES_FIELDS) {
+        VideoTestFixture ref;
+        const uint32_t want = compositeHiResFillColour(ref, field.even, field.odd);
+
+        VideoTestFixture f;
+        fillHiRes(f, field.even, field.odd);
+        f.video->setColorMode(VideoColorMode::SOLID);
+        f.video->forceRenderFrame();
+
+        for (int x = EDGE; x < 560 - EDGE; x++) {
+            INFO(field.name << " dot " << x);
+            REQUIRE(maxChannelDelta(pixelAt(*f.video, x, 10), want) <= 3);
+        }
+    }
+}
+
+TEST_CASE("Solid: hi-res black and white are left alone",
+          "[video][solid][hires]") {
+    // The two values that are not hues have to survive the cell reading: an
+    // empty group is palette entry 0 and a full one is entry 15, which is the
+    // same answer the dots would have given.
+    VideoTestFixture black;
+    fillHiRes(black, 0x00, 0x00);
+    black.video->setColorMode(VideoColorMode::SOLID);
+    black.video->forceRenderFrame();
+
+    VideoTestFixture white;
+    fillHiRes(white, 0x7F, 0x7F);
+    white.video->setColorMode(VideoColorMode::SOLID);
+    white.video->forceRenderFrame();
+
+    for (int x = EDGE; x < 560 - EDGE; x++) {
+        INFO("dot " << x);
+        REQUIRE(pixelAt(*black.video, x, 10) == 0xFF000000u);
+        REQUIRE(pixelAt(*white.video, x, 10) == 0xFFFFFFFFu);
+    }
+}
+
+TEST_CASE("Solid is the only mode that fills in a hi-res field's unlit dots",
+          "[video][solid][hires]") {
+    // The regression guard for the tag HIRES carries. It is dot-gated to every
+    // receiver and a cell only to SOLID, so Pixel Exact must still show a $55 /
+    // $2A field as colour on black — half its dots are genuinely unlit, and a
+    // monitor shows them unlit. If this ever stops finding black, the new kind
+    // has leaked into the decoders it was written to stay out of.
+    VideoTestFixture f;
+    fillHiRes(f, 0x55, 0x2A);
+    f.video->setColorMode(VideoColorMode::PIXEL_EXACT);
+    f.video->forceRenderFrame();
+
+    int black = 0;
+    for (int x = EDGE; x < 560 - EDGE; x++) {
+        if (pixelAt(*f.video, x, 10) == 0xFF000000u) black++;
+    }
+    CHECK(black > 0);
+
+    VideoTestFixture g;
+    fillHiRes(g, 0x55, 0x2A);
+    g.video->setColorMode(VideoColorMode::SOLID);
+    g.video->forceRenderFrame();
+
+    for (int x = EDGE; x < 560 - EDGE; x++) {
+        INFO("dot " << x);
+        REQUIRE(pixelAt(*g.video, x, 10) != 0xFF000000u);
+    }
+}
+
+TEST_CASE("Solid: a drawn hi-res shape stays white on black",
+          "[video][solid][hires]") {
+    // The regression this mode was first got wrong by. White in HIRES is a run
+    // of three or more lit dots, but an aligned group of four only reads as
+    // white when all four of its own dots are lit — so reading groups as
+    // palette indices turned every white stroke's edges into aqua and brown,
+    // and a hi-res title screen came out as green and magenta confetti.
+    //
+    // $1C is three adjacent pixels, six lit dots, with black either side of
+    // them: wide enough to be white, narrow enough that its edges fall inside
+    // groups that are otherwise unlit.
+    for (uint8_t byte : {uint8_t(0x1C), uint8_t(0x7F), uint8_t(0x08),
+                         uint8_t(0x9C)}) {
+        VideoTestFixture f;
+        fillHiRes(f, byte, 0x00);
+        f.video->setColorMode(VideoColorMode::SOLID);
+        f.video->forceRenderFrame();
+
+        // $08 is a LONE pixel — two dots — which is a colour on real hardware
+        // and stays one here; the other three are runs of three or more and
+        // must be white and black and nothing else.
+        if (byte == 0x08) continue;
+
+        for (int x = EDGE; x < 560 - EDGE; x++) {
+            const uint32_t c = pixelAt(*f.video, x, 10);
+            INFO("byte $" << std::hex << int(byte) << " dot " << std::dec << x);
+            REQUIRE((c == 0xFFFFFFFFu || c == 0xFF000000u));
+        }
+    }
+}
+
+TEST_CASE("Solid: a lone hi-res pixel is one flat colour over its pair",
+          "[video][solid][hires]") {
+    // $08 is one pixel per byte, fourteen dots apart. Alone, a lit pixel is
+    // its artifact colour - and that colour is painted over the whole pair
+    // it belongs to, four dots, with nothing else on the line: no one-dot
+    // sliver at either end of it, whatever the neighbouring bytes' high
+    // bits did to the dots. Pixel 3 of a byte is odd, so green.
+    const auto &palette = ntsc::idealPalette();
+    for (uint8_t neighbours : {uint8_t(0x00), uint8_t(0x80)}) {
+        VideoTestFixture f;
+        fillHiRes(f, 0x08, neighbours);
+        f.video->setColorMode(VideoColorMode::SOLID);
+        f.video->forceRenderFrame();
+        for (int col = 0; col < 40; col += 2) {
+            const int p = col * 7 + 3;          // the lit pixel
+            const int pairStart = (p & ~1) * 2; // its pair's first dot
+            for (int x = col * 14; x < col * 14 + 28 && x < 560 - EDGE; x++) {
+                if (x < EDGE) continue;
+                const bool inPair = x >= pairStart && x < pairStart + 4;
+                INFO("neighbours $" << std::hex << int(neighbours) << " dot "
+                                    << std::dec << x);
+                REQUIRE(pixelAt(*f.video, x, 10) ==
+                        (inPair ? palette[12] : 0xFF000000u));
+            }
+        }
+    }
+
+    // ...and Pixel Exact, which IS a receiver, still shows them as two dots
+    // of colour with black between. If this stops finding black inside a
+    // pair, the change has leaked out of SOLID.
+    VideoTestFixture ref;
+    fillHiRes(ref, 0x08, 0x08);
+    ref.video->setColorMode(VideoColorMode::PIXEL_EXACT);
+    ref.video->forceRenderFrame();
+    CHECK(pixelAt(*ref.video, 3 * 2 + 2, 10) == 0xFF000000u);
+}
+
+TEST_CASE("Solid: an odd-width white stroke has no coloured end",
+          "[video][solid][hires]") {
+    // Three lit pixels are white; the pair the third one shares with an unlit
+    // fourth must NOT be painted a colour, or every odd-width white line in
+    // a picture grows a violet or green tail. Pixel-by-pixel white, pair-by-
+    // pair colour - see emitHiResScanline.
+    VideoTestFixture f;
+    fillHiRes(f, 0x1C, 0x00);        // pixels 2, 3, 4 of the even bytes
+    f.video->setColorMode(VideoColorMode::SOLID);
+    f.video->forceRenderFrame();
+    for (int x = EDGE; x < 560 - EDGE; x++) {
+        const uint32_t c = pixelAt(*f.video, x, 10);
+        INFO("dot " << x);
+        REQUIRE((c == 0xFFFFFFFFu || c == 0xFF000000u));
+    }
+    // and the three pixels really are lit white
+    for (int x = 4; x < 10; x++) REQUIRE(pixelAt(*f.video, x, 10) == 0xFFFFFFFFu);
+    REQUIRE(pixelAt(*f.video, 10, 10) == 0xFF000000u);
+}
+
+TEST_CASE("Solid: a hi-res field is still colour, next to lone pixels",
+          "[video][solid][hires]") {
+    // The other side of it: whatever is done about lone pixels must not cost
+    // the fields their colour, which is the whole reason the mode touches
+    // HIRES at all.
+    VideoTestFixture ref;
+    const uint32_t want = compositeHiResFillColour(ref, 0x55, 0x2A);
+
+    VideoTestFixture f;
+    fillHiRes(f, 0x55, 0x2A);
+    f.video->setColorMode(VideoColorMode::SOLID);
+    f.video->forceRenderFrame();
+    for (int x = EDGE; x < 560 - EDGE; x++) {
+        INFO("dot " << x);
+        REQUIRE(maxChannelDelta(pixelAt(*f.video, x, 10), want) <= 3);
+    }
+}

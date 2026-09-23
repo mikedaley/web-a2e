@@ -1847,12 +1847,13 @@ bool isUKCharacterSet() {
 }
 
 // Which kind of receiver decodes the machine's dot stream.
-// 0 = monochrome, 1 = pixel exact, 2 = RGB monitor, 3 = composite.
-// See VideoColorMode in types.hpp.
+// 0 = monochrome, 1 = pixel exact, 2 = RGB monitor, 3 = composite,
+// 4 = solid (no receiver: every cell its own colour). See VideoColorMode in
+// types.hpp.
 EMSCRIPTEN_KEEPALIVE
 void setVideoColorMode(int mode) {
   REQUIRE_VIDEO();
-  if (mode < 0 || mode > 3) {
+  if (mode < 0 || mode > 4) {
     return;
   }
   videoGenerator()->setColorMode(static_cast<a2e::VideoColorMode>(mode));

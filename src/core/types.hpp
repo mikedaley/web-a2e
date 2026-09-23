@@ -73,12 +73,23 @@ enum class VideoMode : uint8_t {
 // How the 14.31818 MHz dot stream is turned into pixels.
 //
 // The Apple IIe emits a 1-bit serial video signal; every colour you see is made
-// by the *receiver*, not by the machine. These are four receivers.
+// by the *receiver*, not by the machine. The first four are four receivers.
+//
+// The fifth is not a receiver at all. SOLID paints each lo-res cell, double
+// lo-res cell, hi-res colour group and double hi-res pixel in the colour its
+// value names, over exactly its own dots, and nowhere else — the picture as
+// the program that drew it meant it, with no signal in between. No real display does this:
+// every decoder, digital ones included, works on four dots at a time, and a
+// seven-dot cell is not a whole number of those, so a lone cell always comes
+// out as its colour in the middle and something else at the edges. Emulators
+// that show lo-res as clean blocks are painting cells too; this is the mode
+// that makes web-a2e one of them when asked.
 enum class VideoColorMode : uint8_t {
   MONOCHROME = 0, // One phosphor: dot on/off, no decode at all
   PIXEL_EXACT,    // Idealised 4-dot decode, hard edges, no filtering
   RGB_MONITOR,    // Idealised decode plus the mild chroma smoothing of an RGB set
-  COMPOSITE       // Full NTSC demodulation — what a composite monitor really shows
+  COMPOSITE,      // Full NTSC demodulation — what a composite monitor really shows
+  SOLID           // Every cell its own colour, no decode: not a monitor, a picture
 };
 
 // Soft switch state - comprehensive Apple IIe soft switches

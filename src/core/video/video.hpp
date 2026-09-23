@@ -178,6 +178,20 @@ private:
     }
   }
 
+  // Say which palette entry a run of CELL dots carries. Only the SOLID mode
+  // reads it: every other mode makes the colour from the dots. The emitters
+  // know the answer for nothing — a LORES cell is its nibble, a double lo-res
+  // cell or a double hi-res pixel is its value rotated one place to the left,
+  // which is the one dot of delay the 80-column path adds (DOUBLE_RES_DELAY)
+  // expressed as the colour it turns into.
+  void setCell(int from, int to, uint8_t palette) {
+    if (from < 0) from = 0;
+    if (to > ntsc::VISIBLE_DOTS) to = ntsc::VISIBLE_DOTS;
+    for (int x = from; x < to; x++) {
+      cellColour_[static_cast<size_t>(x)] = palette;
+    }
+  }
+
   // Write a single dot of the scanline's signal
   void setDot(int x, uint8_t on) {
     if (x >= 0 && x < ntsc::VISIBLE_DOTS + ntsc::SPILL) {
@@ -226,6 +240,8 @@ private:
   // side so the demodulation window never runs off the ends.
   std::array<uint8_t, ntsc::DOT_BUFFER> dots_{};
   std::array<ntsc::IdealKind, ntsc::VISIBLE_DOTS> idealKind_{};
+  std::array<uint8_t, ntsc::VISIBLE_DOTS> cellColour_{}; // see setCell
+
 
   // Not owned: profiles are static constexpr objects with program lifetime.
   const MachineProfile *machine_ = &defaultMachineProfile();

@@ -313,6 +313,7 @@ void decodeIdeal(const uint8_t *dots, const IdealKind *kind, bool chroma,
       break;
     }
 
+    case IdealKind::DOT_GATED_CELL: // HIRES: drawn, so decoded as drawn
     case IdealKind::DOT_GATED: {
       if (!v[x]) {
         // An unlit dot is black. This is the whole difference from a
@@ -370,6 +371,23 @@ void decodeIdeal(const uint8_t *dots, const IdealKind *kind, bool chroma,
     const double y = literal[x] ? (idx[x] ? 1.0 : 0.0) : t.palY[idx[x]];
     out[x] = packRGB(y + 0.956 * i + 0.621 * q, y - 0.272 * i - 0.647 * q,
                      y - 1.106 * i + 1.703 * q);
+  }
+}
+
+void decodeSolid(const uint8_t *dots, const IdealKind *kind,
+                 const uint8_t *cell, uint32_t *out) {
+  // The dot-gated dots first, exactly as the sharp decoder does them, so a
+  // text stroke is the same in both modes.
+  decodeIdeal(dots, kind, true, false, out);
+
+  // Then everything that carries a colour of its own: a cell's value, or a
+  // HIRES pixel's answer under the rule in Video::emitHiResScanline. Painted
+  // over exactly the dots the emitter tagged, and nowhere else.
+  const Tables &t = tables();
+  for (int x = 0; x < VISIBLE_DOTS; x++) {
+    if (kind[x] == IdealKind::CELL || kind[x] == IdealKind::DOT_GATED_CELL) {
+      out[x] = t.palette[cell[x] & 15];
+    }
   }
 }
 

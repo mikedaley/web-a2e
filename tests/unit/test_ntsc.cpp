@@ -376,3 +376,65 @@ TEST_CASE("Ideal palette anchors match the Apple II colours", "[ntsc][color]") {
         REQUIRE(std::abs(sumG - sumB) < 90);
     }
 }
+
+// ============================================================================
+// Solid: no decoder at all
+// ============================================================================
+
+TEST_CASE("Solid paints a cell its own colour over every one of its dots",
+          "[ntsc][solid]") {
+    // A seven-dot cell is not a whole number of four-dot groups, so every
+    // decoder — the sharp ones included — turns a lone cell into its colour in
+    // the middle and something else at the edges. Solid is the mode that does
+    // not decode: the emitter said which palette entry the cell carries, and
+    // that entry goes on all seven dots, whatever the dots themselves are.
+    const auto &palette = idealPalette();
+
+    for (int colour = 1; colour < 15; colour++) {
+        Line line;
+        // A single cell at dots 7..13 carrying colour `colour`, on black. The
+        // dots are the double lo-res pattern for it; they do not matter here
+        // and that is the point.
+        const int nibble = ((colour >> 1) | ((colour & 1) << 3)) & 15;
+        line.fill([nibble](int n) {
+            if (n < 7 || n > 13) return 0;
+            return (nibble >> (((n - 1) % 4 + 4) % 4)) & 1;
+        });
+        line.tag(IdealKind::DOT_GATED);
+        uint8_t cell[VISIBLE_DOTS] = {};
+        for (int x = 7; x < 14; x++) {
+            line.kind[x] = IdealKind::CELL;
+            cell[x] = static_cast<uint8_t>(colour);
+        }
+        decodeSolid(line.dots, line.kind, cell, line.out);
+
+        INFO("colour " << colour);
+        for (int x = 7; x < 14; x++) {
+            INFO("dot " << x);
+            REQUIRE(line.out[x] == palette[colour]);
+        }
+        // ...and it stops exactly at the cell's edge: the neighbours are black.
+        REQUIRE(line.out[6] == 0xFF000000u);
+        REQUIRE(line.out[14] == 0xFF000000u);
+    }
+}
+
+TEST_CASE("Solid treats dot-gated dots exactly as pixel exact does",
+          "[ntsc][solid]") {
+    // HIRES and text are drawn, not encoded, so there is no cell value to
+    // paint. Those dots go the sharp decoder's way, and the two modes must
+    // agree on them to the pixel or a HIRES picture would change when the
+    // preset does.
+    Line a, b;
+    a.fill([](int n) { return ((n / 5) % 3) == 0; });
+    b.fill([](int n) { return ((n / 5) % 3) == 0; });
+    a.tag(IdealKind::DOT_GATED);
+    b.tag(IdealKind::DOT_GATED);
+    uint8_t cell[VISIBLE_DOTS] = {};
+    decodeIdeal(a.dots, a.kind, true, false, a.out);
+    decodeSolid(b.dots, b.kind, cell, b.out);
+    for (int x = 0; x < VISIBLE_DOTS; x++) {
+        INFO("dot " << x);
+        REQUIRE(a.out[x] == b.out[x]);
+    }
+}
