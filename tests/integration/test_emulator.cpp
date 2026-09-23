@@ -734,3 +734,28 @@ TEST_CASE("Ctrl+2 alone is Ctrl+@, and $C000 reads 128", "[emulator][keyboard]")
     emu.handleRawKeyDown(50, false, false, false, false, false, 0); // plain 2
     REQUIRE(emu.readMemory(0xC000) == 0xB2);
 }
+
+TEST_CASE("Ctrl+6 and Ctrl+- are Ctrl+^ and Ctrl+_ at $C000", "[emulator][keyboard]") {
+    // The same encoder rule for the other two keys: under Control the 6 and
+    // - keys read as ^ and _ without Shift, so PEEK(49152) gives 158 and 159.
+    Emulator emu;
+    emu.init();
+
+    REQUIRE(emu.handleRawKeyDown(54, false, true, false, false, false, 0) == 0x1E); // Ctrl+6
+    REQUIRE(emu.readMemory(0xC000) == 0x9E);
+    emu.handleRawKeyUp(54, false, true, false, false, 0);
+    emu.readMemory(0xC010);
+
+    REQUIRE(emu.handleRawKeyDown(189, false, true, false, false, false, 0) == 0x1F); // Ctrl+-
+    REQUIRE(emu.readMemory(0xC000) == 0x9F);
+    emu.handleRawKeyUp(189, false, true, false, false, 0);
+    emu.readMemory(0xC010);
+
+    // Without Control they are still the digit and the minus sign.
+    emu.handleRawKeyDown(54, false, false, false, false, false, 0);
+    REQUIRE(emu.readMemory(0xC000) == 0xB6);
+    emu.handleRawKeyUp(54, false, false, false, false, 0);
+    emu.readMemory(0xC010);
+    emu.handleRawKeyDown(189, false, false, false, false, false, 0);
+    REQUIRE(emu.readMemory(0xC000) == 0xAD);
+}
