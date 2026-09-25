@@ -11,6 +11,16 @@
 
 export const RELEASE_NOTES = [
   {
+    week: "September 25, 2026",
+    fixes: [
+      {
+        title: "The debugger always lists the instruction it is stopped on",
+        description:
+          "The disassembly began a fixed distance above the program counter and walked forward, which went wrong whenever the bytes above were not code. Paused at $C600 with slot 5 empty, a misread two-byte instruction at $C5FF swallowed the first byte of the boot ROM and the PC never appeared. The listing now searches for a start that lands exactly on the PC, and falls back to the PC alone when nothing above it aligns.",
+      },
+    ],
+  },
+  {
     week: "September 20, 2026",
     features: [
       {
