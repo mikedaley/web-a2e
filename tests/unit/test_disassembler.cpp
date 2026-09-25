@@ -321,3 +321,95 @@ TEST_CASE("getFlowType INDIRECT for JMP indirect", "[disasm][flow]") {
     CHECK(getFlowType(0x6C) == FlowType::INDIRECT);      // JMP (abs)
     CHECK(getFlowType(0x7C) == FlowType::INDIRECT);      // JMP (abs,X) - 65C02
 }
+
+// ============================================================================
+// alignedDisassemblyStart: where a listing centred on the PC begins
+// ============================================================================
+
+#include "disasm_align.hpp"
+
+#include <vector>
+
+namespace {
+
+// Walk forward from `start` and return the boundaries reached up to and
+// including `centre`, or an empty list if the walk overshoots.
+template <typename LengthAt>
+std::vector<uint16_t> walkTo(uint16_t start, uint16_t centre, LengthAt lengthAt) {
+    std::vector<uint16_t> out;
+    int at = start;
+    while (at < centre) {
+        out.push_back(static_cast<uint16_t>(at));
+        at += lengthAt(static_cast<uint16_t>(at));
+    }
+    if (at != centre) return {};
+    out.push_back(centre);
+    return out;
+}
+
+// Instruction length as the 65C02 disassembler decodes the byte at `at`.
+struct MemoryLengths {
+    const std::vector<uint8_t>& mem;
+    int operator()(uint16_t at) const {
+        return getInstructionLength(mem[at]);
+    }
+};
+
+} // namespace
+
+TEST_CASE("alignedDisassemblyStart lists the PC after an empty slot (issue #76)",
+          "[disasm][align]") {
+    // Slot 5 empty: $C500-$C5FF read the floating bus, $A0 on every byte.
+    // Slot 6's boot ROM begins LDX #$20 at $C600.
+    std::vector<uint8_t> mem(0x10000, 0xA0);
+    const uint8_t boot[] = {0xA2, 0x20, 0xA0, 0x00, 0xA2, 0x03, 0x86, 0x3C, 0x8A, 0x0A};
+    std::copy(std::begin(boot), std::end(boot), mem.begin() + 0xC600);
+    MemoryLengths lengths{mem};
+
+    const uint16_t start = alignedDisassemblyStart(0xC600, 6, 3, lengths);
+    const auto boundaries = walkTo(start, 0xC600, lengths);
+
+    REQUIRE_FALSE(boundaries.empty());
+    CHECK(boundaries.back() == 0xC600);
+    // Six LDY #$A0 above it, starting on an even byte so the pairs line up.
+    CHECK(boundaries.size() == 7);
+    CHECK(start == 0xC5F4);
+}
+
+TEST_CASE("alignedDisassemblyStart keeps real code as context",
+          "[disasm][align]") {
+    std::vector<uint8_t> mem(0x10000, 0x00);
+    // $1000: LDA #$01 / STA $0300 / INX / JMP $1000 / <centre> NOP
+    const uint8_t code[] = {0xA9, 0x01, 0x8D, 0x00, 0x03, 0xE8, 0x4C, 0x00, 0x10, 0xEA};
+    std::copy(std::begin(code), std::end(code), mem.begin() + 0x1000);
+    MemoryLengths lengths{mem};
+
+    const uint16_t start = alignedDisassemblyStart(0x1009, 4, 3, lengths);
+    const auto boundaries = walkTo(start, 0x1009, lengths);
+
+    REQUIRE(boundaries.size() == 5);
+    CHECK(boundaries[0] == 0x1000);
+    CHECK(boundaries[1] == 0x1002);
+    CHECK(boundaries[2] == 0x1005);
+    CHECK(boundaries[3] == 0x1006);
+    CHECK(boundaries[4] == 0x1009);
+}
+
+TEST_CASE("alignedDisassemblyStart falls back to the centre when nothing aligns",
+          "[disasm][align]") {
+    // Every byte above the centre decodes as an instruction that runs one
+    // byte past it, so no walk can land on the centre; the listing then
+    // starts there with no context rather than somewhere that hides it.
+    const uint16_t centre = 0x2001;
+    auto overshoot = [](uint16_t at) {
+        return at < 0x2001 ? (0x2001 - at) + 1 : 1;
+    };
+    CHECK(alignedDisassemblyStart(centre, 6, 3, overshoot) == centre);
+}
+
+TEST_CASE("alignedDisassemblyStart with no context asked for is the centre",
+          "[disasm][align]") {
+    auto one = [](uint16_t) { return 1; };
+    CHECK(alignedDisassemblyStart(0x0000, 0, 3, one) == 0x0000);
+    CHECK(alignedDisassemblyStart(0x0003, 6, 3, one) == 0x0000);
+}

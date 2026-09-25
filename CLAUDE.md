@@ -1843,6 +1843,15 @@ step.
   tab-separated fields — address, bytes, text — rather than one fixed-width
   string the caller sliced by column, which stopped working the moment an
   address needed six digits and would have failed silently.
+- **The listing always shows the centre as an instruction.** `_disassembleRange`
+  chooses its start by an alignment search (`disasm_align.hpp`): it tries every
+  lookback from the furthest inwards and keeps the first forward walk that
+  lands exactly on the centre, falling back to the centre itself with no
+  context. A fixed lookback walked forward from a random byte and trusted
+  wherever it ended up, so with slot 5 empty and every byte above `$C600`
+  reading `$A0`, a misread `LDY #$A2` at `$C5FF` ate the first byte of the boot
+  ROM and the PC never appeared in the listing (issue #76).
+  `test_disassembler.cpp` pins that case.
 - **The trace's rows are formatted in the core** (`_formatTraceRange`), which
   is one round trip for the visible window instead of one heap read per row,
   and one operand formatter per processor rather than one per place that wants

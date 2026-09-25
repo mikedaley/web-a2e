@@ -8,6 +8,7 @@
 #include "../core/emulator.hpp"
 #include "../core/disassembler/disassembler.hpp"
 #include "../core/disassembler/disassembler65816.hpp"
+#include "../core/disassembler/disasm_align.hpp"
 #include "../core/assembler/assembler.hpp"
 #include "../core/debug/condition_evaluator.hpp"
 #include "../core/filesystem/dos33.hpp"
@@ -1459,8 +1460,9 @@ const char *disassembleAt(uint32_t address) {
 // digits and an instruction four bytes — and would have failed silently, by
 // reading the wrong columns rather than by erroring.
 //
-// centerAddr is snapped backwards onto an instruction boundary, then
-// instructionsBefore instructions of leading context are included.
+// centerAddr is always listed as an instruction boundary, with up to
+// instructionsBefore instructions of leading context found by an alignment
+// search (disasm_align.hpp).
 //
 // A NEGATIVE centerAddr means "centre on the current PC". That exists so the
 // debugger can put this call in the same batch as the register reads: it would
@@ -1482,31 +1484,19 @@ const char *disassembleRange(int32_t centerAddrOrPC, int instructionsBefore,
   const uint32_t bank = centre & 0xFF0000;
   const uint16_t centreOffset = static_cast<uint16_t>(centre & 0xFFFF);
 
-  // Instruction boundaries are not recoverable by scanning backwards, so start
-  // from a safe distance back and walk forward. Four bytes per instruction is
-  // the worst case on a 65816; the +10 keeps a short lookback from landing
-  // mid-operand.
-  const int maxLookback = instructionsBefore * 4 + 10;
-  int scan = static_cast<int>(centreOffset) - maxLookback;
-  if (scan < 0) scan = 0;
+  // Where to begin is an alignment search: the centre is a program counter
+  // (or was typed in as one) and must appear as an instruction, whatever the
+  // bytes above it decode to. See disasm_align.hpp for why a fixed lookback
+  // does not do that.
+  const int longestInstruction = g_iigs ? 4 : 3;
+  int at = a2e::alignedDisassemblyStart(
+      centreOffset, instructionsBefore, longestInstruction,
+      [bank](uint16_t offset) {
+        uint8_t length = 1;
+        disassembleOneAt(bank | offset, &length);
+        return length;
+      });
 
-  std::vector<uint16_t> boundaries;
-  while (scan <= static_cast<int>(centreOffset)) {
-    boundaries.push_back(static_cast<uint16_t>(scan));
-    uint8_t length = 1;
-    disassembleOneAt(bank | static_cast<uint16_t>(scan), &length);
-    scan += length > 0 ? length : 1;
-  }
-
-  // The last boundary at or before the centre is the anchor; back up from
-  // there. If the centre was itself mid-instruction the anchor is the
-  // instruction containing it.
-  const size_t anchor = boundaries.size() - 1;
-  size_t from = anchor > static_cast<size_t>(instructionsBefore)
-                    ? anchor - static_cast<size_t>(instructionsBefore)
-                    : 0;
-
-  int at = static_cast<int>(boundaries[from]);
   for (int i = 0; i < count && at <= 0xFFFF; i++) {
     if (i > 0) buffer.push_back('\n');
     uint8_t length = 1;
