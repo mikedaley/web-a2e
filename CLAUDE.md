@@ -60,6 +60,8 @@ src/bindings/  wasm_interface.cpp, the WASM export glue
 src/js/        browser host (kebab-case files, PascalCase classes)
   main.js, worker/, audio/, display/, disk-manager/, file-explorer/, debug/,
   help/, input/, machine/, state/, ui/, utils/, windows/, agent/, config/
+functions/     Cloudflare Pages Functions (CORS proxy for URL-loaded media)
+plugins/       Vite plugins (dev proxy plugin, serial proxy plugin)
 public/        static assets, built WASM, shaders, the disk library
 examples/      BASIC, Merlin and printer programs
 docs/design/   the browser's design notes (the core's are in core/docs/design/)
@@ -137,6 +139,10 @@ same change.
 rsync of `dist/` to `DEPLOY_TARGET` / `DEPLOY_STAGING_TARGET` from
 `.env.deploy` (gitignored; see `.env.deploy.example`). **One SSH session
 only**: the host locks out concurrent sessions, so verify over HTTPS.
+
+An optional Cloudflare Pages deployment workflow (`.github/workflows/cloudflare-pages-deploy.yml`)
+is opt-in per repository via `vars.CLOUDFLARE_PAGES_ENABLED == 'true'`. It includes CORS
+proxy support for URL-loaded media (`functions/proxy/[[path]].js`) mirrored in development by `plugins/dev-proxy-plugin.js`.
 
 ## Release Process
 

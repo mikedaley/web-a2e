@@ -73,6 +73,29 @@ import {
   loadRememberedStandard,
   profileStandard,
 } from "./machine/video-standard.js";
+import { unzipSync } from "fflate";
+
+// Monkey patch HardDriveManager to support on-the-fly decompression for Cloudflare Pages limits
+const originalGetLibraryImageData = HardDriveManager.prototype._getLibraryImageData;
+if (originalGetLibraryImageData) {
+  HardDriveManager.prototype._getLibraryImageData = async function (entry) {
+    const data = await originalGetLibraryImageData.apply(this, arguments);
+    // Check for ZIP signature (PK\x03\x04)
+    if (data && data.length > 4 && data[0] === 0x50 && data[1] === 0x4b && data[2] === 0x03 && data[3] === 0x04) {
+      try {
+        const unzipped = unzipSync(data);
+        const filenames = Object.keys(unzipped);
+        if (filenames.length > 0) {
+          console.log(`MonkeyPatch: Unzipped ${entry.file} content on the fly`);
+          return unzipped[filenames[0]];
+        }
+      } catch (e) {
+        console.error("MonkeyPatch: Failed to unzip", e);
+      }
+    }
+    return data;
+  };
+}
 import { HardDriveWindow } from "./disk-manager/hard-drive-window.js";
 import { Disk35Window } from "./disk-manager/disk35-window.js";
 import { Disk35Manager } from "./disk-manager/disk35-manager.js";
