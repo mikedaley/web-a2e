@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { createHash } from "crypto";
 import { serialProxyPlugin } from "./plugins/serial-proxy-plugin.js";
+import { devProxyPlugin } from "./plugins/dev-proxy-plugin.js";
 
 // A hash of every file the app loads at a fixed URL: the WASM core, its
 // loader, the two workers, the shaders and the library list. They are asked for
@@ -165,6 +166,7 @@ export default defineConfig({
 
   plugins: [
     serialProxyPlugin(),
+    devProxyPlugin(),
     copyWorkerFiles(),
     stampServiceWorkerVersion(),
   ],
